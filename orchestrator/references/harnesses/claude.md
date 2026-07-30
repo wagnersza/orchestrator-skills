@@ -1,0 +1,53 @@
+# Harness: claude (Claude Code)
+
+The `claude` CLI. Runs a full-screen TUI (alt-screen), so `terminal read` tail is sparse — prefer the checklist file and the tool's idle-detection to tell busy from idle.
+
+## Launch command
+
+```
+claude <model-flag> <effort-flag> <yolo-flag>
+```
+
+- **Yolo flag:** `--dangerously-skip-permissions` — required; without it the worker stalls at its first edit/bash gate forever.
+- **Model flag:** `--model <id>` where `<id>` is the mapped value below.
+- **Effort flag:** `--effort <level>` — `low | medium | high | xhigh | max`. Full range, no clamping needed. Omit to take the model default (`high`).
+
+Verified against `claude --version` 2.1.220 (`claude --help`: `--effort <level>  Effort level for the current session (low, medium, high, xhigh, max)`), and both example commands below run clean.
+
+**A bad effort value does not fail** — it warns and silently uses the default:
+
+```
+$ claude --model sonnet --effort superhigh -p hi
+Warning: Unknown --effort value 'superhigh' — ignoring it and using the default effort. Valid values: low, medium, high, xhigh, max.
+```
+
+In a TUI worker that warning scrolls away and the item quietly runs at `high`. So validate the effort string against the ladder **before** composing `$CMD`; don't rely on the CLI to reject a typo.
+
+## Model-id map
+
+| Config model | `--model` value |
+|--------------|-----------------|
+| `opus-5`     | `opus`          |
+| `sonnet-5`   | `sonnet`        |
+
+(`gpt-5.6-*` are openai models — never launched under the claude harness. If config pairs them, that is a config error.)
+
+## Example
+
+`model: opus-5`, `effort: xhigh`, yolo on →
+
+```
+claude --model opus --effort xhigh --dangerously-skip-permissions
+```
+
+A `light`-role worker, `model: sonnet-5`, `effort: medium` →
+
+```
+claude --model sonnet --effort medium --dangerously-skip-permissions
+```
+
+## Notes
+
+- Never disable thinking (`/effort` and the flag keep it on). Thinking-on at `low` beats thinking-off at similar cost, and thinking-off leaks tool calls as plain text — fatal in an unattended loop.
+- Claude Code has `/implement`, `/ponytail:ponytail`, and `TodoWrite`. The orchestrator does **not** rely on `TodoWrite` for the completion contract — it uses the file-based checklist (see the skill body), which every harness supports. Claude workers may still use `TodoWrite` in addition, but the checklist file is the source of truth the orchestrator reads.
+- If the project's completion contract uses `/implement`, preflight that the required plugins are installed before spawning; abort rather than send a dead prompt.

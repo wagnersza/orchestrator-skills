@@ -1,0 +1,24 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "wsza",
+  "description": "Multi-agent orchestration skills — tool/harness/model agnostic worker coordination.",
+  "owner": {
+    "name": "wagnersza",
+    "url": "https://github.com/wagnersza"
+  },
+  "plugins": [
+    {
+      "name": "orchestrator-skills",
+      "source": "./",
+      "description": "Orchestrate agent worker sessions across any workspace tool (orca/cmux/herdr), harness (claude/codex/pi/copilot/cursor), and frontier model — with zero-touch setup and optional cross-vendor adversarial review.",
+      "category": "engineering",
+      "keywords": [
+        "orchestration",
+        "multi-agent",
+        "worktree",
+        "orca",
+        "adversarial-review"
+      ]
+    }
+  ]
+}
