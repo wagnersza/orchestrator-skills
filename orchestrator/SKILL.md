@@ -38,8 +38,11 @@ file is missing, run `/setup-matt-pocock-skills` first.
 **Preflight the config's dependencies.** Before the first spawn of a session,
 confirm the tool binary, the harness binary (and the review harness if
 `review.enabled`), and the tracker CLI are present — `command -v <bin>` — plus the
-**`prompt-improver` skill**, which every spawn and review prompt goes through
-(`ls ~/.claude/skills/prompt-improver/SKILL.md` or the project-level path). If any
+**`prompt-improver` skill**, which every spawn and review prompt goes through —
+`claude plugin list | grep -o 'prompt-improver@[a-z-]*'`, falling back to
+`ls ~/.claude/skills/prompt-improver/SKILL.md`. Any of its three install shapes
+(plugin, `@skills-dir` clone, project-level clone) **satisfies the check** — the
+skill body is the same and you invoke the skill, not a path. If any
 is missing, stop and point the user at `/orchestrator-setup` (it installs deps);
 the full catalog is [`references/requirements.md`](references/requirements.md).
 Don't try to spawn against a missing binary — or compose a prompt without

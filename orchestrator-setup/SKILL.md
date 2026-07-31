@@ -48,8 +48,9 @@ claude plugin marketplace update          # refresh every marketplace source
 claude plugin update orchestrator-skills@wsza
 claude plugin update mattpocock-skills@mattpocock
 claude plugin update ponytail@ponytail
-# skills installed as plain git clones (see requirements.md)
-git -C ~/.claude/skills/prompt-improver pull --ff-only
+# prompt-improver: read the SUFFIX from `claude plugin list` and pick ONE.
+#   @prompt-improver -> claude plugin update prompt-improver@prompt-improver
+#   @skills-dir      -> git -C ~/.claude/skills/prompt-improver pull --ff-only
 ```
 
 **The `plugin@marketplace` form is required.** A bare name fails with
@@ -58,8 +59,17 @@ git -C ~/.claude/skills/prompt-improver pull --ff-only
 `orchestrator-skills@wsza`, not `@orchestrator-skills`). Skip any dependency that
 isn't installed yet; step 4 installs those.
 
+**`prompt-improver`: read the marketplace suffix, then pick the update command.**
+It shipped as a git clone and is now also a plugin, and a clone under
+`~/.claude/skills/` is auto-registered as **`prompt-improver@skills-dir`** — so it
+shows up in `claude plugin list` while still being a clone. `claude plugin update
+prompt-improver@prompt-improver` **fails on it** (`Plugin not found`, exit 1); pull
+the clone instead. `@prompt-improver` is the real plugin and takes `plugin update`.
+See the shape table in `requirements.md`. **Don't migrate a working clone** — the
+skill body is identical and the orchestrator invokes the skill, not a path.
+
 Report the before/after version for each. `claude plugin list` gives the installed
-version directly; for the git-clone skills use
+version directly; for a git clone use
 `git -C ~/.claude/skills/<name> log --oneline -1`.
 
 **A plugin update needs a session restart to take effect** — the CLI says so, and
@@ -220,10 +230,10 @@ the user to run.
 Scope — only the chosen pieces apply:
 
 - **Always:** git, the `mattpocock-skills` plugin, the `ponytail` plugin, the
-  `prompt-improver` skill (all worker/review prompt composition runs through it),
-  the `playwright-cli` skill (ships with this plugin — nothing to install),
-  `codebase-memory-mcp`, and the tracker CLI the tracker config names
-  (`gh` / `glab` / none for local).
+  `prompt-improver` plugin (all worker/review prompt composition runs through it —
+  an existing git clone of it also counts as satisfied), the `playwright-cli` skill
+  (ships with this plugin — nothing to install), `codebase-memory-mcp`, and the
+  tracker CLI the tracker config names (`gh` / `glab` / none for local).
 - **tool:** the one in config (`orca` / `cmux` / `herdr`).
 - **harness(es):** the impl harness, **and** the review harness if
   `review.enabled` — a cross-vendor review setup (e.g. impl `claude`/opus-5,
@@ -237,8 +247,8 @@ For each needed dep, run its check command. **If present, it was already brought
 to date in step 0a** — skip it. If missing, install it by running the command from
 `requirements.md`:
 
-- **Plugins** — `claude plugin marketplace add <slug> && claude plugin install <name>@<marketplace>` (mattpocock, ponytail). Verified shell commands.
-- **Skills** — `prompt-improver` is a plain git clone into `~/.claude/skills/` (see `requirements.md`); it's auto-discovered next session, so mention a restart is needed before the first spawn.
+- **Plugins** — `claude plugin marketplace add <slug> && claude plugin install <name>@<marketplace>` (mattpocock, ponytail, prompt-improver). Verified shell commands. A plugin auto-loads next session, so mention a restart (or `/reload-plugins`) is needed before the first spawn.
+- **`prompt-improver` specifically** — install as a plugin (see `requirements.md`). If exploration found an existing clone at `~/.claude/skills/prompt-improver`, **it's already satisfied** — don't install the plugin on top, which would leave two copies shadowing each other. Report it as present.
 - **CLIs** — the documented installer (`brew install gh`/`glab`, `npm install -g @anthropic-ai/claude-code`, etc.).
 - **MCP** — `claude mcp add <name> <command/url>` once the server binary/endpoint is known.
 

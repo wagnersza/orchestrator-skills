@@ -61,9 +61,14 @@ catalog with check + install commands:
 
 **Always:** git · `mattpocock-skills` plugin (tracker config + ticket
 conventions) · [`prompt-improver`](https://github.com/wagnersza/prompt-improver)
-skill (owns all worker/review prompt composition) · `ponytail` plugin ·
+plugin (owns all worker/review prompt composition) · `ponytail` plugin ·
 `playwright-cli` (ships in this plugin) · `codebase-memory-mcp` · a tracker CLI
 (`gh`/`glab`, or none for local markdown).
+
+`prompt-improver` also ships as a plugin now — `claude plugin marketplace add
+wagnersza/prompt-improver && claude plugin install prompt-improver@prompt-improver`.
+If you already have it as a git clone under `~/.claude/skills/`, that still works
+and needs no migration; the skill body is identical either way.
 
 **Your chosen tool:** `orca` (its own CLI; needs `orca open` running) / `cmux` /
 `herdr` — fill in `orchestrator/references/tools/<tool>.md` for cmux/herdr first.
