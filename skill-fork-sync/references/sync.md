@@ -22,6 +22,10 @@ python3 -m scripts.fork_state                    # every discovered fork
 python3 -m scripts.fork_state --fork mattpocock  # one fork
 ```
 
+The same script also emits the **bootstrap plan** under `--bootstrap`, which is
+the dry run [`bootstrap.md`](bootstrap.md) documents. One seam, two plans: both
+read the same config and both mutate nothing.
+
 Both are run from this repo's root, matching `skill-creator`'s
 `python3 -m scripts.<name>` convention. `--repo <path>` overrides which repo is
 grepped for references (default: the working directory); `--budget N` overrides
@@ -36,7 +40,9 @@ What it derives, in order:
    against `gh repo view --json parent`: a registered marketplace whose repo has
    a GitHub parent is a **Fork**, and its clone is expected at
    `~/.orchestrator/forks/<marketplace-name>/`. There is no registry of forks in
-   this repo to drift.
+   this repo to drift. (Bootstrap needs the complementary view — declared
+   dependencies whose marketplace still points at upstream, so `parent` is empty —
+   which is `--bootstrap`'s job.)
 2. **Pinned SHA** as `git rev-parse main` and **Sync candidate** as
    `git rev-parse upstream/main`, both in the fork clone. `FORK.md` is never
    read, so a stale or wrong record cannot change the plan.
@@ -108,14 +114,17 @@ carries `"consumed": false`, a `reason`, and `runs: 0` instead of
 
 ### Tests
 
-Seven cases in `scripts/test_fork_state.py`, each building throwaway git repos in
-a temp directory and asserting on the emitted JSON — external behaviour at the
-seam, not helper return values. Stdlib only, no network, no `gh`, no agent runs:
+Fourteen cases in `scripts/test_fork_state.py`, each building throwaway git repos
+and config files in a temp directory and asserting on the emitted JSON — external
+behaviour at the seam, not helper return values. Stdlib only, no network, no `gh`,
+no agent runs:
 
 ```
 python3 -m pytest scripts/ -q                 # if pytest is present
 python3 -m unittest discover -s scripts -q    # the guaranteed fallback
 ```
+
+Seven for the sync plan (`SyncPlanTestCase`):
 
 | Test | Covers |
 |------|--------|
@@ -126,6 +135,19 @@ python3 -m unittest discover -s scripts -q    # the guaranteed fallback
 | `test_budget_ceiling_never_exceeds_five_and_names_drops` | ceiling holds, drops named |
 | `test_pinned_sha_comes_from_git_not_fork_md` | a wrong `FORK.md` SHA changes nothing |
 | `test_script_mutates_nothing` | refs, worktree and consuming repo unchanged |
+
+Seven for the bootstrap plan (`BootstrapPlanTestCase`), which stands the `gh`
+reads up with `--gh-fixture`:
+
+| Test | Covers |
+|------|--------|
+| `test_fork_targets_are_declared_deps_still_pointing_at_upstream` | the target set: declared, registered, not already the maintainer's own |
+| `test_pin_is_the_installed_sha_not_upstream_head` | the pin comes from `installed_plugins.json`, and upstream's head appears nowhere |
+| `test_dry_run_prints_all_six_actions_and_takes_none` | all six actions printed in order, nothing on disk or in the config touched |
+| `test_fork_md_records_the_five_fields` | `FORK.md` carries upstream, date, SHA, why, local changes |
+| `test_rerun_against_a_bootstrapped_fork_is_a_no_op_per_step` | every step reads `done` on a re-run, with `FORK.md` one commit past the pin |
+| `test_a_moved_default_branch_is_not_reported_as_pinned` | a promoted branch is not mistaken for the pin |
+| `test_a_plugin_with_no_installed_sha_blocks_the_pin` | no `gitCommitSha` blocks the pin instead of guessing |
 
 Running them is part of this repo's `evidence` bar whenever a Python file is
 touched — see `docs/agents/orchestrator.md`.

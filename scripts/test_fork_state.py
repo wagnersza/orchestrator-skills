@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-"""Behaviour tests for the sync-plan seam: fixture repo state in, JSON plan out.
+"""Behaviour tests for the seam: fixture state in, JSON plan out.
 
-Every case runs `python3 -m scripts.fork_state` as a subprocess against local
-git repos built in a temp directory and asserts on the emitted **Sync plan** —
-never on a helper's return value. No network, no GitHub, no agent runs: fork
-discovery is bypassed with `--clone`, so `gh` is never called.
+Every case runs `python3 -m scripts.fork_state` as a subprocess against local git
+repos and config files built in a temp directory, and asserts on the emitted
+**Sync plan** or **bootstrap plan** — never on a helper's return value. No
+network, no GitHub, no agent runs: sync bypasses fork discovery with `--clone`,
+and bootstrap stands the two `gh` reads up with `--gh-fixture`, so `gh` is never
+called either way.
 
     python3 -m pytest scripts/ -q
     python3 -m unittest discover -s scripts -t . -q     # fallback, no pytest
@@ -279,6 +281,273 @@ class SyncPlanTestCase(unittest.TestCase):
             env=GIT_ENV,
         ).stdout
         self.assertEqual(status, "")
+
+
+class BootstrapPlanTestCase(unittest.TestCase):
+    """A declared dependency still pointing at upstream, and its installed SHA.
+
+    Same fixture style as above: a real upstream git repo, plus the two Claude
+    Code config files and a `requirements.md` written into a temp directory. The
+    `gh` reads come from `--gh-fixture`, so nothing here touches the network.
+    """
+
+    INSTALLED_SHA_KEY = "gitCommitSha"
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.addCleanup(self.tmp.cleanup)
+
+        # --- Upstream: two commits, so the installed SHA is not upstream's head.
+        self.upstream = self.root / "upstream"
+        self.upstream.mkdir()
+        git(self.upstream, "init", "-q", "-b", "main")
+        write(self.upstream / "skills" / "tdd" / "SKILL.md", "base body\n")
+        git(self.upstream, "add", "-A")
+        git(self.upstream, "commit", "-qm", "the installed version")
+        self.installed_sha = rev(self.upstream, "main")
+        write(self.upstream / "skills" / "tdd" / "SKILL.md", "upstream moved on\n")
+        git(self.upstream, "add", "-A")
+        git(self.upstream, "commit", "-qm", "four commits nobody evaluated")
+        self.upstream_head = rev(self.upstream, "main")
+
+        self.forks_dir = self.root / "forks"
+        self.repo = self.root / "consumer"
+        self.clone = self.forks_dir / "mattpocock"
+
+        # --- The consuming repo declares mattpocock-skills and ponytail, and
+        #     prompt-improver, which is already the maintainer's own repo.
+        write(
+            self.repo / "orchestrator" / "references" / "requirements.md",
+            "| **mattpocock-skills** | `mattpocock-skills@mattpocock` |\n"
+            "| **ponytail** | `ponytail@ponytail` |\n"
+            "| **prompt-improver** | `prompt-improver@prompt-improver` |\n",
+        )
+
+        self.write_config()
+        self.write_gh_fixture()
+
+    # --- fixture helpers ----------------------------------------------------
+
+    def write_config(self, mattpocock_repo="mattpocock/skills", installed=True):
+        """`known_marketplaces.json` + `installed_plugins.json` in the real shape."""
+        self.marketplaces = self.root / "known_marketplaces.json"
+        self.marketplaces.write_text(
+            json.dumps(
+                {
+                    # Declared, still upstream's: a fork target.
+                    "mattpocock": {"source": {"source": "github", "repo": mattpocock_repo}},
+                    # Declared, already the maintainer's own repo: not a target.
+                    "prompt-improver": {
+                        "source": {"source": "github", "repo": "me/prompt-improver"}
+                    },
+                    # Installed but never declared in requirements.md: not a target.
+                    "caveman": {
+                        "source": {"source": "github", "repo": "JuliusBrussee/caveman"}
+                    },
+                }
+            )
+        )
+
+        entry = {
+            "scope": "user",
+            "version": "1.2.0",
+            "lastUpdated": "2026-07-21T13:27:28.622Z",
+        }
+        if installed:
+            entry[self.INSTALLED_SHA_KEY] = self.installed_sha
+        self.installed = self.root / "installed_plugins.json"
+        self.installed.write_text(
+            json.dumps({"version": 2, "plugins": {"mattpocock-skills@mattpocock": [entry]}})
+        )
+
+    def write_gh_fixture(self, fork_exists=False):
+        """Stand in for `gh api user` and `gh repo view --json parent`."""
+        self.gh_fixture = self.root / "gh.json"
+        repos = {
+            "mattpocock/skills": {"exists": True, "parent": None},
+            "me/prompt-improver": {"exists": True, "parent": None},
+            "JuliusBrussee/caveman": {"exists": True, "parent": None},
+        }
+        if fork_exists:
+            repos["me/skills"] = {"exists": True, "parent": "mattpocock/skills"}
+        self.gh_fixture.write_text(json.dumps({"user": "me", "repos": repos}))
+
+    def bootstrap(self, *extra, expect=0):
+        """Run the dry run and return (parsed JSON plan, rendered text)."""
+        base = [
+            sys.executable,
+            "-m",
+            "scripts.fork_state",
+            "--bootstrap",
+            "--repo",
+            str(self.repo),
+            "--marketplaces",
+            str(self.marketplaces),
+            "--installed",
+            str(self.installed),
+            "--forks-dir",
+            str(self.forks_dir),
+            "--gh-fixture",
+            str(self.gh_fixture),
+            "--today",
+            "2026-07-31",
+        ]
+
+        def run(*args):
+            proc = subprocess.run(
+                [*base, *args],
+                cwd=REPO_ROOT,
+                capture_output=True,
+                text=True,
+                env=GIT_ENV,
+            )
+            self.assertEqual(proc.returncode, expect, f"stderr: {proc.stderr}")
+            return proc.stdout
+
+        return json.loads(run("--json", *extra)), run(*extra)
+
+    def target(self, plan, name="mattpocock"):
+        for entry in plan["targets"]:
+            if entry["fork"] == name:
+                return entry
+        self.fail(f"{name} missing: {[t['fork'] for t in plan['targets']]}")
+
+    def step(self, target, name):
+        for entry in target["steps"]:
+            if entry["name"] == name:
+                return entry
+        self.fail(f"step {name} missing: {[s['name'] for s in target['steps']]}")
+
+    def bootstrap_the_fork(self, fork_md=True):
+        """Do to a fixture clone what a real bootstrap would do, so a re-run is
+        planned against an already-bootstrapped fork."""
+        self.write_gh_fixture(fork_exists=True)
+        self.clone.parent.mkdir(parents=True, exist_ok=True)
+        subprocess.run(
+            ["git", "clone", "-q", str(self.upstream), str(self.clone)],
+            check=True,
+            capture_output=True,
+            env=GIT_ENV,
+        )
+        git(
+            self.clone,
+            "remote",
+            "add",
+            "upstream",
+            "https://github.com/mattpocock/skills.git",
+        )
+        git(self.clone, "reset", "-q", "--hard", self.installed_sha)
+        if fork_md:
+            write(self.clone / "FORK.md", "# Fork of mattpocock/skills\n")
+            git(self.clone, "add", "FORK.md")
+            git(self.clone, "commit", "-qm", "Record the fork and its pin")
+        self.write_config(mattpocock_repo="me/skills")
+
+    # --- the cases ----------------------------------------------------------
+
+    def test_fork_targets_are_declared_deps_still_pointing_at_upstream(self):
+        plan, text = self.bootstrap()
+
+        # `mattpocock` is declared and still upstream's, so it is the only target:
+        # `prompt-improver` is already the user's own repo and `caveman` is
+        # installed but never declared in requirements.md.
+        self.assertEqual([t["fork"] for t in plan["targets"]], ["mattpocock"])
+        target = self.target(plan)
+        self.assertEqual(target["upstream"], "mattpocock/skills")
+        self.assertEqual(target["fork_repo"], "me/skills")
+        self.assertEqual(target["marketplace_source_now"], "mattpocock/skills")
+        self.assertEqual(target["clone"], str(self.clone))
+        self.assertFalse(target["already_bootstrapped"])
+        self.assertIn("prompt-improver", self.marketplaces.read_text())
+        self.assertNotIn("prompt-improver", text)
+        self.assertNotIn("caveman", text)
+
+    def test_pin_is_the_installed_sha_not_upstream_head(self):
+        plan, text = self.bootstrap()
+        target = self.target(plan)
+
+        self.assertEqual(target["installed_sha"], self.installed_sha)
+        self.assertEqual(target["plugin_id"], "mattpocock-skills@mattpocock")
+        self.assertEqual(target["installed_version"], "1.2.0")
+        self.assertNotEqual(target["installed_sha"], self.upstream_head)
+        self.assertIn("gitCommitSha", plan["pin_source"])
+        self.assertIn(self.installed_sha, self.step(target, "pin")["command"])
+        self.assertNotIn(self.upstream_head, text)
+
+    def test_dry_run_prints_all_six_actions_and_takes_none(self):
+        before = sorted(str(p) for p in self.root.rglob("*"))
+        plan, text = self.bootstrap()
+        target = self.target(plan)
+
+        self.assertEqual(
+            [s["name"] for s in target["steps"]],
+            ["fork", "clone", "remote", "pin", "FORK.md", "marketplace swap"],
+        )
+        self.assertEqual([s["step"] for s in target["steps"]], [1, 2, 3, 4, 5, 6])
+        self.assertIn("gh repo fork mattpocock/skills", text)
+        self.assertIn(f"git clone https://github.com/me/skills.git {self.clone}", text)
+        self.assertIn("remote add upstream", text)
+        self.assertIn(f"reset --hard {self.installed_sha}", text)
+        self.assertIn("FORK.md", text)
+        self.assertIn(
+            "claude plugin marketplace remove mattpocock && "
+            "claude plugin marketplace add me/skills",
+            text,
+        )
+        self.assertIn("DRY RUN", text)
+
+        # Took none of them: no fork clone appeared, no config file was rewritten,
+        # and the marketplace registration still names upstream.
+        self.assertEqual(plan["mutates"], "nothing")
+        self.assertFalse(self.forks_dir.exists())
+        self.assertEqual(before, sorted(str(p) for p in self.root.rglob("*")))
+        self.assertIn("mattpocock/skills", self.marketplaces.read_text())
+
+    def test_fork_md_records_the_five_fields(self):
+        plan, text = self.bootstrap()
+        body = self.target(plan)["fork_md"]
+
+        self.assertIn("https://github.com/mattpocock/skills", body)  # upstream repo
+        self.assertIn("**Fork date:** 2026-07-31", body)  # fork date
+        self.assertIn(f"`{self.installed_sha}`", body)  # last-synced SHA
+        self.assertIn("**Why this fork exists:**", body)  # why
+        self.assertIn("**Local changes:** none", body)  # local changes
+        self.assertIn("read live from git", body)
+        self.assertIn(body.splitlines()[0], text)
+
+    def test_rerun_against_a_bootstrapped_fork_is_a_no_op_per_step(self):
+        self.bootstrap_the_fork()
+        plan, text = self.bootstrap()
+        target = self.target(plan)
+
+        self.assertEqual([s["status"] for s in target["steps"]], ["done"] * 6)
+        self.assertTrue(target["already_bootstrapped"])
+        self.assertIn("already bootstrapped", text)
+        # FORK.md sits one commit ahead of the pin, and that must still read as
+        # pinned — otherwise a re-run would reset the record away.
+        self.assertNotEqual(rev(self.clone, "main"), self.installed_sha)
+        self.assertIn("already pinned", self.step(target, "pin")["note"])
+
+    def test_a_moved_default_branch_is_not_reported_as_pinned(self):
+        self.bootstrap_the_fork()
+        write(self.clone / "skills" / "tdd" / "SKILL.md", "someone promoted this\n")
+        git(self.clone, "add", "-A")
+        git(self.clone, "commit", "-qm", "a change that is not FORK.md")
+
+        plan, _ = self.bootstrap()
+        self.assertEqual(self.step(self.target(plan), "pin")["status"], "todo")
+        self.assertFalse(self.target(plan)["already_bootstrapped"])
+
+    def test_a_plugin_with_no_installed_sha_blocks_the_pin(self):
+        self.write_config(installed=False)
+        plan, _ = self.bootstrap()
+        target = self.target(plan)
+
+        self.assertIsNone(target["installed_sha"])
+        self.assertIn("nothing to pin to", target["pin_error"])
+        self.assertEqual(self.step(target, "pin")["status"], "blocked")
+        self.assertEqual(self.step(target, "marketplace swap")["status"], "blocked")
 
 
 if __name__ == "__main__":
