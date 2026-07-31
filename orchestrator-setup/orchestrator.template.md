@@ -38,7 +38,8 @@ review:
 
 # --- repo + tracker ---
 repo:     /abs/path/to/this/repo   # the main checkout; stays on the default branch
-tracker:  # read from docs/agents/issue-tracker.md; do NOT redefine labels here
+tracker:  # read from docs/agents/issue-tracker.md; do NOT redefine labels or
+          # board coordinates here
 
 # --- project recipe (the completion contract's project-specific parts) ---
 setup_cmd:  ""            # e.g. "pnpm install" — run by the tool's setup hook
@@ -77,7 +78,13 @@ evidence:   "real-data proof + full test suite passing"  # the evidence bar
   vendor differs from the impl role's (see `references/models.md`). It runs up to
   `rounds` fix↔review cycles, then hands to human review regardless.
 - **Work-state labels** (`ready-for-agent`, `in-progress`, review, done) come from
-  `docs/agents/issue-tracker.md`, not this file — single source of truth.
+  `docs/agents/issue-tracker.md`, not this file — single source of truth. So do the
+  **project board** coordinates, in its `## Project board` section: the project
+  owner/number, the `Status` field id, and the option ids. The board's `Status` is a
+  derived projection of those labels, written at every transition and reconciled when
+  the ready queue is read — not a second state machine. A repo with no board omits
+  that section and every board write becomes a no-op. Rationale:
+  `orchestrator/docs/adr/0009-labels-drive-board-status.md`.
 - **Project recipe** fields are the only place project specifics live. Leave a
   field blank if it doesn't apply (e.g. `db_gate` for a repo with no database).
 - `N` in `ports` is the work-item number, so parallel workers never collide.
