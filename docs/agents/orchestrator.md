@@ -36,11 +36,16 @@ repo:     /Users/wagner.souza/git/wsza/orchestrator-skills   # main checkout; st
 tracker:  # read from docs/agents/issue-tracker.md (GitHub / gh); do NOT redefine labels here
 
 # --- project recipe (the completion contract's project-specific parts) ---
-setup_cmd:  ""            # nothing to install — this repo is markdown skills + JSON manifests
+setup_cmd:  "python3 --version"   # stdlib-only test suite; nothing to install. Once
+                                  # scripts/fork_state.py lands, its tests run under
+                                  # `python3 -m pytest scripts/ -q` if pytest is present,
+                                  # else `python3 -m unittest discover -s scripts -q`.
+                                  # No third-party runtime dependency: fixtures are local
+                                  # git repos in a temp dir, no network, no agent runs.
 run_recipe: ""            # no app to boot
 ports:      ""            # no ports (nothing listens)
 db_gate:    ""            # no database
-evidence:   "the changed skill/reference read end to end for internal consistency, every cross-reference resolved (no link to a deleted or renamed file), and any manifest edit validated as JSON. For a change to a skill body, quote the before/after of each edited block in the review note."
+evidence:   "run the test suite and quote the result (`python3 -m pytest scripts/ -q`, or unittest discover if pytest is absent) — a green run is part of the bar whenever a Python file is touched, and 'no Python file changed' must be stated explicitly when it is skipped. Plus: the changed skill/reference read end to end for internal consistency, every cross-reference resolved (no link to a deleted or renamed file), and any manifest edit validated as JSON. For a change to a skill body, quote the before/after of each edited block in the review note."
 ```
 
 ## Notes
@@ -70,16 +75,28 @@ evidence:   "the changed skill/reference read end to end for internal consistenc
   They don't exist in the GitHub repo yet; that file carries the `gh label create`
   commands.
 
-## Why the recipe is empty
+## Why the recipe is nearly empty
 
-This repo is a **documentation artifact**: markdown skills plus a few JSON
-manifests. There is nothing to install, nothing to boot, no schema, and no port.
-So `setup_cmd`, `run_recipe`, `ports`, and `db_gate` are all blank, and the
-orchestrator drops their checklist steps before sending a prompt.
+This repo is mostly a **documentation artifact**: markdown skills plus a few JSON
+manifests. There is nothing to boot, no schema, and no port — so `run_recipe`,
+`ports`, and `db_gate` stay blank and the orchestrator drops their checklist steps
+before sending a prompt.
 
-The `evidence` bar replaces "boot the app and screenshot it" with what actually
-proves a skill edit is correct: cross-references resolve, the contract stays
-internally consistent, and manifests still parse. The failure mode here is a
+**It is no longer markdown-only.** `/skill-fork-sync` puts the deterministic half
+of a sync behind one Python seam, `scripts/fork_state.py`, and that seam has a
+test suite (ADR 0008). So:
+
+- `setup_cmd` is a Python availability check, not blank. The suite is
+  **stdlib-only** — fixtures are local git repos built in a temp directory, with
+  no network, no GitHub calls and no agent runs — so there is still nothing to
+  install. `pytest` is used if present purely for nicer output; `python3 -m
+  unittest discover -s scripts -q` is the fallback and the guaranteed path.
+- **Running the tests is part of the `evidence` bar** whenever a Python file is
+  touched, and a review note that skips it must say so and why.
+
+The rest of the `evidence` bar replaces "boot the app and screenshot it" with what
+actually proves a skill edit is correct: cross-references resolve, the contract
+stays internally consistent, and manifests still parse. The failure mode here is a
 dangling link to a renamed reference file or a rule that contradicts another
 section — not a 500.
 
