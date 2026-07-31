@@ -33,7 +33,8 @@ in the target repo. **Before anything else, load it.** If it's missing, run
 
 Work-state labels and the tracker CLI come from `docs/agents/issue-tracker.md`
 (written by `/setup-matt-pocock-skills`), **not** the orchestrator config. If that
-file is missing, run `/setup-matt-pocock-skills` first.
+file is missing, run `/setup-matt-pocock-skills` first. That file also owns the
+**project board** coordinates — see [Board status](#board-status).
 
 **Preflight the config's dependencies.** Before the first spawn of a session,
 confirm the tool binary, the harness binary (and the review harness if
@@ -50,6 +51,28 @@ Don't try to spawn against a missing binary — or compose a prompt without
 
 Throughout, address a worker by its **slug** (the work-item's ticket prefix, e.g.
 `#38 B5 · Contacts` → `b5-contacts`).
+
+## Board status
+
+Where the tracker config has a **`## Project board`** section, every work item is
+also a card with a `Status` field. **Labels are the source of truth; `Status` is
+derived from them** — never a second state machine you advance separately. The
+derivation table, the board coordinates (project number, `Status` field id, option
+ids), and the two `gh` calls all live in that section of
+`docs/agents/issue-tracker.md`; read them from there, never from memory. Rationale:
+[`docs/adr/0009-labels-drive-board-status.md`](docs/adr/0009-labels-drive-board-status.md).
+
+Two rules:
+
+- **Write the card wherever you write a label** — and nowhere else. Three places in
+  this skill: the claim at spawn (step 5), the worker's own flip to the review state
+  (its final checklist box), and close (step 2). Plus the reconcile below.
+- **A missing `## Project board` section means every board write is a no-op.** A
+  repo with no board is a supported configuration — skip the write silently and
+  carry on with labels. Never fail a spawn or a close over the board.
+
+The write is idempotent, so re-writing a value a card already holds is free. An
+issue with no card resolves to an empty item id: skip it, don't fail.
 
 ## Right model for the job
 
@@ -101,6 +124,22 @@ start in parallel), then fill to at least 5 with the soonest-unblocked blocked
 items (fewest open deps first), noting what each waits on. Offer to spawn a worker
 for whichever the user picks.
 
+**Reconcile the board here.** This read is the one moment every open item's labels
+*and* open-blocker count are already in hand — which is exactly what the
+`Backlog`/`Ready` split needs — so it's where board drift gets repaired. There is no
+separate sync command. For each open item, derive `Status` from the table in
+`issue-tracker.md`'s [`## Project board`](../docs/agents/issue-tracker.md#project-board)
+section and write it; the write is idempotent, so a consistent board costs nothing
+and no card moves. Report only the cards that **changed** (`#4 In progress → In
+review`), one line, after the queue — an unchanged board says nothing. Skip the
+whole pass if the section is absent, and never let a board error block the queue
+answer: the queue is the deliverable, the reconcile is a side effect.
+
+The reconcile covers **every open item**, not just the ready ones — an item sitting
+in `in-progress` or `to-review` still gets its card confirmed, and a closed item
+already reached `Done` at close. A `user-story` parent's card follows the same table
+against its own labels and state, per that section.
+
 ## "Work a #N" — batch-spawn its unblocked children
 
 When the user says **work on #N / implement the unblocked tasks of #N / do #N,
@@ -136,8 +175,11 @@ When the user says **implement #N / implement X / start work on X**:
    prompt.
 5. **Claim the item first** — swap `ready-for-agent` → `in-progress` on the
    tracker (labels from `issue-tracker.md`), before prompting, so the board
-   reflects the worker and "what next?" won't hand it out twice. Apply any
-   parent-promotion the tracker conventions define (idempotent).
+   reflects the worker and "what next?" won't hand it out twice. Then **move its
+   card to `In progress`** ([Board status](#board-status)) — same step, so the label
+   and the card never disagree. Apply any parent-promotion the tracker conventions
+   define (idempotent) — including the parent's own card, which sits in
+   `In progress` while any child does.
 6. **Write the checklist + deliver the prompt** — see below.
 7. **Follow-along panel** (op 7, if the tool supports it) — open the work item as
    a tab inside the worker's worktree.
@@ -187,6 +229,12 @@ for evidence; satisfy `db_gate` if configured; meet the `evidence` bar (real-dat
 proof + full suite — unit tests alone are not enough); post the review note on the
 **work item** (What to review / Main changes / How to test / Evidence); flip to
 the review state.
+
+**The worker flips its own card.** That last step is the worker's, not yours, so the
+prompt must carry the board move with it: give the worker the two literal `gh`
+commands — the label swap and the `In review` write, with the real ids from
+`issue-tracker.md`'s `## Project board` section substituted in. A worker can't look
+up a field id it wasn't given. Omit the board command if that section is absent.
 
 **Harness shape:** a **claude** worker may use its slash skills (`/implement`,
 `/ponytail:ponytail`) — see `references/harnesses/claude.md`. **Any other harness**
@@ -250,14 +298,16 @@ order.
    id/path. If none matches, say so (maybe already closed) and do only the label
    steps that still apply.
 2. **Advance the tracker state** (labels from `issue-tracker.md`, states mutually
-   exclusive — swap, never stack), from the main checkout (config's `repo`):
-   - work done, PR/MR open → review state.
+   exclusive — swap, never stack), from the main checkout (config's `repo`), and
+   move the card with it ([Board status](#board-status)):
+   - work done, PR/MR open → review state, card → `In review`.
    - **merged** → pull the merge into local default branch **first**, then flip to
-     done and close the item. Merging is a human step; only advance to done once
-     the PR/MR is actually merged. If unmerged, stop at the review state and say
-     what's pending.
+     done and close the item, card → `Done`. Merging is a human step; only advance
+     to done once the PR/MR is actually merged. If unmerged, stop at the review
+     state — the card **stays** at `In review`; never write `Done` for an unmerged
+     PR — and say what's pending.
    - Apply parent-close if the tracker conventions define it (last child closed →
-     close the parent).
+     close the parent), including the parent's card → `Done`.
 3. **Confirm nothing is lost** — check the worktree is clean before removing. A
    **dirty** tree with intentional work is the data-loss case; call it out before
    proceeding.

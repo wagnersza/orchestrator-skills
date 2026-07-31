@@ -14,7 +14,9 @@ Steps whose recipe field is blank in config are dropped before sending.
 - [ ] if a DB gate is configured, satisfy it (back up, migrate, verify schema)
 - [ ] capture evidence per the evidence bar (real-data proof + full suite passing)
 - [ ] post the review note on the **work item** (What to review / Main changes / How to test / Evidence) — cover the substance, no filler sections or redundant summaries
-- [ ] flip the work item to the review state
+- [ ] flip the work item to the review state — and move its board card to the review
+      column with it, using the commands the prompt gives you (one step: a label
+      that moves without its card is drift). No board in this repo → the label alone.
 
 Do not end the turn while any box is unchecked. If you catch yourself about to
 stop at "next step is …", that's the stall — keep going and actually do it.

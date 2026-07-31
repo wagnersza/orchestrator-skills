@@ -79,6 +79,10 @@ The one-time interview that writes the Config — the user describes environment
 **Work-state labels**:
 The tracker labels that gate the queue and mark progress (`ready-for-agent`, `in-progress`, review, done). Owned by `docs/agents/issue-tracker.md` (`/setup-matt-pocock-skills`), not the orchestrator config — single source of truth. During an adversarial-review loop the item stays `in-progress` (a worker still owns it); it flips to the review label only when the loop concludes.
 
+**Board status**:
+The `Status` field on a work item's card, where the tracker has a project board (GitHub Projects v2: `Backlog | Ready | In progress | In review | Done`). A **derived projection of the Work-state labels, not a second state machine** — labels are the source of truth, and `Status` is written wherever a label is written, plus recomputed for every open item when the **Ready queue** is read (which is where drift is repaired; there is no sync command). `Backlog` covers both never-triaged and ready-but-blocked; `Ready` is exactly the ready queue, which is why the split is only knowable at queue time. A human drag is drift, not intent — it is overwritten. The derivation table and the board coordinates live in `docs/agents/issue-tracker.md`, alongside the labels; a repo with no board omits the section and every board write becomes a no-op. Rationale: `docs/adr/0009-labels-drive-board-status.md`.
+_Avoid_: board state, column, board label, project status (the field is `Status`; the layer is Board status).
+
 **Project recipe**:
 Per-project commands the completion contract needs but that aren't tool/harness/model: setup command, run-for-evidence recipe + port scheme, optional DB gate, evidence expectations. Stored in Config so the skill body stays abstract ("boot per the run recipe", "if a DB gate is configured, satisfy it").
 

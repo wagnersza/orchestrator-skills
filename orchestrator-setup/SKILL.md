@@ -138,6 +138,9 @@ For option 1, skip the interview entirely. Do this instead:
      chosen harness can't reach, a same-vendor review pair.
    - **Dead references** — a `references/` path the config or `CLAUDE.md` points at
      that this version deleted or renamed.
+   - **A missing `## Project board` section** in `docs/agents/issue-tracker.md` on a
+     GitHub repo that now has a board — run step 2a and offer to add it. If the
+     section is there, re-resolve its ids and report any mismatch.
 3. **Apply only what the user approves**, one edit at a time. An update must never
    drop a hand-edited recipe field or flip a review policy on its own.
 4. **Report** as a short table: what updated, what the config needs, what's fine.
@@ -150,7 +153,7 @@ Don't assume — read the repo first:
 - `docs/agents/orchestrator.md` — config already present? (step 0b already asked; a
   present config means update-only unless the user chose otherwise — never
   overwrite)
-- `docs/agents/issue-tracker.md` — tracker config present? (mattpocock's `/setup-matt-pocock-skills` writes it)
+- `docs/agents/issue-tracker.md` — tracker config present? (mattpocock's `/setup-matt-pocock-skills` writes it) Does it already carry a `## Project board` section?
 - `git remote -v` — which host/tracker does this repo point at?
 - `CLAUDE.md` / `AGENTS.md` — which exists, and is there an `## Agent skills` block?
 - Setup/run signals — `package.json` scripts, a `scripts/run.sh`, `pnpm-workspace.yaml`, a migrations dir (`alembic/`, `migrations/`, `prisma/`) → hints for `setup_cmd`, `run_recipe`, `db_gate`.
@@ -162,6 +165,50 @@ The orchestrator reads work-state labels and the tracker CLI from
 `docs/agents/issue-tracker.md`. If it's **missing**, call
 `/setup-matt-pocock-skills` to create it before continuing — do not define labels
 in the orchestrator config. If present, note the tracker + labels and move on.
+
+### 2a. Detect a project board and resolve its ids
+
+The orchestrator writes a card's `Status` at every label transition, deriving it from
+the labels (`orchestrator/docs/adr/0009-labels-drive-board-status.md`). It needs the
+real field and option ids to do that, and those are **per-repo data**, so resolve
+them here and write them into `issue-tracker.md` — never into the orchestrator
+config, same split as the labels.
+
+Only for a GitHub tracker. Look for a board owned by the repo's owner:
+
+```bash
+gh project list --owner <owner> --format json --jq '.projects[] | {number, title, id}'
+```
+
+Ask which project this repo's issues live on (a personal account often has several
+untitled ones — show `number` + `title` and let the user pick, or say **none**). Then
+resolve the `Status` field and every option id from the live board:
+
+```bash
+gh project field-list <number> --owner <owner> --format json \
+  --jq '.fields[] | select(.name=="Status")'
+```
+
+Write a `## Project board` section into `docs/agents/issue-tracker.md` carrying: the
+`owner` + project `number`, the project id, the `Status` field id, the
+option-name→id map **as resolved** (never the ids from this skill's examples — they
+are one board's), the derivation table, and the two `gh` calls (resolve an issue's
+item id, then `item-edit --single-select-option-id`). Then verify the token has the
+scope — `gh auth status` should list `project`; if not, run
+`gh auth refresh -s project`.
+
+**Handle these three cases explicitly, and say which one applies:**
+
+- **No board, or the user says none** — leave the section out. Every board write
+  becomes a no-op and the orchestrator runs on labels alone. Say so in one line;
+  this is a supported configuration, not a gap.
+- **A board with no `Status` field, or with different option names** — write the
+  section with whatever options exist and map the derivation table onto them by
+  meaning (a board with only `Todo | In Progress | Done` folds `Backlog`/`Ready` onto
+  `Todo` and both work states onto `In Progress`). Say which columns got folded.
+- **The section already exists** (a re-run) — this is the update path (step 0c):
+  re-resolve the ids and **report** a mismatch, don't silently rewrite. Ids change
+  when a field is recreated, and a stale one fails every write.
 
 ## 3. Interview — one choice at a time
 
