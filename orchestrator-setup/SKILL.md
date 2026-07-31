@@ -1,6 +1,6 @@
 ---
 name: orchestrator-setup
-description: Zero-touch install + config for the orchestrator skill — installs every missing dependency itself (plugins, CLIs, MCP) and writes the per-project config after asking you to pick the workspace tool (orca/cmux/herdr), harness (claude/codex/pi/copilot/cursor) + model, adversarial-review policy, and project recipe. Run once before orchestrating. Use when the user says "set up the orchestrator", "configure orchestration for this repo", "install and set up the orchestrator", "orchestrator setup", points Claude at a repo to get it orchestration-ready, or the orchestrator reports its config is missing.
+description: Zero-touch install, update, and config for the orchestrator skill — always updates the plugin and every dependency skill to the latest version first, then either reconciles an existing config (the default when one exists) or installs every missing dependency and writes a fresh per-project config after asking you to pick the workspace tool (orca/cmux/herdr), harness (claude/codex/pi/copilot/cursor) + models per role, adversarial-review policy, and project recipe. Use when the user says "set up the orchestrator", "configure orchestration for this repo", "orchestrator setup", "update the orchestrator", "update the orchestrator skills/plugin", "get the latest orchestrator", "re-run orchestrator setup", points Claude at a repo to get it orchestration-ready, or the orchestrator reports its config is missing or stale.
 disable-model-invocation: true
 ---
 
@@ -12,6 +12,15 @@ answering the option prompts**. Point Claude at the repo, run this skill, and it
 human only picks options (tool / harness / model / review / recipe). No manual
 install commands, no hand-edited files.
 
+Two modes, decided in step 0:
+
+- **First setup** (no `docs/agents/orchestrator.md`) — the full flow, steps 1–6.
+- **Update** (config already there) — refresh the plugin and every dependency
+  skill, reconcile the existing config against the new version, and change
+  nothing the user didn't ask for. This is the **default** on any re-run.
+
+Either way, step 0 runs first and updates everything.
+
 Same posture as `/setup-matt-pocock-skills`: **explore, ask one thing at a time
 (each with a recommended answer), then act.** The difference from a
 check-only setup: this one **runs the install commands**, it doesn't just print
@@ -21,11 +30,116 @@ The vocabulary (Tool, Harness, Model, Vendor, Yolo mode, Adversarial review,
 Project recipe) is defined in the orchestrator skill's `CONTEXT.md` — use those
 terms.
 
+## 0. Update everything, then pick a mode
+
+**Always run this step first, on every invocation — first setup or re-run.**
+
+### 0a. Update the plugin and every dependency skill
+
+The skill body you are reading, and the reference files it sends you to, are the
+**cached** copy of whatever plugin version is installed. A stale cache silently
+routes to deleted files and misses whole steps, so refresh before doing anything
+else:
+
+```bash
+claude plugin list                        # FIRST — read the exact ids + versions
+claude plugin marketplace update          # refresh every marketplace source
+# then each plugin, by its FULL plugin@marketplace id from the list above
+claude plugin update orchestrator-skills@wsza
+claude plugin update mattpocock-skills@mattpocock
+claude plugin update ponytail@ponytail
+# skills installed as plain git clones (see requirements.md)
+git -C ~/.claude/skills/prompt-improver pull --ff-only
+```
+
+**The `plugin@marketplace` form is required.** A bare name fails with
+`Plugin "<name>" not found` and **exits 1** — so read the ids from
+`claude plugin list` rather than assuming the marketplace name (this plugin is
+`orchestrator-skills@wsza`, not `@orchestrator-skills`). Skip any dependency that
+isn't installed yet; step 4 installs those.
+
+Report the before/after version for each. `claude plugin list` gives the installed
+version directly; for the git-clone skills use
+`git -C ~/.claude/skills/<name> log --oneline -1`.
+
+**A plugin update needs a session restart to take effect** — the CLI says so, and
+it means the *currently loaded* skill body is still the old one. So:
+
+- **If `orchestrator-skills` actually changed version:** stop here. Tell the user
+  the new version, that this session is still running the old skill body, and ask
+  them to restart and re-run `/orchestrator-setup`. Don't carry on with stale
+  instructions and don't try to work around it by reading the new files directly —
+  the loaded body is what drives the flow.
+- **If nothing changed:** say so in one line and continue.
+
+**Detect a stale body.** The cache keeps every version side by side, and the "Base
+directory for this skill" line at the top of this skill names the one actually
+loaded. Compare it against the newest:
+
+```bash
+ls -1v ~/.claude/plugins/cache/wsza/orchestrator-skills/ | tail -1   # newest cached
+```
+
+If that doesn't match the version in your base directory path, you are running a
+stale body — stop and restart, as above. This is the common case right after an
+update lands, and it's silent: the old body reads fine, it just points at
+reference files that moved.
+
+### 0b. Ask what the user wants — update, or full setup
+
+Once versions are current, **check whether `docs/agents/orchestrator.md` already
+exists** and branch:
+
+**Config exists → default to update-only.** Re-running this skill on a configured
+repo is an **update**, not a re-setup: the point is to refresh the plugin and
+skills and reconcile the existing config, **not** to re-interview or overwrite
+choices the user already made. Confirm before doing anything more:
+
+> Config found at `docs/agents/orchestrator.md` (orca / claude / opus-5+sonnet-5).
+> Plugin and skills are now up to date. Update only, or change the setup?
+>
+> 1. **Update only** (recommended) — keep the config as-is; just reconcile it
+>    against the new version and report anything that needs attention.
+> 2. **Change some choices** — say which (tool / harness / models / review /
+>    recipe); everything else stays.
+> 3. **Full re-setup** — re-interview from scratch and overwrite the config.
+
+**Default to 1.** Only run the full interview (step 3) if the user explicitly asks
+for option 3 or clearly says they want to change the setup. If they asked for
+something ambiguous ("run setup again", "update the orchestrator"), that means
+option 1 — say that's what you're doing rather than asking a second time.
+
+**No config → full setup.** Announce that and run steps 1–6 normally; there's
+nothing to preserve.
+
+### 0c. Update-only path
+
+For option 1, skip the interview entirely. Do this instead:
+
+1. **Re-run the dependency checks** (step 4's check commands only) and install
+   anything now missing or newly required by this version.
+2. **Reconcile the existing config against the current template**
+   ([orchestrator.template.md](orchestrator.template.md)) and
+   `references/models.md` — report, don't silently rewrite:
+   - **Fields the new version added** that the config lacks (e.g. a config still
+     carrying a flat `model:` when roles now exist). Offer to add them with
+     defaults.
+   - **Values now invalid** — a model no longer in the registry, an effort the
+     chosen harness can't reach, a same-vendor review pair.
+   - **Dead references** — a `references/` path the config or `CLAUDE.md` points at
+     that this version deleted or renamed.
+3. **Apply only what the user approves**, one edit at a time. An update must never
+   drop a hand-edited recipe field or flip a review policy on its own.
+4. **Report** as a short table: what updated, what the config needs, what's fine.
+   Then stop — don't continue into steps 1–3.
+
 ## 1. Explore
 
 Don't assume — read the repo first:
 
-- `docs/agents/orchestrator.md` — config already present? (offer to edit, not overwrite)
+- `docs/agents/orchestrator.md` — config already present? (step 0b already asked; a
+  present config means update-only unless the user chose otherwise — never
+  overwrite)
 - `docs/agents/issue-tracker.md` — tracker config present? (mattpocock's `/setup-matt-pocock-skills` writes it)
 - `git remote -v` — which host/tracker does this repo point at?
 - `CLAUDE.md` / `AGENTS.md` — which exists, and is there an `## Agent skills` block?
@@ -101,8 +215,9 @@ Scope — only the chosen pieces apply:
 
 ### Install loop
 
-For each needed dep, run its check command. **If present, skip.** If missing,
-install it by running the command from `requirements.md`:
+For each needed dep, run its check command. **If present, it was already brought up
+to date in step 0a** — skip it. If missing, install it by running the command from
+`requirements.md`:
 
 - **Plugins** — `claude plugin marketplace add <slug> && claude plugin install <name>@<marketplace>` (mattpocock, ponytail). Verified shell commands.
 - **Skills** — `prompt-improver` is a plain git clone into `~/.claude/skills/` (see `requirements.md`); it's auto-discovered next session, so mention a restart is needed before the first spawn.
@@ -153,5 +268,10 @@ writing. Then:
 ## 6. Done
 
 Tell the user setup is complete and that the orchestrator will now read
-`docs/agents/orchestrator.md`. They can edit it directly later; re-run this skill
-only to switch tools/harnesses or start over.
+`docs/agents/orchestrator.md`. They can edit it directly later.
+
+**Re-running is how you update.** A later `/orchestrator-setup` refreshes the
+plugin and every dependency skill, then reconciles the config without
+re-interviewing — it only starts over if the user explicitly asks for a full
+re-setup (step 0b). Mention this, so a version bump doesn't look like it needs a
+manual reinstall.

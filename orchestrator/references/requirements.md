@@ -8,6 +8,29 @@ config and checks exactly this set, then offers to install what's missing.
 > Install commands marked **(verify)** are not pinned — confirm against the
 > tool's own docs before running. The linked doc is the source of truth.
 
+## Keeping them current
+
+`/orchestrator-setup` step 0a runs this before anything else, on every invocation.
+A stale plugin cache routes to reference files that no longer exist, so this is not
+optional maintenance:
+
+```bash
+claude plugin list                        # read the exact plugin@marketplace ids
+claude plugin marketplace update          # all marketplaces
+claude plugin update orchestrator-skills@wsza        # then each installed plugin
+claude plugin update mattpocock-skills@mattpocock
+claude plugin update ponytail@ponytail
+git -C ~/.claude/skills/prompt-improver pull --ff-only   # git-clone skills
+```
+
+**Use the full `plugin@marketplace` id** — a bare name fails (`Plugin "<name>" not
+found`, exit 1). `claude plugin list` is the source of truth for the ids.
+
+**A plugin update needs a session restart** to take effect — until then the loaded
+skill body is still the old one. Harness and tracker CLIs update through their own
+package manager (`brew upgrade gh glab`, `npm update -g @anthropic-ai/claude-code`),
+which needs no restart.
+
 ## Check commands
 
 ```bash
