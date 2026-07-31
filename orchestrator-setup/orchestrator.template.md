@@ -16,11 +16,12 @@ harness:  claude          # claude | codex | pi | copilot | cursor -> references
 yolo:     on              # required; the harness ref supplies the actual flag
 
 # --- right model for the job: one (model, effort) pair per role ---
-# Roles + the routing rule are defined in references/models.md.
+# Roles, the routing rule, and the cost profiles are in references/models.md.
+# This block is the `balanced` profile; swap any pair freely.
 models:
   heavy:                  # multi-file feature, refactor, migration, open decisions
     model:  opus-5
-    effort: xhigh
+    effort: high          # `xhigh` = max-capability profile; `medium` = conservative
   light:                  # single-file/scoped edit, fully enumerated criteria
     model:  sonnet-5
     effort: medium
@@ -62,6 +63,11 @@ evidence:   "real-data proof + full test suite passing"  # the evidence bar
   - The **harness clamps** what it can express — `codex` tops out at `high`,
     `pi` at `xhigh`, `cursor` bakes effort into the model id. The harness
     reference holds the map, and the orchestrator reports any clamp.
+  - **Cost profile.** The block above is `balanced`. `conservative` drops heavy to
+    `medium` and light to `low`; `max-capability` runs heavy at `xhigh` and light on
+    `opus-5` @ `high`. Full table + per-MTok prices in `references/models.md`.
+    Cheaper isn't always cheaper — a `light` worker that under-thinks costs a whole
+    round trip, more than the effort saved.
   - **Single-model setup?** Replace the `models:` block with a flat
     `model:`/`effort:` pair — every role then uses it (with `models.review`, or the
     legacy `review.model`, still honoured for review).

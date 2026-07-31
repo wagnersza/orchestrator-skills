@@ -10,7 +10,9 @@ harness:  claude          # claude | codex | pi | copilot | cursor -> references
 yolo:     on              # required; the harness ref supplies the actual flag
 
 # --- right model for the job: one (model, effort) pair per role ---
-# Roles + the routing rule are defined in references/models.md.
+# Roles, the routing rule, and the cost profiles are in references/models.md.
+# This is `balanced` with heavy raised to xhigh: a wrong edit to a skill body
+# ships bad instructions to every future worker, so heavy items justify the rung.
 models:
   heavy:                  # multi-skill change, new skill, contract/vocabulary change
     model:  opus-5

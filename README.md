@@ -23,6 +23,7 @@ session coordinates **worker** sessions: each worker is a
 | **Model** | Frontier model + **vendor** (anthropic / openai) + **effort**. Never hardcoded — resolved per role. |
 | **Effort** | How much the model *thinks*: `low`…`max`, default `high`. Some harnesses clamp the top (codex → `high`). |
 | **Role** | The class of job that picks the `(model, effort)` pair — **heavy** (multi-file/migration → strongest @ `xhigh`), **light** (scoped edit → cheaper @ `medium`), **review** (cross-vendor @ `high`). |
+| **Cost profile** | A preset of all three role pairs — **conservative** / **balanced** (default) / **max-capability**. Setup asks this instead of interrogating role-by-role. Table + per-MTok prices in [`models.md`](orchestrator/references/models.md). |
 | **Worker** | A `(tool, harness, model)` triple on one work item. |
 | **Adversarial review** | Optional review by a second worker on a **different-vendor** model (e.g. implement opus-5, review gpt-5.6). Prompted for **coverage**, not self-filtering. |
 

@@ -162,11 +162,26 @@ Take these in order; each leads with a recommendation.
    filled in; if it's cmux or herdr and still marked "needs verification", tell
    the user its commands must be confirmed against the installed CLI first.
 2. **Harness** — the agent CLI that runs in a worker terminal.
-3. **Models per role** — *not* one global model. Ask for the `heavy` and `light`
-   pair (see the Role table in `references/models.md`), each as
-   `(model, effort)`. Recommend `heavy: opus-5 @ xhigh` / `light: sonnet-5 @ medium`
-   for a claude harness; the strongest available model at `xhigh` for heavy in
-   general. Then:
+3. **Models per role — lead with a cost profile.** Don't open with a
+   role-by-role interrogation. Offer the three presets from the **Cost profiles**
+   table in [`references/models.md`](../orchestrator/references/models.md) and let
+   the user pick one, then show the resolved pairs:
+
+   | Profile | heavy | light | review | Relative cost |
+   |---------|-------|-------|--------|---------------|
+   | **conservative** | `opus-5` @ `medium` | `sonnet-5` @ `low` | `gpt-5.6-terra` @ `medium` | ~1× |
+   | **balanced** (recommended) | `opus-5` @ `high` | `sonnet-5` @ `medium` | `gpt-5.6-terra` @ `high` | ~2–3× |
+   | **max-capability** | `opus-5` @ `xhigh` | `opus-5` @ `high` | `gpt-5.6-sol` @ `high` | ~5–8× |
+
+   Recommend **balanced**. Say the multiplier is an ordering, not a budget figure
+   — effort changes thinking tokens per item, so the spread is workload-dependent.
+   Name the one non-obvious trade: **conservative can cost more** when a
+   `light` worker at `low` under-thinks, because a failed round trip plus a
+   re-spawn a rung up exceeds what the cheap effort saved.
+
+   The user may override any single pair after picking (e.g. "balanced, but heavy
+   at `xhigh`") — that's expected; profiles are a starting point. Then, whichever
+   way the pairs were reached:
    - Reject a model not in the registry (frontier only).
    - Warn if the harness can't pin the chosen model
      (`references/harnesses/<h>.md` model-id map incomplete or, for `pi`, the model
@@ -180,10 +195,13 @@ Take these in order; each leads with a recommendation.
      hard ones, depending which way it's set.
 4. **Yolo** — on (required). State the actual flag from the harness reference so
    the user sees what "unattended" means for their harness.
-5. **Adversarial review** — off by default. If on, ask for `models.review`
-   (model + effort, default effort `high`) and **assert its vendor differs** from
-   the impl roles' (look both up in `references/models.md`); refuse a same-vendor
-   pair. Confirm the round cap (default 3).
+5. **Adversarial review** — off by default. If on, the chosen profile already
+   supplies `models.review`; just confirm it rather than re-asking. Either way
+   **assert its vendor differs** from the impl roles' (look both up in
+   `references/models.md`) and refuse a same-vendor pair. Confirm the round cap
+   (default 3). Mention the cost shape: review roughly **doubles** the per-item
+   spend when it runs, and each fix round steps the impl worker up a rung — so on
+   a `conservative` profile, a review loop converges toward `balanced` pricing.
 6. **Project recipe** — `setup_cmd`, `run_recipe` + `ports`, `db_gate` (blank if
    no database), `evidence` bar. Pre-fill from what exploration found and let the
    user correct. Offer to clone `references/examples/fullstack-app.md` as a

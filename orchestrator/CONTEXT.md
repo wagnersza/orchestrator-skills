@@ -24,6 +24,10 @@ _Avoid_: reasoning effort, thinking budget, temperature.
 The class of job a work item represents, which selects its `(Model, Effort)` pair from config's `models:` block. Three: **heavy** (multi-file feature, refactor, migration, open decisions — strongest model, `xhigh`), **light** (single-file scoped edit with fully enumerated criteria — cheaper model, `medium`), **review** (the adversarial reviewer — different vendor, `high`). Default heavy; downgrade to light only on clear signals. A fix round after review steps up a rung.
 _Avoid_: tier, profile, model class.
 
+**Cost profile**:
+A preset `models:` block — one `(model, effort)` pair per role, chosen as a set instead of role-by-role. Three: **conservative** (opus-5 @ medium / sonnet-5 @ low), **balanced** (opus-5 @ high / sonnet-5 @ medium — the default), **max-capability** (opus-5 @ xhigh / opus-5 @ high). Defined with per-MTok prices in `references/models.md`; `/orchestrator-setup` offers them as the first model question. A starting point, not a constraint — any pair is editable in config afterwards. Note cheaper is not always cheaper: a mis-routed `light` worker burns a round trip that costs more than the effort saved.
+_Avoid_: tier, plan, budget mode.
+
 **Vendor**:
 The provider of a model — anthropic or openai. Adversarial review crosses vendors.
 _Avoid_: provider, brand.

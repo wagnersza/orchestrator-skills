@@ -67,3 +67,56 @@ visible and correctable.
 **Flat-config fallback.** A config with a single `model:` / `effort:` and no
 `models:` block uses that pair for every role (and `review.model` for review, as
 before).
+
+## Cost profiles
+
+Three preset `models:` blocks, cheapest to most capable. `/orchestrator-setup`
+offers these instead of asking role-by-role; every one is still per-role routing,
+so a `light` item never pays the `heavy` rate.
+
+| Profile | heavy | light | review | Relative cost |
+|---------|-------|-------|--------|---------------|
+| **conservative** | `opus-5` @ `medium` | `sonnet-5` @ `low` | `gpt-5.6-terra` @ `medium` | ~1× |
+| **balanced** (default) | `opus-5` @ `high` | `sonnet-5` @ `medium` | `gpt-5.6-terra` @ `high` | ~2–3× |
+| **max-capability** | `opus-5` @ `xhigh` | `opus-5` @ `high` | `gpt-5.6-sol` @ `high` | ~5–8× |
+
+**Read the multiplier as a range, not a number.** Effort changes how many tokens
+the model *thinks*, and that varies per item — the same `xhigh` spawn costs far
+more on an open-ended refactor than on a tightly-specced one. Treat the column as
+ordering, and measure your own workload before budgeting from it.
+
+Per-MTok list prices (input / output), for reasoning about the table above:
+
+| Model | Vendor | Input | Output |
+|-------|--------|-------|--------|
+| `opus-5` | anthropic | $5 | $25 |
+| `sonnet-5` | anthropic | $3 ($2 intro through 2026-08-31) | $15 ($10 intro) |
+| `gpt-5.6-sol` / `gpt-5.6-terra` | openai | per OpenAI's published rates | — |
+
+### Choosing a profile
+
+- **conservative** — high-volume or well-specced work, or a personal-budget
+  project. `opus-5` at `medium` still holds quality on most items; `sonnet-5` at
+  `low` is for genuinely trivial ones. Expect a higher re-spawn rate: a `light`
+  worker at `low` that under-thinks costs a whole round trip, which can exceed
+  what the cheaper effort saved.
+- **balanced** — the default, and the right answer unless you know otherwise.
+  Both models at their own default effort.
+- **max-capability** — migrations, security-sensitive work, anything where a
+  missed bug costs more than the tokens. Note `light` runs `opus-5` here, so the
+  cheap tier isn't cheap: pick this when correctness dominates, not as a default.
+
+**Cheaper is not always cheaper.** The dominant cost in this system is a failed
+round trip — a worker that under-thinks, gets caught in review, and re-spawns a
+rung up pays for two spawns plus a review cycle. That's why the routing rule
+defaults to `heavy` and why an ambiguous item should not be dropped to `light`
+to save tokens. A fix round already steps effort up one rung, so a
+`conservative` config that mis-routes converges on `balanced` pricing anyway —
+with the extra latency.
+
+**Effort is the lever, not the model.** Within a profile, moving `heavy` one rung
+(`high` → `xhigh`) changes cost more than swapping which model runs `light`.
+Tune effort first.
+
+Profiles are a starting point, not a constraint — `docs/agents/orchestrator.md`
+is human-editable, so set any `(model, effort)` pair per role directly.
