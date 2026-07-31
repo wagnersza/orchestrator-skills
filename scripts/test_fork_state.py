@@ -34,6 +34,7 @@ GIT_ENV = {
 
 CONSUMED = ["code-review", "tdd"]
 UNCONSUMED = ["wayfinder", "to-questionnaire"]
+FORK_RECORD_NAME = "FORK.md"
 
 
 def git(cwd, *args):
@@ -990,6 +991,348 @@ class EvalPlanTestCase(unittest.TestCase):
         self.assertEqual(one["budget"]["runs_planned"], 2)
         # A named fork gets the whole ceiling, not a per-fork share of it.
         self.assertEqual(one["budget"]["remaining"], 3)
+
+
+class PromotePlanTestCase(unittest.TestCase):
+    """One bootstrapped fork, its upstream, and the install config.
+
+    Same style again: real git repos and real config files in a temp directory,
+    `--gh-fixture` standing in for the `gh` reads. The plan is what a promote
+    *would* run, so every assertion here is about what it says — nothing is
+    pushed, no marketplace is refreshed and no plugin is updated.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.addCleanup(self.tmp.cleanup)
+
+        self.forks_dir = self.root / "forks"
+        self.repo = self.root / "consumer"
+        write(self.repo / "docs" / "agents" / "orchestrator.md", "uses `tdd`\n")
+
+        # --- Upstream, then a fork clone pinned to it with FORK.md on top: the
+        #     exact state a completed bootstrap leaves behind.
+        self.upstream = self.root / "upstream"
+        self.upstream.mkdir()
+        git(self.upstream, "init", "-q", "-b", "main")
+        write(
+            self.upstream / ".claude-plugin" / "plugin.json",
+            json.dumps({"name": "mattpocock-skills", "version": "1.2.0"}),
+        )
+        write(self.upstream / "skills" / "tdd" / "SKILL.md", "tdd: base body\n")
+        git(self.upstream, "add", "-A")
+        git(self.upstream, "commit", "-qm", "the pinned version")
+        self.pin_base = rev(self.upstream, "main")
+
+        self.clone = self.forks_dir / "mattpocock"
+        self.clone.parent.mkdir(parents=True, exist_ok=True)
+        subprocess.run(
+            ["git", "clone", "-q", str(self.upstream), str(self.clone)],
+            check=True,
+            capture_output=True,
+            env=GIT_ENV,
+        )
+        git(self.clone, "remote", "add", "upstream", str(self.upstream))
+        write(
+            self.clone / "FORK.md",
+            "# Fork of mattpocock/skills\n\n"
+            "- **Upstream repository:** https://github.com/mattpocock/skills\n"
+            "- **Fork date:** 2026-07-31\n"
+            f"- **Last-synced SHA:** `{self.pin_base}` (1.2.0)\n"
+            "- **Local changes:** none, and none intended.\n",
+        )
+        git(self.clone, "add", "FORK.md")
+        git(self.clone, "commit", "-qm", "Record the fork and its pin")
+        git(self.clone, "fetch", "-q", "upstream")
+
+        self.write_config()
+
+    # --- fixture helpers ----------------------------------------------------
+
+    def write_config(self, installed=True, plugin_id="mattpocock-skills@mattpocock"):
+        self.marketplaces = self.root / "known_marketplaces.json"
+        self.marketplaces.write_text(
+            json.dumps(
+                {"mattpocock": {"source": {"source": "github", "repo": "me/skills"}}}
+            )
+        )
+        self.gh_fixture = self.root / "gh.json"
+        self.gh_fixture.write_text(
+            json.dumps(
+                {
+                    "user": "me",
+                    "repos": {
+                        "me/skills": {"exists": True, "parent": "mattpocock/skills"}
+                    },
+                }
+            )
+        )
+        self.installed = self.root / "installed_plugins.json"
+        plugins = (
+            {
+                plugin_id: [
+                    {
+                        "scope": "user",
+                        "version": "1.2.0",
+                        "gitCommitSha": self.pin_base,
+                        "lastUpdated": "2026-07-21T13:27:28.622Z",
+                    }
+                ]
+            }
+            if installed
+            else {}
+        )
+        self.installed.write_text(json.dumps({"version": 2, "plugins": plugins}))
+
+    def advance_upstream(self, version="1.3.0"):
+        """Move upstream past the pin, so there is a candidate to promote."""
+        write(self.upstream / "skills" / "tdd" / "SKILL.md", "tdd: changed\n")
+        write(
+            self.upstream / ".claude-plugin" / "plugin.json",
+            json.dumps({"name": "mattpocock-skills", "version": version}),
+        )
+        git(self.upstream, "add", "-A")
+        git(self.upstream, "commit", "-qm", "upstream moved")
+        git(self.clone, "fetch", "-q", "upstream")
+        return rev(self.upstream, "main")
+
+    def promote(self, *extra, expect=0, skills_dir=None):
+        """Run the promote plan and return (parsed JSON, rendered text)."""
+        base = [
+            sys.executable,
+            "-m",
+            "scripts.fork_state",
+            "--promote",
+            "--repo",
+            str(self.repo),
+            "--marketplaces",
+            str(self.marketplaces),
+            "--installed",
+            str(self.installed),
+            "--forks-dir",
+            str(self.forks_dir),
+            "--gh-fixture",
+            str(self.gh_fixture),
+            "--skills-dir",
+            str(skills_dir or self.root / "no-skills-dir"),
+        ]
+
+        def run(*args):
+            proc = subprocess.run(
+                [*base, *args],
+                cwd=REPO_ROOT,
+                capture_output=True,
+                text=True,
+                env=GIT_ENV,
+            )
+            self.assertEqual(proc.returncode, expect, f"stderr: {proc.stderr}")
+            return proc.stdout
+
+        return json.loads(run("--json", *extra)), run(*extra)
+
+    def fork(self, plan, name="mattpocock"):
+        for entry in plan["forks"]:
+            if entry["fork"] == name:
+                return entry
+        self.fail(f"{name} missing: {[f['fork'] for f in plan['forks']]}")
+
+    def step(self, fork_entry, name):
+        for entry in fork_entry["steps"]:
+            if entry["name"] == name:
+                return entry
+        self.fail(f"step {name} missing: {[s['name'] for s in fork_entry['steps']]}")
+
+    def make_clone(self, root, name, remote="https://github.com/me/skills.git"):
+        """A skills-directory-shaped clone of the fork, named for the skill."""
+        path = Path(root) / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        git_init = subprocess.run(
+            ["git", "init", "-q", "-b", "main", str(path)],
+            check=True,
+            capture_output=True,
+            env=GIT_ENV,
+        )
+        del git_init
+        git(path, "remote", "add", "origin", remote)
+        return path
+
+    # --- the cases ----------------------------------------------------------
+
+    def test_a_promotable_candidate_plans_four_steps_and_takes_none(self):
+        """AC 1 + AC 3: the ordered steps, marketplace before plugin, run by nobody."""
+        candidate = self.advance_upstream()
+        before = sorted(str(p) for p in self.root.rglob("*"))
+        plan, text = self.promote()
+        fork = self.fork(plan)
+
+        self.assertEqual(fork["candidate_sha"], candidate)
+        self.assertTrue(fork["fast_forward"])
+        self.assertTrue(fork["promotable"])
+        self.assertEqual(
+            [s["name"] for s in fork["steps"]],
+            ["advance the pin", FORK_RECORD_NAME, "marketplace", "plugin"],
+        )
+        self.assertEqual([s["step"] for s in fork["steps"]], [1, 2, 3, 4])
+        self.assertEqual([s["status"] for s in fork["steps"]], ["todo"] * 4)
+        # Marketplace strictly before plugin, and the reason is in the note.
+        marketplace = fork["steps"].index(self.step(fork, "marketplace"))
+        self.assertLess(marketplace, fork["steps"].index(self.step(fork, "plugin")))
+        self.assertIn("installed out of that clone", self.step(fork, "marketplace")["note"])
+        self.assertIn("marketplace update mattpocock", text)
+
+        # Planned, not run: nothing on disk moved and the pin is where it was.
+        self.assertEqual(plan["mutates"], "nothing")
+        self.assertEqual(before, sorted(str(p) for p in self.root.rglob("*")))
+        self.assertNotEqual(rev(self.clone, "main"), candidate)
+        self.assertIn("Nothing below is executed", text)
+
+    def test_a_diverged_pin_is_refused_rather_than_force_pushed(self):
+        """AC 1: a promote needing a force-push means the pin moved — stop."""
+        self.advance_upstream()
+        write(self.clone / "skills" / "tdd" / "SKILL.md", "a real local commit\n")
+        git(self.clone, "add", "-A")
+        git(self.clone, "commit", "-qm", "not FORK.md")
+
+        plan, text = self.promote(expect=2)
+        fork = self.fork(plan)
+
+        self.assertFalse(fork["fast_forward"])
+        self.assertFalse(fork["promotable"])
+        self.assertIn("never force", fork["fast_forward_reason"])
+        self.assertEqual(self.step(fork, "advance the pin")["status"], "refused")
+        # Everything downstream is blocked, so no half-promote is planned.
+        self.assertEqual(
+            [s["status"] for s in fork["steps"][1:]], ["blocked"] * 3
+        )
+        self.assertIn("REFUSED", text)
+        self.assertNotIn("--force", text)
+        self.assertNotIn("push --force", text)
+
+    def test_a_pin_already_carrying_the_candidate_is_a_no_op_not_a_rewind(self):
+        """AC 1 + AC 7: a re-run after a partial promote resumes, never rewinds.
+
+        This is the state a promote that died after step 1 leaves behind, so step
+        1 must read `done` while step 2 still reads `todo` — a per-step status,
+        not one verdict for the whole promote.
+        """
+        candidate = self.advance_upstream()
+        git(self.clone, "merge", "-q", "--no-edit", "upstream/main")
+
+        plan, _ = self.promote("--candidate", candidate)
+        fork = self.fork(plan)
+
+        self.assertTrue(fork["already_promoted"])
+        self.assertFalse(fork["record_up_to_date"])
+        self.assertTrue(fork["promotable"])
+        self.assertEqual(
+            [s["status"] for s in fork["steps"]], ["done", "todo", "todo", "todo"]
+        )
+
+        # Once FORK.md catches up too, step 2 reads done as well and only the two
+        # unchecked steps are left.
+        (self.clone / "FORK.md").write_text(fork["fork_md"])
+        git(self.clone, "add", "FORK.md")
+        git(self.clone, "commit", "-qm", f"Promote to {candidate[:7]}")
+        fork = self.fork(self.promote("--candidate", candidate)[0])
+        self.assertTrue(fork["record_up_to_date"])
+        self.assertEqual(
+            [s["status"] for s in fork["steps"]], ["done", "done", "todo", "todo"]
+        )
+
+    def test_fork_md_synced_sha_is_rewritten_to_the_candidate(self):
+        """AC 2: the record moves in the same promote, keeping its other fields."""
+        candidate = self.advance_upstream()
+        plan, _ = self.promote()
+        fork = self.fork(plan)
+
+        body = fork["fork_md"]
+        self.assertIn(f"- **Last-synced SHA:** `{candidate}` (1.3.0)", body)
+        self.assertNotIn(self.pin_base, body)
+        self.assertIn("**Upstream repository:**", body)  # the other fields survive
+        self.assertIn("**Local changes:** none", body)
+        self.assertEqual(fork["candidate_version"], "1.3.0")
+        # And it is planned, not written: the file on disk still names the pin.
+        self.assertIn(self.pin_base, (self.clone / "FORK.md").read_text())
+        self.assertIn(FORK_RECORD_NAME, self.step(fork, FORK_RECORD_NAME)["command"])
+
+    def test_the_update_command_follows_the_install_shape(self):
+        """AC 4: plugin, @skills-dir clone and project clone each get their own."""
+        self.advance_upstream()
+        plugin = self.step(self.fork(self.promote()[0]), "plugin")
+        self.assertEqual(plugin["command"], "claude plugin update mattpocock-skills@mattpocock")
+        self.assertIn("plugin", plugin["note"])
+
+        # A @skills-dir clone is absent from installed_plugins.json, and
+        # `claude plugin update` fails on it — so it takes a git pull instead.
+        self.write_config(installed=False)
+        skills_dir = self.root / "claude-skills"
+        clone = self.make_clone(skills_dir, "tdd")
+        shape = self.fork(self.promote(skills_dir=skills_dir)[0])["install_shape"]
+        self.assertEqual(shape["shape"], "skills-dir clone")
+        self.assertEqual(shape["command"], f"git -C {clone} pull --ff-only")
+        self.assertIn("Plugin not found", shape["why"])
+
+        # A project-level clone shows in no listing at all.
+        import shutil
+
+        shutil.rmtree(clone)
+        project = self.make_clone(self.repo / ".claude/skills", "tdd")
+        shape = self.fork(self.promote(skills_dir=skills_dir)[0])["install_shape"]
+        self.assertEqual(shape["shape"], "project clone")
+        self.assertEqual(shape["command"], f"git -C {project.resolve()} pull")
+
+    def test_an_ambiguous_install_blocks_the_plugin_step(self):
+        """AC 4 + AC 7: two shadowing copies is not a shape to guess at."""
+        self.advance_upstream()
+        skills_dir = self.root / "claude-skills"
+        self.make_clone(skills_dir, "tdd")
+
+        plan, text = self.promote(skills_dir=skills_dir)
+        shape = self.fork(plan)["install_shape"]
+        self.assertEqual(shape["shape"], "ambiguous")
+        self.assertIsNone(shape["command"])
+        self.assertIn("shadowing", shape["why"])
+        self.assertEqual(self.step(self.fork(plan), "plugin")["status"], "blocked")
+        self.assertIn("ambiguous", text)
+
+    def test_it_promotes_nothing_and_never_verifies_the_installed_sha(self):
+        """AC 6 + AC 8: approval is the maintainer's, and no read-back check."""
+        self.advance_upstream()
+        plan, text = self.promote()
+
+        self.assertEqual(plan["executed"].split(" — ")[0], "nothing")
+        self.assertIn("all-green assertion table", plan["approval"])
+        self.assertIn("ADR 0008", plan["approval"])
+        self.assertFalse(plan["verifies_installed_sha_afterwards"])
+        self.assertIn("false mismatches", plan["why_not"])
+        self.assertIn("restart", plan["why_not"])
+        self.assertIn("next session", plan["takes_effect"])
+        self.assertIn("next session", text)
+        self.assertIn("false mismatches", text)
+
+    def test_a_stale_candidate_and_a_missing_clone_are_both_refused(self):
+        """AC 7: the state is legible instead of half-promoted."""
+        # The approved candidate is past the pin, and upstream then moved again —
+        # so the assertion table describes a tree that is no longer on offer.
+        approved = self.advance_upstream()
+        head = self.advance_upstream(version="1.4.0")
+        plan, _ = self.promote("--candidate", approved, expect=2)
+        fork = self.fork(plan)
+
+        self.assertNotEqual(approved, head)
+        self.assertTrue(fork["fast_forward"])  # it would fast-forward, and still no
+        self.assertIn("re-sync", fork["stale_evaluation"])
+        self.assertFalse(fork["promotable"])
+
+        import shutil
+
+        shutil.rmtree(self.clone)
+        plan, text = self.promote(expect=2)
+        fork = self.fork(plan)
+        self.assertIn("run /skill-fork-sync bootstrap", fork["error"])
+        self.assertEqual(fork["steps"], [])
+        self.assertIn("REFUSED", text)
 
 
 if __name__ == "__main__":

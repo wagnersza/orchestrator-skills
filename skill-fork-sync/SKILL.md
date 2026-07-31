@@ -34,7 +34,7 @@ Three, and the mode word is part of the invocation:
 |--------|------|-----------|
 | `/skill-fork-sync bootstrap` | Per declared dependency, idempotently: fork upstream into the maintainer's account, clone the fork under `~/.orchestrator/forks/<marketplace-name>/`, add the `upstream` remote, reset the fork's default branch to the **currently-installed** SHA and force-push, write `FORK.md`, then swap the marketplace registration from upstream to the fork. Behaviour-neutral by construction: day one after bootstrap runs exactly the code that ran before it. | [`references/bootstrap.md`](references/bootstrap.md) |
 | `/skill-fork-sync sync [<fork>]` | For one named fork or all of them: resolve the **Pinned SHA** and the **Sync candidate** live from git, diff them, map changed paths to skills, mark each changed skill **consumed** or skipped, allocate the **Run budget**, then evaluate the consumed ones candidate-vs-pinned in a throwaway worktree and report an assertion table with a promote/hold recommendation. A delta touching nothing consumed costs zero runs. | [`references/sync.md`](references/sync.md) |
-| `/skill-fork-sync promote` | On explicit approval only: fast-forward and push the fork's default branch to the candidate, rewrite `FORK.md`'s synced SHA, update the marketplace, then update the plugin — using the update command that matches the dependency's install shape. One step, so fork and install never disagree. Ends by stating that the new skill body loads next session. | [`references/promote.md`](references/promote.md) |
+| `/skill-fork-sync promote` | On explicit approval only, four ordered steps: advance and push the fork's default branch to the candidate as a **fast-forward** — refusing rather than force-pushing if it cannot — rewrite `FORK.md`'s synced SHA, update the marketplace, then update the plugin with the command that matches the dependency's install shape. Marketplace before plugin, because the plugin installs out of the marketplace's clone. One act, so the fork and the install never disagree; ends by stating that the new skill body loads next session. | [`references/promote.md`](references/promote.md) |
 
 Read the mode's reference file before acting. `SKILL.md` names the modes; the
 references own the steps.
@@ -77,10 +77,13 @@ no merge request, and needs no cross-vendor reviewer.
 
 ## Implementation status
 
-The three mode reference files are stubs. Each names what will fill it and which
-work item does so; the mode names above are fixed, so those items inherit the
-invocation surface rather than each inventing one. The deterministic half of a
-sync (delta detection, diff-to-skill mapping, the consumption check, budget
-allocation) is destined for a single seam — a `scripts/fork_state.py` that emits
-the **Sync plan** as JSON and mutates nothing. That script is not in the repo
-yet; it lands with the sync-plan work item.
+All three modes are implemented. Their deterministic halves live in one seam,
+`scripts/fork_state.py`, which emits every plan as JSON and mutates nothing —
+`--bootstrap` for the fork targets and their pins, the default and `--evals` for
+the **Sync plan** and the runs it may spend, `--promote` for the ordered promote
+steps with the fast-forward check and the install-shape decision. Its stdlib-only
+test suite is `scripts/test_fork_state.py`.
+
+**Nothing has yet run against a real fork.** Bootstrap is a human step and has not
+been performed, so `~/.orchestrator/forks/` is empty today; a sync and a promote
+both report that cleanly rather than failing.

@@ -33,6 +33,14 @@ without dropping or rewriting one, printed to stdout for the caller to write:
     python3 -m scripts.fork_state --merge-eval-set --fork mattpocock \\
         --skill code-review --new-assertions new.json --first-seen <candidate-sha>
 
+**Promote plan** — the four ordered steps that turn the dial, each with a status:
+whether the candidate can be taken without rewriting history, the `FORK.md` line
+that records it, and the update command the dependency's install shape calls for.
+Exit 2 when a fork's promote is refused:
+
+    python3 -m scripts.fork_state --promote --fork mattpocock
+    python3 -m scripts.fork_state --promote --fork mattpocock --candidate <sha>
+
 Every fact is derived; none is recorded in this repo. Read-only by construction:
 `git rev-parse`, `git diff --name-only`, `git ls-tree`, `git merge-base
 --is-ancestor`, `git remote get-url`, `git cat-file -e`, `gh repo view`, `gh api
@@ -493,15 +501,6 @@ def bootstrap_steps(target, gh, fork_exists=None):
         fork_exists = gh.repo(fork_repo)["exists"]
     cloned = (clone / ".git").exists()
 
-    def step(n, name, command, status, note):
-        return {
-            "step": n,
-            "name": name,
-            "command": command,
-            "status": status,
-            "note": note,
-        }
-
     steps = [
         step(
             1,
@@ -614,6 +613,16 @@ def bootstrap_steps(target, gh, fork_exists=None):
         )
     )
     return steps
+
+
+def step(n, name, command, status, note):
+    """One ordered step of a plan: what to run, whether it is needed, and why.
+
+    Shared by the bootstrap dry run and the promote plan, because both are read
+    the same way — a numbered list where `done` means "skip it, the effect is
+    already in place" (`bootstrap_steps`, `promote_steps`).
+    """
+    return {"step": n, "name": name, "command": command, "status": status, "note": note}
 
 
 def has_commit(clone, sha):
@@ -1053,6 +1062,423 @@ def build_eval_plan(plan, repo, results_root=None, plugin_root=DEFAULT_PLUGIN_RO
     }
 
 
+# --- promote: the two decisions turning the dial must not get wrong ----------
+
+
+FORK_RECORD = "FORK.md"
+SKILLS_DIR_MARKETPLACE = "skills-dir"
+
+
+def is_ancestor(clone, ancestor, descendant):
+    """Whether `ancestor` is reachable from `descendant` — read-only."""
+    try:
+        git(clone, "merge-base", "--is-ancestor", ancestor, descendant)
+        return True
+    except GitError:
+        return False
+
+
+def fast_forwardable(clone, pinned, candidate):
+    """Whether taking `candidate` only *adds* commits, so no force-push.
+
+    A promote that would rewrite the fork's default branch means the pin moved
+    under the evaluation, and the answer is a re-sync, never a force
+    (`promote.md`). Two shapes qualify, and both leave the remote's history
+    intact:
+
+    - `candidate` is a descendant of the **Pinned SHA** — a literal fast-forward;
+    - the pin diverges from their shared base by nothing but `FORK.md` commits,
+      which is exactly the shape bootstrap leaves behind (`pinned_at`) and every
+      earlier promote adds to. Merging then adds commits and rewrites none.
+
+    Anything else — a real commit on the fork, or a pin ahead of the candidate —
+    is refused with the reason, rather than promoted with a `--force`.
+    """
+    if is_ancestor(clone, pinned, candidate):
+        return True, "candidate is a descendant of the pin — a fast-forward"
+    try:
+        base = git(clone, "merge-base", pinned, candidate)
+        local = changed_paths(clone, base, pinned)
+    except GitError as exc:
+        return False, str(exc)
+    extra = [path for path in local if path != FORK_RECORD]
+    if extra:
+        return False, (
+            f"the fork's default branch carries local changes upstream does not "
+            f"have ({', '.join(extra[:3])}) — merging the candidate would not "
+            "produce the evaluated tree. Re-sync; never force"
+        )
+    return True, (
+        f"the pin diverges from the candidate's history by {FORK_RECORD} only, so "
+        "the merge adds commits and rewrites none"
+    )
+
+
+def plugin_version(clone, sha):
+    """The plugin version declared at `sha`, or None — read-only."""
+    try:
+        manifest = git(clone, "show", f"{sha}:.claude-plugin/plugin.json")
+        return json.loads(manifest).get("version")
+    except (GitError, json.JSONDecodeError):
+        return None
+
+
+def clones_of(root, fork):
+    """Directories directly under `root` that are git clones of this fork's repo.
+
+    Matched on `origin`, not on the directory name: a skills-directory clone is
+    named for the *skill* it holds, which need not be the marketplace name.
+    """
+    wanted = {
+        r.rstrip("/").removesuffix(".git")
+        for r in (fork.get("fork_repo"), fork.get("upstream"))
+        if r
+    }
+    if not wanted or not Path(root).is_dir():
+        return []
+    found = []
+    for path in sorted(Path(root).iterdir()):
+        if not (path / ".git").exists():
+            continue
+        try:
+            origin = git(path, "remote", "get-url", "origin")
+        except GitError:
+            continue
+        if any(origin.rstrip("/").removesuffix(".git").endswith(w) for w in wanted):
+            found.append(path)
+    return found
+
+
+def install_shape(fork, installed_path, repo, skills_dir=None):
+    """Which update command this dependency's install shape calls for.
+
+    `requirements.md`'s three-shape table, applied rather than restated: a plugin
+    takes `claude plugin update <plugin>@<marketplace>`; a clone auto-registered
+    from the skills directory takes `git pull --ff-only`, because
+    `claude plugin update` fails on it (`Plugin not found`, exit 1); a
+    project-level clone takes a `git pull` in the project.
+
+    The discriminators are the two a human reads, in that order: an entry in
+    `installed_plugins.json` (which a `@skills-dir` clone is absent from), then a
+    git clone on disk under either skills directory whose `origin` is this
+    dependency's repo. A dependency that is *both* is the shadowing case
+    `requirements.md` warns about, so it is reported as ambiguous and blocks the
+    step rather than picking one.
+    """
+    skills_dir = Path(skills_dir) if skills_dir else Path.home() / ".claude/skills"
+    name = fork["fork"]
+    installed = installed_shas(installed_path) if Path(installed_path).exists() else {}
+    entry = installed.get(name) or {}
+    plugin_id = entry.get("plugin_id")
+
+    clones = [
+        (label, path)
+        for label, root in (
+            ("skills-dir clone", skills_dir),
+            ("project clone", Path(repo) / ".claude/skills"),
+        )
+        for path in clones_of(root, fork)
+    ]
+
+    if plugin_id and clones:
+        return {
+            "shape": "ambiguous",
+            "command": None,
+            "why": (
+                f"both a plugin install ({plugin_id}) and a clone at "
+                f"{clones[0][1]} — two copies shadowing each other, which "
+                "requirements.md says to resolve rather than update blind"
+            ),
+        }
+    if plugin_id:
+        return {
+            "shape": "plugin",
+            "command": f"claude plugin update {plugin_id}",
+            "why": "installed as a plugin, so the full plugin@marketplace id updates it",
+        }
+    if len(clones) == 1:
+        label, path = clones[0]
+        return {
+            "shape": label,
+            "command": f"git -C {path} pull"
+            + (" --ff-only" if label == "skills-dir clone" else ""),
+            "why": (
+                "a clone under ~/.claude/skills/ is auto-registered under the "
+                "skills-dir marketplace, so it appears in `claude plugin list` but "
+                "`claude plugin update` fails on it (Plugin not found, exit 1)"
+                if label == "skills-dir clone"
+                else "a project-level clone appears in no plugin listing; git owns it"
+            ),
+        }
+    if clones:
+        return {
+            "shape": "ambiguous",
+            "command": None,
+            "why": (
+                "clones in both ~/.claude/skills/ and the project's .claude/skills/ "
+                f"({', '.join(str(p) for _, p in clones)}) — two copies shadowing "
+                "each other, which requirements.md says to resolve first"
+            ),
+        }
+    return {
+        "shape": "unknown",
+        "command": None,
+        "why": (
+            f"no entry for marketplace {name!r} in {installed_path} and no clone "
+            f"under {skills_dir} or {Path(repo) / '.claude/skills'} — read "
+            "`claude plugin list` and pick the command from requirements.md's "
+            "three-shape table before running anything"
+        ),
+    }
+
+
+def records_sha(clone, candidate):
+    """Whether `FORK.md` on the default branch already records `candidate`.
+
+    Read from git rather than the working tree, so an uncommitted edit does not
+    make step 2 look done. This is the one thing `FORK.md` is read *for* — whether
+    the record has caught up — never for what the pin is.
+    """
+    try:
+        return candidate in git(clone, "show", f"{PINNED_REF}:{FORK_RECORD}")
+    except GitError:
+        return False
+
+
+def promote_fork_md(clone, candidate, version=None):
+    """`FORK.md` with its last-synced SHA rewritten to the candidate.
+
+    The one place this skill writes `FORK.md`. It is still never *read back for a
+    decision* — every status in the promote plan comes from git, so a stale record
+    cannot make a promote look done (ADR 0007).
+    """
+    path = Path(clone) / FORK_RECORD
+    if not path.exists():
+        return None, f"no {FORK_RECORD} at {path} — run /skill-fork-sync bootstrap"
+    body = path.read_text()
+    line = f"- **Last-synced SHA:** `{candidate}`" + (f" ({version})" if version else "")
+    new_body, count = re.subn(
+        r"^- \*\*Last-synced SHA:\*\*.*$", lambda _: line, body, flags=re.M
+    )
+    if not count:
+        return None, (
+            f"{path} has no `- **Last-synced SHA:**` line to rewrite — restore the "
+            "five fields bootstrap writes before promoting"
+        )
+    return new_body, None
+
+
+def promote_steps(fork, shape, candidate, ff_ok, ff_reason, already, recorded):
+    """The four ordered steps of a promote, each with a status.
+
+    Order is load-bearing and stated in `promote.md`: the branch moves before the
+    record, and **the marketplace refreshes before the plugin** — the plugin is
+    installed from the marketplace's local clone, so updating the plugin against a
+    stale clone reinstalls the version already in force.
+
+    Status is per step and derived from that step's own effect, which is what makes
+    a promote that failed partway legible: step 1 landing says nothing about step
+    4, so `already` marks step 1 `done` and leaves the rest to their own checks.
+    Steps 3 and 4 have no check at all — the marketplace refresh is a fetch that
+    costs nothing to repeat, and reading the installed SHA back would report false
+    mismatches until a restart, so promote deliberately does not (ADR 0007).
+    """
+    clone = fork["clone"]
+    if already:
+        move = ("done", f"the default branch already carries {candidate[:7]}")
+    elif ff_ok:
+        move = ("todo", ff_reason)
+    else:
+        move = ("refused", ff_reason)
+    blocked = move[0] == "refused"
+
+    return [
+        step(
+            1,
+            "advance the pin",
+            f"git -C {clone} merge --no-edit {candidate} && "
+            f"git -C {clone} push origin {PINNED_REF}",
+            move[0],
+            move[1],
+        ),
+        step(
+            2,
+            FORK_RECORD,
+            f"write {Path(clone) / FORK_RECORD} && git -C {clone} add {FORK_RECORD} && "
+            f'git -C {clone} commit -m "Promote to {candidate[:7]}" && '
+            f"git -C {clone} push origin {PINNED_REF}",
+            "blocked" if blocked else ("done" if recorded else "todo"),
+            f"already records {candidate[:7]}"
+            if recorded
+            else f"records {candidate[:7]} as the synced SHA — a human record, never "
+            "read back for a version decision",
+        ),
+        step(
+            3,
+            "marketplace",
+            f"claude plugin marketplace update {fork['fork']}",
+            "blocked" if blocked else "todo",
+            "refreshes the marketplace's local clone from the fork; the plugin is "
+            "installed out of that clone, so this goes first. Unchecked — a fetch "
+            "costs nothing to repeat",
+        ),
+        step(
+            4,
+            "plugin",
+            shape["command"] or "(shape unresolved — see requirements.md)",
+            "blocked" if blocked or not shape["command"] else "todo",
+            f"{shape['shape']}: {shape['why']}",
+        ),
+    ]
+
+
+def build_promote_plan(
+    forks, repo, installed_path, candidate=None, skills_dir=None
+):
+    """The ordered promote plan per fork. Runs nothing and writes nothing."""
+    plans = []
+    for fork in forks:
+        entry = {"fork": fork["fork"], "clone": fork["clone"]}
+        clone = Path(fork["clone"])
+        if not (clone / ".git").exists():
+            entry.update(
+                error=f"no fork clone at {clone} — run /skill-fork-sync bootstrap",
+                promotable=False,
+                steps=[],
+            )
+            plans.append(entry)
+            continue
+        try:
+            pinned = git(clone, "rev-parse", PINNED_REF)
+            head = git(clone, "rev-parse", CANDIDATE_REF)
+        except GitError as exc:
+            entry.update(error=str(exc), promotable=False, steps=[])
+            plans.append(entry)
+            continue
+
+        target = candidate or head
+        entry.update(
+            pinned_sha=pinned,
+            candidate_sha=target,
+            upstream_head=head,
+            sha_source="git rev-parse (FORK.md is never read)",
+        )
+
+        if candidate and not has_commit(clone, candidate):
+            entry.update(
+                error=(
+                    f"candidate {candidate[:7]} is not in {clone} — fetch upstream, "
+                    "then re-sync"
+                ),
+                promotable=False,
+                steps=[],
+            )
+            plans.append(entry)
+            continue
+        already = is_ancestor(clone, target, pinned)
+        if candidate and not already and git(clone, "rev-parse", candidate) != head:
+            # The approved candidate is no longer upstream's head: upstream moved
+            # after the sync, so the assertion table describes a different tree.
+            # Moot once the pin already carries it — there is nothing left to take.
+            entry["stale_evaluation"] = (
+                f"the approved candidate {candidate[:7]} is not {CANDIDATE_REF} "
+                f"({head[:7]}) any more — upstream moved after the sync, so re-sync "
+                "before promoting"
+            )
+
+        ff_ok, ff_reason = (
+            (True, "already promoted")
+            if already
+            else fast_forwardable(clone, pinned, target)
+        )
+        shape = install_shape(fork, installed_path, repo, skills_dir)
+        version = plugin_version(clone, target)
+        body, record_error = promote_fork_md(clone, target, version)
+
+        recorded = records_sha(clone, target)
+        entry.update(
+            up_to_date=pinned == head and already,
+            already_promoted=already,
+            record_up_to_date=recorded,
+            fast_forward=ff_ok,
+            fast_forward_reason=ff_reason,
+            install_shape=shape,
+            candidate_version=version,
+            steps=promote_steps(
+                fork, shape, target, ff_ok, ff_reason, already, recorded
+            ),
+            fork_md=body,
+            promotable=ff_ok and "stale_evaluation" not in entry,
+        )
+        if record_error:
+            entry["fork_md_error"] = record_error
+        plans.append(entry)
+
+    return {
+        "generated_by": "scripts.fork_state --promote",
+        "mutates": "nothing",
+        "executed": "nothing — running these steps is the maintainer's approved act",
+        "approval": (
+            "explicit and per promote, including on an all-green assertion table "
+            "(ADR 0008)"
+        ),
+        "verifies_installed_sha_afterwards": False,
+        "why_not": (
+            "`claude plugin update` may not refresh the loaded cache until a "
+            "restart, so reading the installed SHA back would report false "
+            "mismatches"
+        ),
+        "takes_effect": "next session — the running one keeps the body it started with",
+        "forks": plans,
+    }
+
+
+def render_promote(plan):
+    """The promote plan as text: the ordered steps and what each one is for."""
+    lines = [
+        "PROMOTE — /skill-fork-sync promote",
+        "Nothing below is executed. Run the steps in order, per fork, and report",
+        "which ones completed if any of them fails partway.",
+        f"Takes effect: {plan['takes_effect']}",
+    ]
+    if not plan["forks"]:
+        return "\n".join(lines + ["", "No fork in scope. Nothing to promote."]) + "\n"
+
+    for fork in plan["forks"]:
+        lines += ["", "=" * 74, f"{fork['fork']}", "=" * 74]
+        if "error" in fork:
+            lines += [f"  REFUSED: {fork['error']}"]
+            continue
+        lines += [
+            f"  pin                {fork['pinned_sha']}",
+            f"  candidate          {fork['candidate_sha']}"
+            + (f"  ({fork['candidate_version']})" if fork["candidate_version"] else ""),
+            f"  fast-forward       {'yes' if fork['fast_forward'] else 'NO'} — "
+            f"{fork['fast_forward_reason']}",
+            f"  install shape      {fork['install_shape']['shape']}",
+        ]
+        if fork.get("stale_evaluation"):
+            lines += [f"  STALE: {fork['stale_evaluation']}"]
+        if fork.get("fork_md_error"):
+            lines += [f"  {FORK_RECORD}: {fork['fork_md_error']}"]
+        if not fork["promotable"]:
+            lines += ["", "  REFUSED — nothing was promoted. Re-sync; never force."]
+        lines += ["", "  Steps, in the order they must happen:"]
+        for entry in fork["steps"]:
+            lines += [
+                f"    {entry['step']}. [{entry['status'].upper():>7}] {entry['name']}",
+                f"       run: {entry['command']}",
+                f"       {entry['note']}",
+            ]
+
+    lines += [
+        "",
+        "=" * 74,
+        f"The installed SHA is not checked afterwards: {plan['why_not']}",
+    ]
+    return "\n".join(lines) + "\n"
+
+
 # --- CLI --------------------------------------------------------------------
 
 
@@ -1060,8 +1486,9 @@ def main(argv=None):
     parser = argparse.ArgumentParser(
         prog="python3 -m scripts.fork_state",
         description=(
-            "Emit the Sync plan for the pinned skill forks as JSON, or the "
-            "bootstrap dry run with --bootstrap. Mutates nothing either way."
+            "Emit the Sync plan for the pinned skill forks as JSON, the bootstrap "
+            "dry run with --bootstrap, or the promote plan with --promote. Mutates "
+            "nothing in any mode."
         ),
     )
     parser.add_argument("--fork", help="plan one discovered fork by marketplace name")
@@ -1082,6 +1509,24 @@ def main(argv=None):
         action="store_true",
         help="extend a committed eval set with newly drafted assertions and print "
         "the merged set; writes nothing",
+    )
+    parser.add_argument(
+        "--promote",
+        action="store_true",
+        help="print the promote plan: the four ordered steps, whether the candidate "
+        "can be taken without a force-push, and the update command the install "
+        "shape calls for. Promotes nothing. Exit 2 if any fork is refused",
+    )
+    parser.add_argument(
+        "--candidate",
+        help="with --promote, the approved candidate SHA (default: upstream/main). A "
+        "candidate that is no longer upstream's head is reported as a stale "
+        "evaluation",
+    )
+    parser.add_argument(
+        "--skills-dir",
+        help="the skills directory a @skills-dir clone would live in "
+        "(default: ~/.claude/skills)",
     )
     parser.add_argument("--skill", help="with --merge-eval-set, the skill's eval set")
     parser.add_argument(
@@ -1117,7 +1562,7 @@ def main(argv=None):
     parser.add_argument(
         "--json",
         action="store_true",
-        help="with --bootstrap, emit the plan as JSON instead of text",
+        help="with --bootstrap or --promote, emit the plan as JSON instead of text",
     )
     parser.add_argument(
         "--clone",
@@ -1231,6 +1676,17 @@ def main(argv=None):
                 )
 
     repo = Path(args.repo).resolve()
+
+    if args.promote:
+        plan = build_promote_plan(
+            forks, repo, args.installed, args.candidate, args.skills_dir
+        )
+        if args.json:
+            print(json.dumps(plan, indent=args.indent))
+        else:
+            print(render_promote(plan), end="")
+        return 0 if all(f.get("promotable") for f in plan["forks"]) else 2
+
     plan = build_plan(forks, repo, args.budget)
     if args.evals:
         try:
