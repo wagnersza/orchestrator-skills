@@ -21,6 +21,8 @@ python3 -c "import json;p=json.load(open('$HOME/.claude/plugins/installed_plugin
 python3 -c "import json;d=json.load(open('$HOME/.claude.json'));print('mcp:', list(d.get('mcpServers',{}).keys()))"
 # playwright-cli skill (this repo)
 ls playwright-cli/SKILL.md 2>/dev/null && echo "playwright-cli skill present"
+# prompt-improver skill (user- or project-level)
+ls ~/.claude/skills/prompt-improver/SKILL.md .claude/skills/prompt-improver/SKILL.md 2>/dev/null
 ```
 
 ## Always required
@@ -29,6 +31,7 @@ ls playwright-cli/SKILL.md 2>/dev/null && echo "playwright-cli skill present"
 |-----|-----|-------|---------|
 | **git** | worktrees, branches | `command -v git` | preinstalled on macOS / `brew install git` |
 | **mattpocock-skills** (plugin) | tracker config (`/setup-matt-pocock-skills`) + `to-tickets`/`to-spec` conventions the resolver reads | plugin check above | `claude plugin marketplace add mattpocock/skills && claude plugin install mattpocock-skills@mattpocock` — repo <https://github.com/mattpocock/skills> |
+| **prompt-improver** (skill) | **owns all worker/review prompt composition** — the per-model tuning rules and the code-review coverage rule. The orchestrator drafts a prompt and runs it through this skill; it holds no prompting rules of its own | `ls ~/.claude/skills/prompt-improver/SKILL.md` | `git clone https://github.com/wagnersza/prompt-improver.git ~/.claude/skills/prompt-improver` (per-project: clone to `<project>/.claude/skills/prompt-improver`) — auto-discovered next session |
 | **ponytail** (plugin) | keeps workers lazy/minimal; the completion contract references it | plugin check above | `claude plugin marketplace add DietrichGebert/ponytail && claude plugin install ponytail@ponytail` |
 | **playwright-cli** (skill) | UI evidence screenshots the completion contract requires | `ls playwright-cli/SKILL.md` | shipped in this plugin; install browsers with `playwright install` (<https://playwright.dev>) |
 | **codebase-memory-mcp** | code discovery for workers (search_graph, trace_path) | MCP check above | **manual** — no public package resolved; if a binary exists (e.g. `~/.local/bin/codebase-memory-mcp`), register it: `claude mcp add codebase-memory-mcp <path-to-binary>`. Otherwise install per its own docs, then `claude mcp add`. |

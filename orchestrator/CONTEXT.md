@@ -45,11 +45,15 @@ An optional review of a worker's output by a second worker running a **different
 **Review round**:
 One cycle of adversarial review: the review worker posts a verdict (approve / request-changes + findings). On **request-changes**, the orchestrator re-prompts the **original impl worker** with the findings to fix, then re-reviews. Bounded at **3 rounds**. After approve — or after the 3rd round regardless — the orchestrator gathers evidence and moves the item to **human review**. The human reviews after the fixes; merge stays a human step.
 
-**Prompting guide**:
-The per-model reference the orchestrator follows when composing a spawn prompt. Two guides, vendored into `references/prompting/`: opus-5 and sonnet-5. Each model maps to one guide. GPT-5.6 has two tiers — **sol** (follows the opus-5 guide) and **terra** (follows the sonnet-5 guide). Read alongside `references/prompting/_composing.md`, the model-independent rules for every worker prompt.
+**prompt-improver**:
+The external skill that owns **all** prompt composition — the diagnosis checklist, the shared rules (front-load the spec, positive examples over prohibitions, no stale verification/status scaffolding, coverage-not-filtering for code review), and the per-model tuning. A dependency, not vendored: <https://github.com/wagnersza/prompt-improver>. The orchestrator drafts a prompt and runs it through this skill; it holds no prompting rules of its own, so the rules never drift out of sync with the upstream guides.
+_Avoid_: prompting guide, composing rules (both were vendored files, now removed).
 
-**Composing rules**:
-The model-independent half of prompt composition, in `references/prompting/_composing.md`: whole spec in the first turn, center + edges, named artifacts, positive examples over prohibitions, scope stated per item, and the stale scaffolding to delete (verification steps, forced status cadence, thinking-off rules). A worker prompt is an agentic-pipeline prompt — tight and finishable — so open-ended senior-partner framing does not apply, but everything above does.
+**Tuning profile**:
+Which of `prompt-improver`'s per-model rule sets a spawn prompt uses. Two: **Claude Opus 5** and **Claude Sonnet 5**. `references/models.md` maps each supported model to one — GPT-5.6's **sol** tier takes the Opus 5 profile, **terra** the Sonnet 5 profile.
+
+**Agentic-pipeline prompt**:
+What a worker prompt is: deterministic, complete in one turn, finishable unattended. `prompt-improver` treats this as an explicit case — it keeps the tight task framing and the checklist and applies only the model tuning, rather than doing its open senior-partner rewrite. The orchestrator says so when invoking it.
 
 **Tracker**:
 Where work items live (GitHub / GitLab / local markdown). The orchestrator does not own a tracker abstraction — it reuses the mattpocock engineering skills' config, written to `docs/agents/issue-tracker.md` by `/setup-matt-pocock-skills`.

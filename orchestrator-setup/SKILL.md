@@ -88,7 +88,8 @@ the user to run.
 Scope — only the chosen pieces apply:
 
 - **Always:** git, the `mattpocock-skills` plugin, the `ponytail` plugin, the
-  `playwright-cli` skill (ships with this plugin — nothing to install),
+  `prompt-improver` skill (all worker/review prompt composition runs through it),
+  the `playwright-cli` skill (ships with this plugin — nothing to install),
   `codebase-memory-mcp`, and the tracker CLI the tracker config names
   (`gh` / `glab` / none for local).
 - **tool:** the one in config (`orca` / `cmux` / `herdr`).
@@ -104,6 +105,7 @@ For each needed dep, run its check command. **If present, skip.** If missing,
 install it by running the command from `requirements.md`:
 
 - **Plugins** — `claude plugin marketplace add <slug> && claude plugin install <name>@<marketplace>` (mattpocock, ponytail). Verified shell commands.
+- **Skills** — `prompt-improver` is a plain git clone into `~/.claude/skills/` (see `requirements.md`); it's auto-discovered next session, so mention a restart is needed before the first spawn.
 - **CLIs** — the documented installer (`brew install gh`/`glab`, `npm install -g @anthropic-ai/claude-code`, etc.).
 - **MCP** — `claude mcp add <name> <command/url>` once the server binary/endpoint is known.
 

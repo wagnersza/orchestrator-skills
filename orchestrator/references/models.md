@@ -1,33 +1,35 @@
 # Model registry
 
 The frontier models the orchestrator supports, each with its **vendor**, the
-**prompting guide** it follows, and its **effort** range. When composing a spawn
-or review prompt, load the guide named here plus
-[`prompting/_composing.md`](prompting/_composing.md) (the shared rules) and follow
-both.
+**tuning profile** its prompt follows, and its **effort** range.
+
+Prompt *content* is not defined here. The orchestrator composes every spawn and
+review prompt through the **`prompt-improver` skill** (a dependency — see
+[`requirements.md`](requirements.md)), which owns the per-model tuning rules. This
+table only says which of that skill's model profiles applies.
 
 Adversarial review requires the reviewer's **vendor** to differ from the
 implementer's — this table is where the orchestrator looks up each side's vendor
 to assert that.
 
-| Model            | Vendor    | Prompting guide          | Default effort | Notes |
-|------------------|-----------|--------------------------|----------------|-------|
-| `opus-5`         | anthropic | `prompting/opus-5.md`    | `high`         | Long-horizon agentic coding; give the full spec up front. Quality holds at `low`/`medium`. |
-| `sonnet-5`       | anthropic | `prompting/sonnet-5.md`  | `high`         | Coding + agentic; literal instruction following. |
-| `gpt-5.6-sol`    | openai    | `prompting/opus-5.md`    | `high`         | "sol" tier — reuses the opus-5 guide. |
-| `gpt-5.6-terra`  | openai    | `prompting/sonnet-5.md`  | `high`         | "terra" tier — reuses the sonnet-5 guide. |
+| Model            | Vendor    | prompt-improver profile | Default effort | Notes |
+|------------------|-----------|-------------------------|----------------|-------|
+| `opus-5`         | anthropic | Claude Opus 5           | `high`         | Long-horizon agentic coding; give the full spec up front. Quality holds at `low`/`medium`. |
+| `sonnet-5`       | anthropic | Claude Sonnet 5         | `high`         | Coding + agentic; literal instruction following. |
+| `gpt-5.6-sol`    | openai    | Claude Opus 5           | `high`         | "sol" tier — closest to the Opus 5 profile. |
+| `gpt-5.6-terra`  | openai    | Claude Sonnet 5         | `high`         | "terra" tier — closest to the Sonnet 5 profile. |
 
 Notes:
 
-- **Frontier only.** This version supports only the models above. A model not in this table is unsupported — the setup phase should reject it rather than guess a guide.
-- **`gpt-5.6` alone is ambiguous** — it has two tiers. Config must name `gpt-5.6-sol` or `gpt-5.6-terra` so the guide is unambiguous.
-- The **harness** decides how a model id becomes a `--model` flag value and how effort is expressed (see `harnesses/<h>.md`); this table is only about vendor, guide, and effort semantics — not the flag strings.
+- **Frontier only.** This version supports only the models above. A model not in this table is unsupported — the setup phase should reject it rather than guess a profile.
+- **`gpt-5.6` alone is ambiguous** — it has two tiers. Config must name `gpt-5.6-sol` or `gpt-5.6-terra` so the profile is unambiguous.
+- The **harness** decides how a model id becomes a `--model` flag value and how effort is expressed (see `harnesses/<h>.md`); this table is only about vendor, profile, and effort semantics — not the flag strings.
 
 ## Effort
 
 Effort tunes how much the model **thinks** — capability against tokens and
 latency. It does *not* shorten the visible response; prompt for length
-separately (see `prompting/_composing.md`).
+separately (a `prompt-improver` shared rule).
 
 | Effort   | Use |
 |----------|-----|

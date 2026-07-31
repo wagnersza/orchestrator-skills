@@ -20,6 +20,6 @@ Do not end the turn while any box is unchecked. If you catch yourself about to
 stop at "next step is …", that's the stall — keep going and actually do it.
 
 (This file is the **completion contract**, not a verification instruction — it
-lists work to *do*, so it isn't the stale scaffolding `prompting/_composing.md`
-tells you to strip. Don't add a "re-check your work" or "verify again" box: these
-models self-verify, and the instruction only costs tokens.)
+lists work to *do*, so it isn't the stale scaffolding `prompt-improver` tells you
+to strip. Don't add a "re-check your work" or "verify again" box: these models
+self-verify, and the instruction only costs tokens.)

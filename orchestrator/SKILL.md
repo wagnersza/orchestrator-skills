@@ -37,10 +37,13 @@ file is missing, run `/setup-matt-pocock-skills` first.
 
 **Preflight the config's dependencies.** Before the first spawn of a session,
 confirm the tool binary, the harness binary (and the review harness if
-`review.enabled`), and the tracker CLI are present — `command -v <bin>`. If any
+`review.enabled`), and the tracker CLI are present — `command -v <bin>` — plus the
+**`prompt-improver` skill**, which every spawn and review prompt goes through
+(`ls ~/.claude/skills/prompt-improver/SKILL.md` or the project-level path). If any
 is missing, stop and point the user at `/orchestrator-setup` (it installs deps);
 the full catalog is [`references/requirements.md`](references/requirements.md).
-Don't try to spawn against a missing binary.
+Don't try to spawn against a missing binary — or compose a prompt without
+`prompt-improver`.
 
 Throughout, address a worker by its **slug** (the work-item's ticket prefix, e.g.
 `#38 B5 · Contacts` → `b5-contacts`).
@@ -149,28 +152,32 @@ file-based **checklist** (works across every harness, unlike claude-only
 - The prompt tells the worker to **work the checklist top to bottom, ticking each
   box as it completes it, and not to end the turn while any box is unchecked.**
 
-Compose the prompt from **two** references: the shared rules in
-[`references/prompting/_composing.md`](references/prompting/_composing.md), plus
-the **model's guide** (look up the role's model in `references/models.md` and read
-the guide it names in `references/prompting/`). The shared rules in one breath:
+**Prompt quality is not this skill's job — it's `prompt-improver`'s.** That skill
+(a dependency, see [`references/requirements.md`](references/requirements.md)) owns
+the diagnosis checklist, the shared rules, and the per-model tuning. Don't restate
+its rules here or work from memory of them.
 
-- **Whole spec, first turn.** Task, intent, constraints, acceptance criteria,
-  checklist, recipe, evidence bar. A worker has no human to answer a follow-up.
-- **Center + edges.** One line on the outcome this item is for, and an explicit
-  list of what *not* to touch. Unstated boundaries get widened.
-- **Name every artifact.** Item id, files/dirs, run recipe + its ports, migration
-  dir, the tracker command for the review note. Not "the API", not "our tests".
-- **Positive examples over prohibitions** — except the scope edges, which are
-  legitimately negative.
-- **State scope per item.** "every route, not just the first" — no model here
-  generalizes an instruction to a sibling, and literalism sharpens at low effort.
-- **No stale scaffolding.** Drop verification steps ("double-check", "use a
-  subagent to verify"), forced status cadence ("summarize every 3 tool calls"),
-  and any thinking-off rule. These models verify and narrate on their own; the
-  instructions only burn tokens (and thinking-off rules increase tag leakage).
-- **Cap delegation** — a worker inside a worktree shouldn't fan out.
-- **Calibrate written length** — review note and PR/MR description run long by
-  default; ask for substance without padding.
+1. **Draft** the worker prompt: the task, the acceptance criteria, the checklist,
+   the project recipe, the evidence bar, the scope edges.
+2. **Run it through `prompt-improver`**, naming the role's model so it applies the
+   right profile (look the model up in [`references/models.md`](references/models.md)
+   → its `prompt-improver` profile). Send the improved prompt, not the draft.
+3. **Tell it this is an agentic-pipeline prompt.** `prompt-improver` handles this
+   case explicitly: it keeps the tight task framing and the checklist, and applies
+   only the model-specific tuning. A worker prompt must be deterministic and
+   finishable unattended, so the open senior-partner rewrite must **not** be
+   applied — say so when invoking, or it may reshape the contract.
+
+Three things `prompt-improver` can't know, so state them in the draft:
+
+- **Whole spec, first turn.** A worker has no human to answer a follow-up, so
+  "ask the user" is never an option — where something is genuinely unknown, name
+  the assumption to take instead.
+- **Cap delegation.** A worker already inside a worktree shouldn't fan out;
+  `prompt-improver`'s subagent cap is the wording to use.
+- **Scope edges are the exception to positive-framing.** Name the neighbouring
+  files, features, and refactors the worker must not touch — negatively, on
+  purpose.
 
 Bake in the project recipe: boot the app with `run_recipe` on the per-item `ports`
 for evidence; satisfy `db_gate` if configured; meet the `evidence` bar (real-data
@@ -211,14 +218,14 @@ When a work item reaches the review state and review is enabled:
    Assert the review model's vendor differs from the impl model's
    (`references/models.md`) — refuse if same vendor.
 2. **Prompt it to review** the diff/MR against the work item's acceptance
-   criteria, per `_composing.md` + the review model's guide. **Ask for coverage,
-   filter downstream** — never "only high-severity", "be conservative", or "don't
-   nitpick": every model here now obeys that literally and drops real bugs. Use:
-   *"Report every issue you find, including ones you are uncertain about or
-   consider low-severity. Do not filter for importance or confidence at this stage
-   — a separate step will. For each finding include your confidence and an
-   estimated severity."* The orchestrator ranks when it reads the verdict. It posts
-   a verdict on the work item: **approve** or **request-changes + findings**.
+   criteria — drafted, then run through `prompt-improver` for the review model's
+   profile, same as a spawn prompt. Say it's a **code-review prompt**:
+   `prompt-improver` has a specific rule for these — **ask for coverage, filter
+   downstream** — and it's the one that matters most here. Never "only
+   high-severity", "be conservative", or "don't nitpick": every model here obeys
+   that literally and silently drops real bugs. The orchestrator ranks when it
+   reads the verdict. The reviewer posts a verdict on the work item: **approve**
+   or **request-changes + findings**.
 3. **On request-changes:** re-prompt the **original impl worker** with the
    findings to fix, then re-review. Loop, bounded at `review.rounds` (default 3).
    Each fix round steps the impl worker's effort up one rung — a finding the model

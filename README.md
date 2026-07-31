@@ -59,8 +59,10 @@ catalog with check + install commands:
 [`orchestrator/references/requirements.md`](orchestrator/references/requirements.md).
 
 **Always:** git · `mattpocock-skills` plugin (tracker config + ticket
-conventions) · `ponytail` plugin · `playwright-cli` (ships in this plugin) ·
-`codebase-memory-mcp` · a tracker CLI (`gh`/`glab`, or none for local markdown).
+conventions) · [`prompt-improver`](https://github.com/wagnersza/prompt-improver)
+skill (owns all worker/review prompt composition) · `ponytail` plugin ·
+`playwright-cli` (ships in this plugin) · `codebase-memory-mcp` · a tracker CLI
+(`gh`/`glab`, or none for local markdown).
 
 **Your chosen tool:** `orca` (its own CLI; needs `orca open` running) / `cmux` /
 `herdr` — fill in `orchestrator/references/tools/<tool>.md` for cmux/herdr first.
@@ -127,12 +129,10 @@ orchestrator/
   docs/adr/                     # design decisions
   references/
     requirements.md            # deps: check + install
-    models.md                  # model -> vendor -> prompting guide
+    models.md                  # model -> vendor -> prompt-improver profile
     checklist.template.md
     tools/{_operations,orca,cmux,herdr}.md
     harnesses/{claude,codex,pi,copilot,cursor}.md
-    prompting/_composing.md    # model-independent prompt rules
-    prompting/{opus-5,sonnet-5}.md   # vendored prompt guides
     examples/fullstack-app.md
 orchestrator-setup/
   SKILL.md · orchestrator.template.md
