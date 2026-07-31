@@ -1,0 +1,2 @@
+# Worker checklist files — live in the worktree, torn down with it
+.orchestrator/
