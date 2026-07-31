@@ -19,6 +19,20 @@ dry run and executed by nobody:
     python3 -m scripts.fork_state --bootstrap --json    # the same plan as JSON
     python3 -m scripts.fork_state --bootstrap --fork ponytail
 
+**Eval plan** — the sync plan turned into the runs a sync may actually spend: a
+candidate/pinned worktree pair per **Consumed skill**, the committed eval set each
+one extends, the transcript paths, and the budget accounting with everything left
+uncovered named:
+
+    python3 -m scripts.fork_state --evals               # every fork
+    python3 -m scripts.fork_state --evals --fork mattpocock
+
+**Eval-set merge** — extend a committed eval set with newly drafted assertions
+without dropping or rewriting one, printed to stdout for the caller to write:
+
+    python3 -m scripts.fork_state --merge-eval-set --fork mattpocock \\
+        --skill code-review --new-assertions new.json --first-seen <candidate-sha>
+
 Every fact is derived; none is recorded in this repo. Read-only by construction:
 `git rev-parse`, `git diff --name-only`, `git ls-tree`, `git merge-base
 --is-ancestor`, `git remote get-url`, `git cat-file -e`, `gh repo view`, `gh api
@@ -48,6 +62,18 @@ CANDIDATE_REF = "upstream/main"
 DEFAULT_MARKETPLACES = Path.home() / ".claude/plugins/known_marketplaces.json"
 DEFAULT_INSTALLED = Path.home() / ".claude/plugins/installed_plugins.json"
 DEFAULT_FORKS_DIR = Path.home() / ".orchestrator/forks"
+
+# The directory the plugin system owns. Claude Code may reset or re-clone
+# anything under it on `marketplace update`, so no fork clone, candidate worktree
+# or eval artefact may live there (ADR 0007). Enforced, not merely intended:
+# `check_outside_plugin_root()` refuses to emit an eval plan that names a path
+# inside it.
+DEFAULT_PLUGIN_ROOT = Path.home() / ".claude/plugins"
+
+# Eval sets are committed here, one file per fork per skill, extended each sync.
+EVAL_SET_DIR = "evals"
+# Results and transcripts are machine-local noise, gitignored via `.orchestrator/`.
+RESULTS_DIR = ".orchestrator/fork-sync"
 
 # Directories never grepped for a skill reference: machine-local noise, vendored
 # trees, and git's own object store.
@@ -733,6 +759,300 @@ def build_plan(forks, repo, ceiling=RUN_BUDGET):
     }
 
 
+# --- the eval plan: the Sync plan turned into the runs a sync may spend -------
+
+
+class PluginRootError(RuntimeError):
+    """A planned path fell inside the directory the plugin system owns.
+
+    Raised instead of reported, so no eval plan naming such a path is ever
+    emitted: the guarantee behind "the live plugin cache is unmodified" is that
+    the plan the flow follows cannot contain a path under it (ADR 0007).
+    """
+
+
+def check_outside_plugin_root(paths, plugin_root):
+    """Refuse any planned path inside `plugin_root`. Returns the paths checked."""
+    root = Path(plugin_root).expanduser().resolve()
+    for path in paths:
+        resolved = Path(path).expanduser().resolve()
+        if resolved == root or root in resolved.parents:
+            raise PluginRootError(
+                f"planned path {resolved} is inside the plugin system's directory "
+                f"{root} — Claude Code may reset or re-clone that tree on "
+                "`marketplace update`, and an eval must never write there"
+            )
+    return [str(p) for p in paths]
+
+
+def loads_via_hook(clone, sha):
+    """Whether the plugin at `sha` loads through a session hook.
+
+    A `hooks` key in `.claude-plugin/plugin.json` means the skill body reaches a
+    session via a SessionStart hook rather than skill invocation (`ponytail`),
+    and path injection cannot exercise a hook. Such a fork's assertions test the
+    skill body's *content* instead of its runtime behaviour — weaker evidence,
+    named in the plan rather than papered over (ADR 0008).
+    """
+    try:
+        manifest = git(clone, "show", f"{sha}:.claude-plugin/plugin.json")
+    except GitError:
+        return False
+    try:
+        return bool(json.loads(manifest).get("hooks"))
+    except json.JSONDecodeError:
+        return False
+
+
+def eval_set_path(repo, fork, skill):
+    """Where the committed eval set for one fork's one skill lives.
+
+    Per fork per skill, under `evals/`, so a sync extends exactly one file and
+    two forks that happen to ship a same-named skill never collide.
+    """
+    return Path(repo) / EVAL_SET_DIR / fork / f"{skill}.json"
+
+
+def read_eval_set(path, fork, skill):
+    """The committed eval set, or the empty skeleton a first sync would write."""
+    path = Path(path)
+    if not path.exists():
+        return {
+            "skill_name": skill,
+            "fork": fork,
+            "assertions": [],
+        }, False
+    data = json.loads(path.read_text())
+    data.setdefault("skill_name", skill)
+    data.setdefault("fork", fork)
+    data.setdefault("assertions", [])
+    return data, True
+
+
+def merge_eval_set(existing, new_assertions, first_seen=""):
+    """Extend an eval set — never rewrite or drop one.
+
+    Existing assertions keep their text, their order and their
+    `first_seen_candidate`, so results stay comparable across syncs; a new
+    assertion is appended only if its `name` is not already present. An incoming
+    assertion that reuses an existing name is reported as `unchanged` rather than
+    overwriting it: a redrafted assertion under an old name would silently break
+    comparability with every earlier sync.
+    """
+    merged = dict(existing)
+    kept = [dict(a) for a in existing.get("assertions", [])]
+    names = {a.get("name") for a in kept}
+
+    added, unchanged = [], []
+    for assertion in new_assertions:
+        name = assertion.get("name")
+        if not name:
+            raise ValueError("every assertion needs a `name` — the table is read by name")
+        if name in names:
+            unchanged.append(name)
+            continue
+        entry = dict(assertion)
+        entry.setdefault("first_seen_candidate", first_seen)
+        kept.append(entry)
+        names.add(name)
+        added.append(name)
+
+    merged["assertions"] = kept
+    return {
+        "eval_set": merged,
+        "kept": [a["name"] for a in existing.get("assertions", [])],
+        "added": added,
+        "unchanged_kept_as_is": unchanged,
+        "total_assertions": len(kept),
+    }
+
+
+def skill_evals(fork, skill, repo, results_root, hook_loaded):
+    """The two runs one **Consumed skill** costs, and everything they need."""
+    clone = Path(fork["clone"])
+    candidate = fork["candidate_sha"]
+    pinned = fork["pinned_sha"]
+    worktree_root = clone.parent / ".worktrees" / fork["fork"]
+    candidate_tree = worktree_root / f"{candidate[:7]}-candidate"
+    pinned_tree = worktree_root / f"{pinned[:7]}-pinned"
+    results = Path(results_root) / f"{fork['fork']}-{candidate[:7]}"
+
+    set_path = eval_set_path(repo, fork["fork"], skill["skill"])
+    eval_set, existed = read_eval_set(set_path, fork["fork"], skill["skill"])
+
+    return {
+        "skill": skill["skill"],
+        "skill_path_in_repo": skill["path"],
+        "changed_paths": skill["changed_paths"],
+        "referenced_by": skill.get("referenced_by", []),
+        "runs": skill["runs"],
+        "eval_set": {
+            "path": str(set_path.relative_to(Path(repo))),
+            "exists": existed,
+            "action": "extend" if existed else "create",
+            "assertions_now": len(eval_set["assertions"]),
+            "assertion_names": [a.get("name") for a in eval_set["assertions"]],
+            "committed": True,
+        },
+        "assertion_target": (
+            "skill body content — this plugin loads via a session hook, which "
+            "path injection cannot exercise"
+            if hook_loaded
+            else "runtime behaviour under path injection"
+        ),
+        "loads_via_hook": hook_loaded,
+        "worktrees": {
+            "candidate": {
+                "path": str(candidate_tree),
+                "ref": candidate,
+                "skill_dir": str(candidate_tree / skill["path"]),
+            },
+            "pinned": {
+                "path": str(pinned_tree),
+                "ref": pinned,
+                "skill_dir": str(pinned_tree / skill["path"]),
+                "why": "baseline is the Pinned SHA, not no-skill — the question is "
+                "whether upstream regressed",
+            },
+        },
+        "transcripts": {
+            "candidate": str(results / f"{skill['skill']}-candidate.md"),
+            "pinned": str(results / f"{skill['skill']}-pinned.md"),
+        },
+        "results_dir": str(results),
+    }
+
+
+def build_eval_plan(plan, repo, results_root=None, plugin_root=DEFAULT_PLUGIN_ROOT):
+    """Turn a Sync plan into the eval plan: what runs, where, against what.
+
+    Adds no run of its own and spends nothing — it only says what the judgment
+    half may spend, and refuses to name a path inside the plugin system's
+    directory (`check_outside_plugin_root`).
+    """
+    repo = Path(repo)
+    results_root = Path(results_root) if results_root else repo / RESULTS_DIR
+    budget = plan["run_budget"]
+
+    forks, planned_paths, uncovered = [], [], []
+    for fork in plan["forks"]:
+        entry = {
+            "fork": fork["fork"],
+            "clone": fork["clone"],
+        }
+        if "error" in fork:
+            entry.update(
+                error=fork["error"],
+                bootstrapped=False,
+                evals=[],
+                runs_planned=0,
+                verdict="cannot evaluate",
+                verdict_reason=(
+                    "no fork clone — run /skill-fork-sync bootstrap first; nothing "
+                    "was spent"
+                ),
+            )
+            forks.append(entry)
+            continue
+
+        entry.update(
+            pinned_sha=fork["pinned_sha"],
+            candidate_sha=fork["candidate_sha"],
+            bootstrapped=True,
+            up_to_date=fork["up_to_date"],
+        )
+        hook_loaded = (
+            False if fork["up_to_date"] else loads_via_hook(fork["clone"], fork["candidate_sha"])
+        )
+        evals = [
+            skill_evals(fork, skill, repo, results_root, hook_loaded)
+            for skill in fork.get("skills", [])
+            if skill.get("runs")
+        ]
+        for item in evals:
+            planned_paths += [
+                item["worktrees"]["candidate"]["path"],
+                item["worktrees"]["pinned"]["path"],
+                item["results_dir"],
+            ]
+
+        for skill in fork.get("skipped", []):
+            uncovered.append(
+                {
+                    "fork": fork["fork"],
+                    "skill": skill["skill"],
+                    "reason": skill["reason"],
+                    "cost": 0,
+                }
+            )
+        for drop in fork.get("dropped_for_budget", []):
+            uncovered.append({**drop, "cost": 0})
+
+        entry.update(
+            evals=evals,
+            runs_planned=sum(item["runs"] for item in evals),
+            loads_via_hook=hook_loaded,
+        )
+        if fork["up_to_date"]:
+            entry.update(
+                verdict="promotable",
+                verdict_reason="no delta — the pin is already the candidate",
+            )
+        elif not evals:
+            entry.update(
+                verdict="promotable",
+                verdict_reason=(
+                    "the delta touches nothing this repo consumes, so zero eval "
+                    "runs are spent"
+                ),
+            )
+        else:
+            entry.update(
+                verdict="needs evaluation",
+                verdict_reason=(
+                    f"{len(evals)} consumed skill(s) changed; the promote-or-hold "
+                    "recommendation comes from the assertion table, and the "
+                    "decision stays the maintainer's"
+                ),
+            )
+        forks.append(entry)
+
+    check_outside_plugin_root(planned_paths, plugin_root)
+
+    runs_planned = sum(f["runs_planned"] for f in forks)
+    return {
+        "generated_by": "scripts.fork_state --evals",
+        "mutates": "nothing",
+        "consuming_repo": str(repo),
+        "plugin_root_untouched": str(Path(plugin_root).expanduser()),
+        "candidate_loaded_by": "path injection into the eval worker's prompt",
+        "budget": {
+            "ceiling": budget["ceiling"],
+            "runs_per_skill": budget["runs_per_skill"],
+            "runs_planned": runs_planned,
+            "spent_on": [
+                {
+                    "fork": fork["fork"],
+                    "skill": item["skill"],
+                    "runs": item["runs"],
+                    "split": "1 candidate + 1 pinned baseline",
+                }
+                for fork in forks
+                for item in fork["evals"]
+            ],
+            "remaining": budget["ceiling"] - runs_planned,
+            "remaining_note": "held as a tiebreak, not spent to fill the ceiling",
+            "uncovered": uncovered,
+        },
+        "promotes": "nothing — the recommendation is advisory and the maintainer decides",
+        "rejecting_a_candidate": (
+            "remove the candidate worktree; the live install was never modified, so "
+            "there is no rollback"
+        ),
+        "forks": forks,
+    }
+
+
 # --- CLI --------------------------------------------------------------------
 
 
@@ -749,6 +1069,50 @@ def main(argv=None):
         "--bootstrap",
         action="store_true",
         help="print the bootstrap dry run instead of the sync plan; takes no action",
+    )
+    parser.add_argument(
+        "--evals",
+        action="store_true",
+        help="print the eval plan derived from the sync plan: the worktree pair, "
+        "eval set and transcript paths per consumed skill, plus the budget "
+        "accounting. Spends no run and creates no worktree",
+    )
+    parser.add_argument(
+        "--merge-eval-set",
+        action="store_true",
+        help="extend a committed eval set with newly drafted assertions and print "
+        "the merged set; writes nothing",
+    )
+    parser.add_argument("--skill", help="with --merge-eval-set, the skill's eval set")
+    parser.add_argument(
+        "--new-assertions",
+        help="with --merge-eval-set, a JSON file holding the drafted assertions "
+        "(a list, or an object with an `assertions` list)",
+    )
+    parser.add_argument(
+        "--first-seen",
+        default="",
+        help="with --merge-eval-set, the candidate SHA new assertions were drafted "
+        "against",
+    )
+    parser.add_argument(
+        "--check-path",
+        action="append",
+        default=[],
+        help="assert this path is outside the plugin system's directory and exit; "
+        "how the flow checks a worktree path the configured tool chose rather "
+        "than one this script planned. Exit 2 if it is inside",
+    )
+    parser.add_argument(
+        "--results-root",
+        help="where eval results and transcripts would go "
+        f"(default: <repo>/{RESULTS_DIR}, gitignored)",
+    )
+    parser.add_argument(
+        "--plugin-root",
+        default=str(DEFAULT_PLUGIN_ROOT),
+        help="the directory the plugin system owns; no planned path may fall "
+        "inside it (default: ~/.claude/plugins)",
     )
     parser.add_argument(
         "--json",
@@ -785,6 +1149,40 @@ def main(argv=None):
     args = parser.parse_args(argv)
 
     gh = GitHubReader(args.gh_fixture)
+
+    if args.check_path:
+        try:
+            checked = check_outside_plugin_root(args.check_path, args.plugin_root)
+        except PluginRootError as exc:
+            parser.error(str(exc))
+        print(
+            json.dumps(
+                {
+                    "checked": checked,
+                    "plugin_root": str(Path(args.plugin_root).expanduser()),
+                    "outside_plugin_root": True,
+                },
+                indent=args.indent,
+            )
+        )
+        return 0
+
+    if args.merge_eval_set:
+        if not (args.fork and args.skill and args.new_assertions):
+            parser.error("--merge-eval-set needs --fork, --skill and --new-assertions")
+        repo = Path(args.repo).resolve()
+        incoming = json.loads(Path(args.new_assertions).read_text())
+        if isinstance(incoming, dict):
+            incoming = incoming.get("assertions", [])
+        path = eval_set_path(repo, args.fork, args.skill)
+        existing, _ = read_eval_set(path, args.fork, args.skill)
+        try:
+            merged = merge_eval_set(existing, incoming, args.first_seen)
+        except ValueError as exc:
+            parser.error(str(exc))
+        merged["write_to"] = str(path)
+        print(json.dumps(merged, indent=args.indent))
+        return 0
 
     if args.bootstrap:
         repo = Path(args.repo).resolve()
@@ -832,7 +1230,13 @@ def main(argv=None):
                     "(a fork is a registered marketplace whose repo has a GitHub parent)"
                 )
 
-    plan = build_plan(forks, Path(args.repo).resolve(), args.budget)
+    repo = Path(args.repo).resolve()
+    plan = build_plan(forks, repo, args.budget)
+    if args.evals:
+        try:
+            plan = build_eval_plan(plan, repo, args.results_root, args.plugin_root)
+        except PluginRootError as exc:
+            parser.error(str(exc))
     print(json.dumps(plan, indent=args.indent))
     return 1 if any("error" in f for f in plan["forks"]) else 0
 
