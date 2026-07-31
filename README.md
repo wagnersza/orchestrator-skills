@@ -12,6 +12,11 @@ session coordinates **worker** sessions: each worker is a
 - **`orchestrator-setup/`** — one-time per-repo setup: pick tool/harness/model,
   the review policy, and the project recipe; check + install dependencies; write
   the config.
+- **`skill-fork-sync/`** — hold each declared skill dependency at a version you
+  control. Fork the upstream repo, pin your fork's default branch to a known-good
+  SHA, and when upstream moves, evaluate only the changed skills this repo
+  actually consumes — in a throwaway worktree, against the pinned version — before
+  you approve a promote. Three modes: `bootstrap`, `sync [<fork>]`, `promote`.
 - **`playwright-cli/`** — browser automation (used for UI evidence).
 
 ## Concepts
@@ -26,6 +31,7 @@ session coordinates **worker** sessions: each worker is a
 | **Cost profile** | A preset of all three role pairs — **conservative** / **balanced** (default) / **max-capability**. Setup asks this instead of interrogating role-by-role. Table + per-MTok prices in [`models.md`](orchestrator/references/models.md). |
 | **Worker** | A `(tool, harness, model)` triple on one work item. |
 | **Adversarial review** | Optional review by a second worker on a **different-vendor** model (e.g. implement opus-5, review gpt-5.6). Prompted for **coverage**, not self-filtering. |
+| **Fork / Pinned SHA** | `/skill-fork-sync`'s version dial: a fork of an upstream skill repo whose default branch sits at a known-good commit, because `claude plugin marketplace add` takes no ref/branch/tag flag. Nothing reaches your sessions until you promote. |
 
 Full glossary: [`orchestrator/CONTEXT.md`](orchestrator/CONTEXT.md). Design
 rationale: [`orchestrator/docs/adr/`](orchestrator/docs/adr/).
@@ -120,6 +126,11 @@ phrases:
 | **review #N adversarially** | Spawn a cross-vendor reviewer even if review is off in config. |
 | **close task #N** / it's done | Advance tracker state, tear down the worktree (after merge). |
 
+`/skill-fork-sync` is invoked with its mode word — `bootstrap` to create and pin
+the forks, `sync [<fork>]` to check whether upstream moved and evaluate the delta,
+`promote` to advance the pin and refresh the install. The promote decision is
+always yours; nothing auto-promotes.
+
 Each worker keeps a file-based **checklist** (`.orchestrator/checklist-<item>.md`,
 gitignored) it ticks as it completes each contract step; the orchestrator reads it
 to track progress and catch a worker that stalls before opening the PR/MR. This
@@ -142,5 +153,8 @@ orchestrator/
     examples/fullstack-app.md
 orchestrator-setup/
   SKILL.md · orchestrator.template.md
+skill-fork-sync/
+  SKILL.md
+  references/{bootstrap,sync,promote}.md   # one per mode
 playwright-cli/
 ```

@@ -84,3 +84,39 @@ Per-project commands the completion contract needs but that aren't tool/harness/
 
 **Checklist**:
 A persistent, file-based task list that survives context loss and works across every harness (unlike claude-only `TodoWrite`). Both the orchestrator and each worker keep one, so neither forgets a step (the documented "stalls before opening the MR" failure mode). Written as markdown checkboxes (`- [ ]` / `- [x]`) to `.orchestrator/checklist-<item>.md` at the worktree root (gitignored, torn down with the worktree). The worker ticks each step as it completes; the orchestrator reads the file to see exact progress and detect a stall (unchecked items + idle terminal → re-prompt with the remaining steps).
+
+## Skill dependency versioning
+
+Vocabulary for `/skill-fork-sync` (`../skill-fork-sync/SKILL.md`), which holds each declared skill dependency at a version this repo controls. Rationale: `docs/adr/0007-fork-and-pin-skill-dependencies.md` and `docs/adr/0008-diff-targeted-run-budget.md`.
+
+**Fork**:
+A copy of an upstream skill repo in the maintainer's own GitHub account, created with `gh repo fork` and registered as the marketplace source in place of the upstream. Its **default branch is the version dial**: whatever sits there is what sessions load, because `claude plugin marketplace add` accepts no ref/branch/tag flag. Public, and explicitly a fork (GitHub's fork banner, the `parent` API field, plus a `FORK.md` recording upstream, fork date, last-synced SHA and why it exists). Clone lives under `~/.orchestrator/forks/<marketplace-name>/`, never inside `~/.claude/plugins/marketplaces/`.
+_Avoid_: mirror, vendored copy (a fork tracks upstream via a remote; neither of those does).
+
+**Upstream**:
+The original third-party repo a **Fork** was made from (`mattpocock/skills`, `DietrichGebert/ponytail`), present in the fork clone as the `upstream` git remote. Commits accumulate there and reach no session until a **Promote** moves them.
+_Avoid_: origin (that's the fork), source repo, parent (that's GitHub's API field name, not the layer).
+
+**Pinned SHA**:
+The commit the fork's default branch currently sits at — the version every session actually loads. Always resolved **live from git** (`git rev-parse main` in the fork clone), never read from `FORK.md`, so a stale record can't drive a wrong decision. Set at bootstrap to the *currently-installed* SHA (`installed_plugins.json`'s `gitCommitSha`), which makes bootstrap behaviour-neutral.
+_Avoid_: version, tag, release (tag-based pinning was rejected — see ADR 0007), current SHA.
+
+**Sync candidate**:
+The upstream commit a sync is considering promoting to — `git rev-parse upstream/main`, also read live from git. Evaluated in a throwaway worktree with the live install untouched, so a bad candidate can't break the session evaluating it and rejecting it means deleting a worktree with no rollback path.
+_Avoid_: new version, upstream HEAD (that's where the candidate comes from, not the thing under evaluation), release candidate.
+
+**Consumed skill**:
+A skill in an upstream delta that **this repo references**, decided by grepping this repo for the skill's name. Only consumed skills spend **Run budget**; changed skills this repo never references are skipped. Self-maintaining — a new reference in any doc is covered by the next sync with no registry to update — and deliberately biased toward false positives, so the failure direction is over-testing rather than skipping risk.
+_Avoid_: used skill, dependency (a dependency is declared in `references/requirements.md`; consumption is per-skill and grep-derived), relevant skill.
+
+**Sync plan**:
+The JSON a sync's deterministic half emits before anything is spent: the **Pinned SHA** and **Sync candidate**, the changed paths, the changed paths mapped to skills, each one marked **consumed** or skipped, the **Run budget** allocation, and what was dropped. Produced by one seam (`scripts/fork_state.py`) that mutates nothing, so it is testable with plain asserts and zero agent runs.
+_Avoid_: diff report, delta, manifest.
+
+**Promote**:
+Turning the dial: fast-forward and push the fork's default branch to the approved **Sync candidate**, rewrite `FORK.md`'s synced SHA, update the marketplace, and update the plugin — as one step, so there is never a state where the fork and the install disagree. **Always an explicit human decision**, never automatic on a clean eval. The new skill body loads next session.
+_Avoid_: merge, upgrade, release, sync (sync only evaluates and recommends; promote is the act).
+
+**Run budget**:
+The cap on what one sync may spend: **5 worker runs total, pinned-baseline runs included**. So either two paired candidate-vs-pinned comparisons plus a tiebreak, or up to five candidate runs. The allocation and any coverage dropped for budget is always reported, so "tested" never silently means "partially tested". Diff-targeted rather than a fixed contract suite, which at this ceiling could consume the whole budget and leave nothing for the change that triggered the sync.
+_Avoid_: cost cap, token budget, quota, test budget.
