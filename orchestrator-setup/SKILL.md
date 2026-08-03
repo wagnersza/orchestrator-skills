@@ -135,9 +135,10 @@ For option 1, skip the interview entirely. Do this instead:
 
 1. **Re-run the dependency checks** (step 4's check commands only) and install
    anything now missing or newly required by this version. This includes
-   `simple-english`. A repo configured before this dependency existed has no
-   install of it, so this path must install it for an existing user, not
-   merely report it missing.
+   `simple-english`, and `playwright-cli` plus its browsers where step 4's recipe
+   gate applies. A repo configured before these dependencies existed has no
+   install of them, so this path must install them for an existing user, not
+   merely report them missing.
 2. **Reconcile the existing config against the current template**
    ([orchestrator.template.md](orchestrator.template.md)) and
    `references/models.md` — report, don't silently rewrite:
@@ -289,9 +290,20 @@ Scope — only the chosen pieces apply:
 - **Always:** git, the `mattpocock-skills` plugin, the `ponytail` plugin, the
   `prompt-improver` plugin (all worker/review prompt composition runs through it —
   an existing git clone of it also counts as satisfied), the `simple-english`
-  skill (owns all writing rules for prose deliverables), the `playwright-cli`
-  skill (ships with this plugin — nothing to install), `codebase-memory-mcp`, and
+  skill (owns all writing rules for prose deliverables), `codebase-memory-mcp`, and
   the tracker CLI the tracker config names (`gh` / `glab` / none for local).
+- **browser surface — `playwright-cli` and `playwright browsers`, the catalog's two
+  always-required rows, gated on the recipe.** The **skill body** under
+  `playwright-cli/` ships with this plugin. The **binary does not**. The browsers it
+  drives are a second requirement, because a machine can have the CLI and no
+  browsers. The gate is the project recipe naming a **browser-evidence need** — a
+  non-blank `run_recipe`, or an `evidence` bar that asks for UI proof. If the recipe
+  names one, check and install both rows. If it names neither, install nothing and
+  say so in the table. A recipe with no browser-evidence need is a supported
+  configuration, not a gap. This is the same gate the orchestrator's preflight uses,
+  so the two cannot disagree about when the surface is required
+  ([`../orchestrator/CONTEXT.md`](../orchestrator/CONTEXT.md), **Browser surface**;
+  [ADR 0012](../orchestrator/docs/adr/0012-playwright-cli-is-the-only-browser-surface.md)).
 - **tool:** the one in config (`orca` / `cmux` / `herdr`).
 - **harness(es):** the impl harness, **and** the review harness if
   `review.enabled` — a cross-vendor review setup (e.g. impl `claude`/opus-5,
@@ -302,8 +314,9 @@ Scope — only the chosen pieces apply:
 ### Install loop
 
 For each needed dep, run its check command. **If present, it was already brought up
-to date in step 0a** — skip it. If missing, install it by running the command from
-`requirements.md`:
+to date in step 0a** — skip it. The browser surface is the one exception, because
+step 0a cannot apply the recipe gate: see its bullet below. If missing, install it
+by running the command from `requirements.md`:
 
 - **Plugins** — `claude plugin marketplace add <slug> && claude plugin install <name>@<marketplace>` (mattpocock, ponytail, prompt-improver). Verified shell commands. A plugin auto-loads next session, so mention a restart (or `/reload-plugins`) is needed before the first spawn.
 - **`prompt-improver` specifically** — install as a plugin (see `requirements.md`). If exploration found an existing clone at `~/.claude/skills/prompt-improver`, **it's already satisfied** — don't install the plugin on top, which would leave two copies shadowing each other. Report it as present.
@@ -318,6 +331,20 @@ to date in step 0a** — skip it. If missing, install it by running the command 
   fallback also cannot run unattended, report it as **needs the user**, with that
   clone-and-copy command as the exact remaining action. Never write a config that
   names `simple-english` present while it is still absent.
+- **`playwright-cli` specifically — two steps, in order, and only when the gate
+  above applies.** Run the CLI check from `requirements.md`. If the CLI is missing,
+  install it with that row's command. Then run the **browser** check from the same
+  block, as a **separate step**. If the browsers are missing, install them with that
+  row's command. A machine can have the CLI and no browsers, so a green CLI check is
+  not permission to skip the second step. Take both commands from
+  `requirements.md` — the CLI row, the browsers row, and the check block — rather
+  than typing them here. The steps, the verification that a browser really opens,
+  the update command, and the failure modes are in
+  [`../playwright-cli/references/installation.md`](../playwright-cli/references/installation.md).
+  **A present CLI was not brought up to date in step 0a**, unlike the plugins —
+  step 0a runs before the recipe is known, so it cannot apply this gate. Update a
+  present CLI here, with the line the update block in `requirements.md` already
+  carries for it.
 - **CLIs** — the documented installer (`brew install gh`/`glab`, `npm install -g @anthropic-ai/claude-code`, etc.).
 - **MCP** — `claude mcp add <name> <command/url>` once the server binary/endpoint is known.
 
@@ -332,6 +359,14 @@ to date in step 0a** — skip it. If missing, install it by running the command 
 - A CLI needs **authentication** (vendor login) — run its login if interactive is
   possible, else tell the user the exact command (`claude` login, `codex` auth,
   `gh auth login`, `glab auth login`).
+- **`playwright-cli` cannot install because node is absent, or because the install
+  cannot reach the network.** Both are genuine, because neither can finish
+  unattended and a node install can ask for a password. Stop, report the row as
+  **needs the user**, and give the exact remaining command from `requirements.md`.
+  Point at the **No node** failure mode in
+  [`../playwright-cli/references/installation.md`](../playwright-cli/references/installation.md).
+  A **missing CLI on a machine that has node is not this case** — install it and
+  move on.
 
 Anything a plugin install pulls in that needs the session reloaded to take effect
 (new skills), note it — the user may need to restart the agent once.
@@ -344,6 +379,13 @@ verification"); if not, that's a "needs the user" item. Include a `simple-englis
 row: **present** if a check hit already covered it, **installed** if the `npx
 skills add` command above ran, or **needs the user** with the clone-and-copy
 fallback command as the exact remaining action if it could not run unattended.
+
+Give the browser surface **two rows, never one** — `playwright-cli` and the
+playwright browsers — on the same present / installed / needs-the-user terms. Then a
+machine with the CLI and no browsers is described as what it is. A "needs the user"
+row on either one carries the exact remaining command from `requirements.md`. If the
+recipe names no browser-evidence need, both rows read **not needed by this recipe**
+rather than a gap. Nothing was checked, and nothing is missing.
 
 ## 5. Confirm and write
 
