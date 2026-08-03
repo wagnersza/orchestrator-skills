@@ -104,6 +104,37 @@ own user-global state. Rationale and the accepted risk:
 _Avoid_: browser tool, browser automation (both are broader than the declared
 surface), Playwright (that names the library, not this repo's surface).
 
+**Commit slice**:
+One commit on a **Worker**'s branch. Two conditions define a slice, and both are
+necessary:
+
+1. **One logical change.** The commit does one thing a reviewer can judge on its own:
+   an ADR, or a vocabulary entry, or the reference edits that apply a decision. One of
+   those, not two.
+2. **The branch is self-consistent at that commit.** Every cross-reference the commit
+   introduces resolves within the same commit. This condition exists because a
+   dangling cross-reference is this repo's main failure mode. So a reference file and
+   the link target it adds are one slice, never two.
+
+A worker commits a slice as soon as that slice is complete, and it does not wait for
+the end of the item. The message is **Conventional Commits** with an imperative
+subject, plus a body that says why when the subject cannot carry it. A **Prose
+deliverable** in a slice goes through **simple-english** before the commit that
+carries it, not before the last commit of the item.
+
+**A trivial item is one commit, and that is not a violation.** The rule is "one commit
+per logical change", never "at least N commits". A minimum count makes a worker split
+a change whose parts fail on their own. In a **Review round** fix cycle, one finding
+is one slice, so the reviewer can map each fix to the finding it answers.
+
+Slices serve the reviewer who reads the open PR. They are not a request to change the
+merge button: this repo squash-merges, so `main` keeps one commit per item. Rationale
+and the accepted risk of documentary enforcement:
+`docs/adr/0013-workers-commit-in-contextualised-slices.md`.
+_Avoid_: atomic commit (that names indivisibility, not one logical change),
+checkpoint, WIP commit (neither has to be self-consistent), granularity (that names
+the dial, not the unit).
+
 **Tuning profile**:
 Which of `prompt-improver`'s per-model rule sets a spawn prompt uses. Two: **Claude Opus 5** and **Claude Sonnet 5**. `references/models.md` maps each supported model to one — GPT-5.6's **sol** tier takes the Opus 5 profile, **terra** the Sonnet 5 profile.
 
