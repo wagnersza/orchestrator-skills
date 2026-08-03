@@ -43,11 +43,21 @@ confirm the tool binary, the harness binary (and the review harness if
 `claude plugin list | grep -o 'prompt-improver@[a-z-]*'`, falling back to
 `ls ~/.claude/skills/prompt-improver/SKILL.md`. Any of its three install shapes
 (plugin, `@skills-dir` clone, project-level clone) **satisfies the check** — the
-skill body is the same and you invoke the skill, not a path. If any
-is missing, stop and point the user at `/orchestrator-setup` (it installs deps);
-the full catalog is [`references/requirements.md`](references/requirements.md).
-Don't try to spawn against a missing binary — or compose a prompt without
-`prompt-improver`.
+skill body is the same and you invoke the skill, not a path.
+
+Check the **`simple-english` skill** in the same pass, because every worker routes
+its **Prose deliverable** text through it. Run the `simple-english` line of the
+check block in [`references/requirements.md`](references/requirements.md) — the
+four-path `ls` that prints every hit. Don't write a check of your own. Any of its
+four install shapes (global or project, `.agents/` or `.claude/`) **satisfies the
+check**, for the same reason `prompt-improver` gets three: you invoke the skill,
+not a path. The skill is not a plugin, so `claude plugin list` never shows it.
+
+If any of them is missing, stop and point the user at `/orchestrator-setup` (it
+installs deps). The full catalog is
+[`references/requirements.md`](references/requirements.md). Don't try to spawn
+against a missing binary. Don't compose a prompt without `prompt-improver`. And
+never tell a worker to invoke a skill that is not installed.
 
 Throughout, address a worker by its **slug** (the work-item's ticket prefix, e.g.
 `#38 B5 · Contacts` → `b5-contacts`).
@@ -193,7 +203,8 @@ file-based **checklist** (works across every harness, unlike claude-only
 - Seed `.orchestrator/checklist-<item>.md` at the worktree root from
   [`references/checklist.template.md`](references/checklist.template.md). Drop any
   step whose recipe field is blank in config (e.g. no `db_gate` → drop the DB
-  step).
+  step). **The writing-pass box is unconditional** — it depends on no recipe field,
+  so it ships on every item, including a pure-code one.
 - The prompt tells the worker to **work the checklist top to bottom, ticking each
   box as it completes it, and not to end the turn while any box is unchecked.**
 
@@ -223,6 +234,40 @@ Three things `prompt-improver` can't know, so state them in the draft:
 - **Scope edges are the exception to positive-framing.** Name the neighbouring
   files, features, and refactors the worker must not touch — negatively, on
   purpose.
+
+**Writing quality is not this skill's job either — it's `simple-english`'s.** That
+skill (a dependency, see
+[`references/requirements.md`](references/requirements.md)) owns every writing rule.
+Tell the worker to run the prose it changed through `simple-english` in
+**pragmatic** mode, before it commits. State only which text, in which mode, and
+what stays untouched — the **simple-english** and **Prose deliverable** entries in
+[`CONTEXT.md`](CONTEXT.md) hold the definitions. Don't restate a sentence limit, a
+substitution or a rule number here or in the prompt. Rationale:
+[`docs/adr/0011-delegate-technical-writing-to-simple-english.md`](docs/adr/0011-delegate-technical-writing-to-simple-english.md).
+
+Four things the prompt must carry:
+
+- **Which text.** The four **Prose deliverable** classes in `CONTEXT.md`. Two classes
+  bind a worker only when its diff contains them: the markdown in the diff, and the
+  strings a Python file prints. Two classes bind **every** worker on **every** item:
+  the review note on the work item, and the PR/MR body. So a worker on a pure-code
+  item is never exempt. The fourth class is orchestrator reports, which bind this
+  session and no worker — see [Reporting to the user](#reporting-to-the-user).
+- **Which mode.** Pragmatic, which keeps domain vocabulary. Every `CONTEXT.md`
+  glossary term — Tool, Harness, Worker, Pinned SHA — survives the pass unchanged.
+  Never ask for strict mode: it needs a dictionary this repo does not have.
+- **What stays byte-identical.** Code blocks, identifiers, file paths, commands,
+  quoted error strings, YAML and JSON keys, link targets, and proper nouns. A pass
+  that edits one of these can break a cross-reference or a copy-pasteable command.
+- **How far it reaches.** Only the prose the worker already changes. A one-line
+  documentation item stays a one-line diff. A repo-wide rewrite is separate work.
+
+**Keep the three delegations apart.** A worker that runs one artifact through two of
+them acts on contradictory instructions. The orchestrator invokes `prompt-improver`
+on the prompt. The worker invokes `simple-english` on its own deliverable prose.
+`ponytail` governs how much exists at all. The ordering rule and the one real
+collision sit in the **Prose deliverable** entry of [`CONTEXT.md`](CONTEXT.md).
+Point the worker at that entry rather than re-deriving the rule in the prompt.
 
 Bake in the project recipe: boot the app with `run_recipe` on the per-item `ports`
 for evidence; satisfy `db_gate` if configured; meet the `evidence` bar (real-data
@@ -340,6 +385,14 @@ it. Shape output for acting on, not for completeness:
   goes at the end as its own one-line offer, not inline.
 - **No preamble, no recap, no closer.** Don't re-list what you just did step by
   step; the checklist and the tracker are the record.
+
+**These reports are a Prose deliverable too.** They are the fourth class in the
+**Prose deliverable** entry of [`CONTEXT.md`](CONTEXT.md), so the same writing rules
+that bind a worker bind this session. Apply `simple-english` in pragmatic mode to
+what you write here. Keep the untouchables byte-identical: a slug, a model id, a
+label name, an effort string and a command stay exactly as they are. This session
+enforces the standard on every worker, so its own output cannot be the
+counter-example.
 
 Break this when the user asks you to **explain** a routing or review decision
 (answer in full), or before a **destructive** step — teardown confirmation and a
