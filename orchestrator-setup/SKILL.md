@@ -51,7 +51,14 @@ claude plugin update ponytail@ponytail
 # prompt-improver: read the SUFFIX from `claude plugin list` and pick ONE.
 #   @prompt-improver -> claude plugin update prompt-improver@prompt-improver
 #   @skills-dir      -> git -C ~/.claude/skills/prompt-improver pull --ff-only
+npx skills update simple-english -g -y   # -p instead of -g for a project install
 ```
+
+**`simple-english` never takes `claude plugin update`.** It installs through the
+`skills` CLI, not a Claude plugin marketplace. So it never appears in `claude
+plugin list` — the same trap `@skills-dir` documents above for `prompt-improver`.
+Use `npx skills update simple-english -g -y` instead. It prints `All global
+skills are up to date` when nothing moved. See `requirements.md`.
 
 **The `plugin@marketplace` form is required.** A bare name fails with
 `Plugin "<name>" not found` and **exits 1** — so read the ids from
@@ -127,7 +134,10 @@ nothing to preserve.
 For option 1, skip the interview entirely. Do this instead:
 
 1. **Re-run the dependency checks** (step 4's check commands only) and install
-   anything now missing or newly required by this version.
+   anything now missing or newly required by this version. This includes
+   `simple-english`. A repo configured before this dependency existed has no
+   install of it, so this path must install it for an existing user, not
+   merely report it missing.
 2. **Reconcile the existing config against the current template**
    ([orchestrator.template.md](orchestrator.template.md)) and
    `references/models.md` — report, don't silently rewrite:
@@ -278,9 +288,10 @@ Scope — only the chosen pieces apply:
 
 - **Always:** git, the `mattpocock-skills` plugin, the `ponytail` plugin, the
   `prompt-improver` plugin (all worker/review prompt composition runs through it —
-  an existing git clone of it also counts as satisfied), the `playwright-cli` skill
-  (ships with this plugin — nothing to install), `codebase-memory-mcp`, and the
-  tracker CLI the tracker config names (`gh` / `glab` / none for local).
+  an existing git clone of it also counts as satisfied), the `simple-english`
+  skill (owns all writing rules for prose deliverables), the `playwright-cli`
+  skill (ships with this plugin — nothing to install), `codebase-memory-mcp`, and
+  the tracker CLI the tracker config names (`gh` / `glab` / none for local).
 - **tool:** the one in config (`orca` / `cmux` / `herdr`).
 - **harness(es):** the impl harness, **and** the review harness if
   `review.enabled` — a cross-vendor review setup (e.g. impl `claude`/opus-5,
@@ -296,6 +307,17 @@ to date in step 0a** — skip it. If missing, install it by running the command 
 
 - **Plugins** — `claude plugin marketplace add <slug> && claude plugin install <name>@<marketplace>` (mattpocock, ponytail, prompt-improver). Verified shell commands. A plugin auto-loads next session, so mention a restart (or `/reload-plugins`) is needed before the first spawn.
 - **`prompt-improver` specifically** — install as a plugin (see `requirements.md`). If exploration found an existing clone at `~/.claude/skills/prompt-improver`, **it's already satisfied** — don't install the plugin on top, which would leave two copies shadowing each other. Report it as present.
+- **`simple-english` specifically** — run `npx skills add AminBlg/SimpleEnglish
+  --global --all` (the command `requirements.md` verified). It needs `node`/`npx`
+  and network access. If the check already found any of the four install shapes
+  `requirements.md` lists, skip the install and report it present. If `npx` is not
+  on the machine, or the CLI cannot reach the network, or the install otherwise
+  cannot finish unattended, fall back to the manual path in `requirements.md`
+  (`git clone https://github.com/AminBlg/SimpleEnglish`, then copy its
+  `skills/simple-english` directory to `~/.claude/skills/simple-english`). If that
+  fallback also cannot run unattended, report it as **needs the user**, with that
+  clone-and-copy command as the exact remaining action. Never write a config that
+  names `simple-english` present while it is still absent.
 - **CLIs** — the documented installer (`brew install gh`/`glab`, `npm install -g @anthropic-ai/claude-code`, etc.).
 - **MCP** — `claude mcp add <name> <command/url>` once the server binary/endpoint is known.
 
@@ -318,7 +340,10 @@ After the loop, re-run the checks and present a short table: each needed dep, no
 **present** / **installed** / **needs the user** (with the exact remaining
 action). Don't write config that names a tool/harness still absent — flag it. Also
 confirm the tool's reference file is filled in (cmux/herdr ship marked "needs
-verification"); if not, that's a "needs the user" item.
+verification"); if not, that's a "needs the user" item. Include a `simple-english`
+row: **present** if a check hit already covered it, **installed** if the `npx
+skills add` command above ran, or **needs the user** with the clone-and-copy
+fallback command as the exact remaining action if it could not run unattended.
 
 ## 5. Confirm and write
 
