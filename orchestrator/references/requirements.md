@@ -36,6 +36,12 @@ skill body is still the old one. Harness and tracker CLIs update through their o
 package manager (`brew upgrade gh glab`, `npm update -g @anthropic-ai/claude-code`),
 which needs no restart.
 
+**A forked dependency does not move on `plugin update`, and that is the point.**
+`mattpocock` is registered to `wagnersza/skills`, whose default branch is the pin,
+so the commands above fetch the fork and change nothing until a promote moves it —
+see [`../../skill-fork-sync/SKILL.md`](../../skill-fork-sync/SKILL.md). Upstream
+deltas arrive through `/skill-fork-sync sync`, never through this block.
+
 ## Check commands
 
 ```bash
@@ -60,7 +66,7 @@ claude plugin list 2>/dev/null | grep -o 'prompt-improver@[a-z-]*' || \
 | Dep | Why | Check | Install |
 |-----|-----|-------|---------|
 | **git** | worktrees, branches | `command -v git` | preinstalled on macOS / `brew install git` |
-| **mattpocock-skills** (plugin) | tracker config (`/setup-matt-pocock-skills`) + `to-tickets`/`to-spec` conventions the resolver reads | plugin check above | `claude plugin marketplace add mattpocock/skills && claude plugin install mattpocock-skills@mattpocock` — repo <https://github.com/mattpocock/skills> |
+| **mattpocock-skills** (plugin) | tracker config (`/setup-matt-pocock-skills`) + `to-tickets`/`to-spec` conventions the resolver reads | plugin check above | `claude plugin marketplace add wagnersza/skills && claude plugin install mattpocock-skills@mattpocock` — **the fork**, pinned and carrying the invocation overlay (ADR 0007, ADR 0010). Upstream is <https://github.com/mattpocock/skills>; installing from it directly leaves 13 of the 22 registered skills unreachable by a worker |
 | **prompt-improver** (plugin) | **owns all worker/review prompt composition** — the per-model tuning rules and the code-review coverage rule. The orchestrator drafts a prompt and runs it through this skill; it holds no prompting rules of its own | plugin check above, **or** the clone fallback in the check block | `claude plugin marketplace add wagnersza/prompt-improver && claude plugin install prompt-improver@prompt-improver` — repo <https://github.com/wagnersza/prompt-improver>. Auto-loads next session (`/reload-plugins` picks it up now). No dependencies of its own. |
 | **ponytail** (plugin) | keeps workers lazy/minimal; the completion contract references it | plugin check above | `claude plugin marketplace add DietrichGebert/ponytail && claude plugin install ponytail@ponytail` |
 | **playwright-cli** (skill) | UI evidence screenshots the completion contract requires | `ls playwright-cli/SKILL.md` | shipped in this plugin; install browsers with `playwright install` (<https://playwright.dev>) |

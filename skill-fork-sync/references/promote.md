@@ -48,7 +48,7 @@ commits:
 
 | The plan says | Because | Do |
 |---------------|---------|-----|
-| `fast_forward: true` | the candidate is a descendant of the pin, or the pin diverges from their shared base by nothing but `FORK.md` — the shape bootstrap and every earlier promote leave behind | run the four steps |
+| `fast_forward: true` | the candidate is a descendant of the pin, or the pin diverges from their shared base by nothing but `FORK.md` and the **Invocation overlay** — the shape bootstrap and every earlier promote leave behind | run the four steps |
 | `fast_forward: false` | the fork's default branch carries a change upstream does not have, so merging would not produce the tree the sync evaluated | **stop. Re-sync.** |
 | `stale_evaluation` set | the approved candidate is no longer `upstream/main` — upstream moved after the sync, so the assertion table describes a different tree | **stop. Re-sync.** |
 
@@ -58,11 +58,21 @@ would land. The plan refuses rather than offering a `--force`: step 1 reads
 `refused` and steps 2–4 read `blocked`, so no half-promote is even planned. The
 fix is a fresh `/skill-fork-sync sync`, not a bigger hammer.
 
-## The four steps, in order
+**The overlay is the one divergence that does not refuse.** A fork carries it by
+construction ([ADR 0010](../../orchestrator/docs/adr/0010-invocation-overlay-on-the-forks.md)),
+so `overlay_diff()` reads each diverging path's *diff content*: deletions only, and
+every deleted line one of the two overlay keys or the `policy:` header that held
+one. A commit that edits a skill body still refuses — even in a file the overlay
+also touched — which is why the check reads the diff rather than allowlisting
+filenames.
+
+## The four steps, in order — then the overlay
 
 Read the plan for the fork first; every command below is one it prints verbatim.
 **The order is load-bearing** and each step names what "already done" looks like,
-so a re-run resumes rather than restarting.
+so a re-run resumes rather than restarting. Step 5, the overlay re-apply, is not in
+the plan's step list — it belongs to the fork rather than to the version dial — but
+it is not optional either.
 
 ### 1. Advance the pin to the candidate
 
@@ -148,6 +158,30 @@ guessing:
 
 **Not checked either**, and for a stronger reason than step 3 — see
 [what promote deliberately does not do](#what-promote-deliberately-does-not-do).
+
+### 5. Re-apply the invocation overlay
+
+```bash
+python3 -m scripts.invocation_overlay --clone <clone>            # dry: what changed?
+python3 -m scripts.invocation_overlay --clone <clone> --apply    # then, if anything did
+git -C <clone> add -A
+git -C <clone> commit -m "Re-apply the invocation overlay"
+git -C <clone> push origin main
+```
+
+**Every promote, not just the ones that look like they need it.** The **Invocation
+overlay** is a *deletion* of two keys, so a candidate that registers a new
+user-invoked skill re-introduces them, and that skill is unreachable by an
+unattended worker from the moment the promote lands
+([ADR 0010](../../orchestrator/docs/adr/0010-invocation-overlay-on-the-forks.md)).
+The dry run is the check: it prints `nothing to strip … already applied` when the
+candidate added nothing, which costs one command and removes the guesswork.
+
+Order does not matter against steps 3–4 — it changes the fork, not the install —
+but it must land **before the session restart** below, or the next session loads a
+skill body the overlay has not reached. Merge conflicts here are possible when
+upstream edits a frontmatter block the overlay touched; resolve by keeping
+upstream's content and dropping the two keys again.
 
 ### Then: say that it takes effect next session
 

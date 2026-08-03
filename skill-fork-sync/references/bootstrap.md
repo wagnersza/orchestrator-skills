@@ -66,7 +66,7 @@ what makes a re-run readable (see [Re-running](#re-running-is-a-no-op-per-step))
 
 ## The procedure, for one fork
 
-Six steps, and **the order is load-bearing**. Read the dry run for the target
+Seven steps, and **the order is load-bearing**. Read the dry run for the target
 first; every command below is one the dry run prints verbatim.
 
 ### 1. Fork the upstream
@@ -167,7 +167,7 @@ Five fields, exactly:
 | Fork date | when the fork was created |
 | Last-synced SHA | the commit `main` is pinned to, plus the plugin version |
 | Why the fork exists | that a marketplace takes no ref flag, so this branch is the dial |
-| Local changes | what diverges from upstream — `none` here, and none intended |
+| Local changes | what diverges from upstream — the **Invocation overlay** and nothing else (step 7), plus the command that re-applies it |
 
 Concretely, as the dry run prints it:
 
@@ -183,18 +183,36 @@ Concretely, as the dry run prints it:
   commits accumulate on the `upstream` remote and reach no session until a sync
   evaluates them and the maintainer promotes. See ADR 0007 in
   wagnersza/orchestrator-skills.
-- **Local changes:** none, and none intended. This fork pins a version; it is not
-  a development branch. The only commit ahead of the pinned upstream SHA is this
-  file.
+- **Local changes:** none but the **invocation overlay**, and none else intended.
+  This fork pins a version; it is not a development branch. The overlay deletes
+  two keys and nothing more — `disable-model-invocation` from `SKILL.md`
+  frontmatter and `policy.allow_implicit_invocation` from `agents/openai.yaml` —
+  so every registered skill is reachable by an unattended orchestrator worker. No
+  skill body, name or description is edited. See ADR 0010 in
+  wagnersza/orchestrator-skills.
 
 The pinned SHA that drives any decision is read live from git (`git rev-parse
 main` in this clone), never from this file.
+
+## Re-applying the overlay after a promote
+
+The overlay is a deletion of two known keys, so an upstream commit that adds a new
+user-invoked skill re-introduces them. After every promote, from the
+`orchestrator-skills` repo root:
+
+```bash
+python3 -m scripts.invocation_overlay --clone ~/.orchestrator/forks/mattpocock --apply
 ```
 
-**Local changes stays `none`.** These forks pin versions; they are not development
-branches, and contributing back upstream is out of scope (ADR 0007). Keeping the
-only divergence to a single file also keeps every future sync a clean
-fast-forward.
+Without `--apply` it prints what it would change and touches nothing.
+```
+
+**Local changes is the invocation overlay, and nothing else.** These forks pin
+versions; they are not development branches, and contributing back upstream is out
+of scope (ADR 0007). The overlay is the one exception ADR 0010 carves out, and it
+is deliberately a *deletion of two known keys* rather than an edit — that is what
+lets `overlay_diff()` in the seam still tell it apart from a real local commit, so
+every future sync stays a clean fast-forward.
 
 **Already done when** `FORK.md` exists in the clone.
 
@@ -231,13 +249,49 @@ The accepted cost of keeping the name is that `claude plugin marketplace list`
 shows `mattpocock` pointing at the fork with no visual marker. Fork provenance
 lives in `known_marketplaces.json` and on GitHub instead (ADR 0007).
 
-**This step goes last** because it is the step that changes what sessions load.
-Pointing the marketplace at a fork whose pin has not landed yet would hand
-sessions upstream's head — the failure step 4 exists to avoid. The dry run
-enforces the ordering by reporting the swap as `blocked` until the pin and
+**This step goes last of the version steps** because it is the one that changes
+what sessions load. Pointing the marketplace at a fork whose pin has not landed yet
+would hand sessions upstream's head — the failure step 4 exists to avoid. The dry
+run enforces the ordering by reporting the swap as `blocked` until the pin and
 `FORK.md` are in place.
 
 **Already done when** the marketplace's registered repo is already the fork.
+
+### 7. Apply the invocation overlay
+
+```bash
+python3 -m scripts.invocation_overlay --clone <clone> --apply
+git -C <clone> add -A
+git -C <clone> commit -m "Make every registered skill model-invocable (invocation overlay)"
+git -C <clone> push origin main
+```
+
+Run the script **without `--apply` first** — it prints every file it would rewrite
+and touches nothing. Then apply, read `git -C <clone> diff --stat`, and confirm the
+diff is deletions only before committing.
+
+A worker session has no human in it, so a skill upstream marks user-invoked-only is
+a skill that never runs: no model can fire it and no other skill can reach it. The
+overlay deletes the two keys that cause that — `disable-model-invocation: true`
+from `SKILL.md` frontmatter and the `policy.allow_implicit_invocation: false` block
+from `agents/openai.yaml` — for every skill the fork's plugin manifest **registers**.
+Skills under `skills/in-progress/` or `skills/deprecated/` are not registered, load
+in no session, and are left alone. Rationale, and why this is the one local change
+a fork may carry:
+[ADR 0010](../../orchestrator/docs/adr/0010-invocation-overlay-on-the-forks.md).
+
+**This step goes truly last**, after the swap, because it is the only step that
+changes what a skill *does* rather than which version is in force. A fork whose pin
+has not landed has nothing worth overlaying.
+
+**Already done when** no registered skill in the clone still carries
+`disable-model-invocation`. The script is idempotent — a clone with nothing to
+strip says so and writes nothing — which is what makes the re-apply after every
+promote safe.
+
+**If it reports `LEFT ALONE`**, that skill's `agents/openai.yaml` has a `policy:`
+block holding more than the one key the overlay owns. It is not edited; decide by
+hand, because upstream may grow policy fields unrelated to invocation.
 
 ### Then, once per fork
 
@@ -259,7 +313,7 @@ reason:
 2. **Check the pins against the versions you expect.** Each target prints its
    plugin id, installed SHA and version. A SHA that isn't the version you think
    you're running is the cheapest possible moment to notice.
-3. **Complete one fork's six steps end to end before starting the next.** Not
+3. **Complete one fork's seven steps end to end before starting the next.** Not
    step 1 for every fork, then step 2 for every fork. A fork that is half
    bootstrapped — say, forked and cloned but not yet pinned — is a fork whose
    marketplace could be swapped by mistake onto upstream's head, and doing them
@@ -272,6 +326,10 @@ reason:
 
 Today that is two forks — `mattpocock/skills` and `DietrichGebert/ponytail`.
 `prompt-improver` is already `wagnersza/prompt-improver` and is not a target.
+`mattpocock` is done: `wagnersza/skills`, pinned at `ed37663` (1.2.0), `FORK.md`
+and the overlay committed, marketplace swapped. `ponytail` is untouched — all of
+its skills are model-invocable upstream, so its step 7 will read `DONE` the moment
+its clone exists.
 
 ## Re-running is a no-op, per step
 
@@ -289,9 +347,10 @@ labels every step:
 The per-step checks are the "Already done when" lines above, and each one asks
 about the *effect* rather than trusting a record: the fork exists on GitHub, the
 clone has a `.git`, the `upstream` remote resolves to upstream, the installed SHA
-is an ancestor of `main` with only `FORK.md` on top, `FORK.md` exists, the
-marketplace already names the fork. Nothing consults a "bootstrap has run" flag,
-because a flag can be true when the thing it describes is gone.
+is an ancestor of `main` with nothing but `FORK.md` and the overlay on top,
+`FORK.md` exists, the marketplace already names the fork, no registered skill still
+blocks model invocation. Nothing consults a "bootstrap has run" flag, because a
+flag can be true when the thing it describes is gone.
 
 When every step of every target reads `DONE`, the plan says so
 (`already_bootstrapped`) and there is nothing to do.
@@ -303,6 +362,9 @@ When every step of every target reads `DONE`, the plan says so
   the maintainer's to run, on repos they own.
 - **Changes no marketplace registration** and modifies no plugin install.
 - **Reads `FORK.md` back for a decision.** Ever. It is a record; git is the truth.
+- **Applies no overlay by itself.** `scripts/invocation_overlay.py` is the one
+  script here that writes anything, and only when given `--apply`; the dry run
+  prints the command, and the commit and push in step 7 are the maintainer's.
 
 ## Fixed here, inherited there
 
@@ -315,11 +377,19 @@ When every step of every target reads `DONE`, the plan says so
   [`sync.md`](sync.md) documents the shared script; the bootstrap-specific cases
   are `test_fork_targets_are_declared_deps_still_pointing_at_upstream`,
   `test_pin_is_the_installed_sha_not_upstream_head`,
-  `test_dry_run_prints_all_six_actions_and_takes_none`,
+  `test_dry_run_prints_all_seven_actions_and_takes_none`,
   `test_fork_md_records_the_five_fields`,
   `test_rerun_against_a_bootstrapped_fork_is_a_no_op_per_step`,
-  `test_a_moved_default_branch_is_not_reported_as_pinned` and
-  `test_a_plugin_with_no_installed_sha_blocks_the_pin`.
+  `test_a_moved_default_branch_is_not_reported_as_pinned`,
+  `test_a_plugin_with_no_installed_sha_blocks_the_pin`, and for step 7
+  `test_the_overlay_step_names_the_skills_a_worker_cannot_reach`,
+  `test_the_overlay_alone_still_reads_as_pinned` and
+  `test_a_body_edit_hiding_behind_the_overlay_is_not_pinned`.
+- The overlay script itself: `scripts/invocation_overlay.py`, tested by
+  `scripts/test_invocation_overlay.py`.
 - Rationale for fork-and-pin, why tag-based pinning lost, and why the marketplace
   names stay as upstream defines them:
   [ADR 0007](../../orchestrator/docs/adr/0007-fork-and-pin-skill-dependencies.md).
+- Rationale for the overlay being the one local change a fork may carry, and why
+  it is content-checked rather than path-allowlisted:
+  [ADR 0010](../../orchestrator/docs/adr/0010-invocation-overlay-on-the-forks.md).

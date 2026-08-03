@@ -7,16 +7,19 @@ the layout and [`orchestrator/CONTEXT.md`](orchestrator/CONTEXT.md) for the
 vocabulary.
 
 A third skill, **`skill-fork-sync`**, owns dependency versioning: it forks each
-declared skill dependency, pins the fork's default branch, and gates upstream
-deltas behind a diff-targeted evaluation before you promote. See
+declared skill dependency, pins the fork's default branch, applies the **invocation
+overlay** so an unattended worker can reach every registered skill, and gates
+upstream deltas behind a diff-targeted evaluation before you promote. See
 [`skill-fork-sync/SKILL.md`](skill-fork-sync/SKILL.md),
-[ADR 0007](orchestrator/docs/adr/0007-fork-and-pin-skill-dependencies.md) and
-[ADR 0008](orchestrator/docs/adr/0008-diff-targeted-run-budget.md).
+[ADR 0007](orchestrator/docs/adr/0007-fork-and-pin-skill-dependencies.md),
+[ADR 0008](orchestrator/docs/adr/0008-diff-targeted-run-budget.md) and
+[ADR 0010](orchestrator/docs/adr/0010-invocation-overlay-on-the-forks.md).
 
 This repo is mostly markdown skills plus JSON manifests — nothing to build, boot,
-or migrate. The one exception is `scripts/fork_state.py` (the sync-plan seam) and
-its stdlib-only test suite: **run the tests when you touch a Python file**, per the
-`evidence` bar in [`docs/agents/orchestrator.md`](docs/agents/orchestrator.md).
+or migrate. The exceptions are `scripts/fork_state.py` (the sync-plan seam) and
+`scripts/invocation_overlay.py` (the overlay writer), each with a stdlib-only test
+suite: **run the tests when you touch a Python file**, per the `evidence` bar in
+[`docs/agents/orchestrator.md`](docs/agents/orchestrator.md).
 
 ## Working here
 

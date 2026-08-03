@@ -83,8 +83,9 @@ manifests. There is nothing to boot, no schema, and no port — so `run_recipe`,
 before sending a prompt.
 
 **It is no longer markdown-only.** `/skill-fork-sync` puts the deterministic half
-of a sync behind one Python seam, `scripts/fork_state.py`, and that seam has a
-test suite (ADR 0008). So:
+of a sync behind one Python seam, `scripts/fork_state.py`, and the invocation
+overlay behind a second, `scripts/invocation_overlay.py` (ADR 0010). Both have
+test suites (ADR 0008). So:
 
 - `setup_cmd` is a Python availability check, not blank. The suite is
   **stdlib-only** — fixtures are local git repos built in a temp directory, with
