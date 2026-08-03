@@ -76,6 +76,34 @@ Three dependencies now shape a worker's output, and each owns a different artifa
 One collision is real: the `ponytail` shortest-explanation rule conflicts with the standard's rules for articles and against telegraph style. The resolution is a split of authority. `ponytail` decides whether a paragraph exists, and **simple-english** decides how a kept paragraph reads. So `ponytail` can delete a paragraph, and a worker that compresses a kept paragraph into telegraph style commits a violation.
 _Avoid_: documentation, docs, copy, text (all four are broader than the four classes).
 
+**Browser surface**:
+The one browser-automation surface a **Worker** drives when an item needs UI proof.
+It is `playwright-cli`, and it is the only sanctioned one. Every action it performs
+emits the equivalent Playwright TypeScript. So its output is code that can become a
+durable test (`../playwright-cli/references/test-generation.md`), not a transcript
+entry that dies with the session. It is a declared dependency with a checked binary
+and an install procedure of its own (`references/requirements.md`,
+`../playwright-cli/references/installation.md`).
+
+**A browser MCP that a worker's session happens to expose is not a sanctioned
+surface, whichever one it is.** Chrome DevTools MCP is the instance registered
+globally on the maintainer's machine today, so it loads in every worker session
+here. But the rule is about the class, not about that one server. A new browser MCP
+that appears tomorrow is out of bounds on the same terms, with no edit to this
+entry. **Tool availability is not tool endorsement.** An unattended worker's tool
+list comes from global config the worker did not choose, so anything this repo has
+not declared is not sanctioned by default.
+
+Enforcement is **documentary**, in three places and nowhere else. This entry says
+what the concept means, `references/requirements.md` says which surface is declared,
+and the worker prompt's scope edges say it to the worker. This repo writes no
+permissions deny rule, and it leaves the machine's global MCP registration alone.
+That registration serves the maintainer's unrelated projects, and this repo does not
+own user-global state. Rationale and the accepted risk:
+`docs/adr/0012-playwright-cli-is-the-only-browser-surface.md`.
+_Avoid_: browser tool, browser automation (both are broader than the declared
+surface), Playwright (that names the library, not this repo's surface).
+
 **Tuning profile**:
 Which of `prompt-improver`'s per-model rule sets a spawn prompt uses. Two: **Claude Opus 5** and **Claude Sonnet 5**. `references/models.md` maps each supported model to one — GPT-5.6's **sol** tier takes the Opus 5 profile, **terra** the Sonnet 5 profile.
 
