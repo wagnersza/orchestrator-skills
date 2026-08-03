@@ -30,7 +30,22 @@ H=$(orca terminal create --worktree "id:$WT" --title "$SLUG" --command "$CMD" --
 
 **Why not `orca worktree create --agent <name>`:** that clean one-call path launches the agent with Orca's own argv (default model, no way to pass `--model` or the effort flag), and the handle it returns churns during boot. The two-step `terminal create --command "$CMD"` fixes both — `$CMD` is where the role's model **and** effort land.
 
-The worktree also holds a fallback shell + the setup terminal running the install. Leave them — teardown kills every terminal regardless. `$H` is the only handle you prompt.
+`worktree create` also opened a startup shell in its own tab. After `$H` exists
+and the setup hook is complete, close every other tab. Then the worktree shows
+one tab, the agent. Read the handles fresh from `terminal list` — a startup
+handle captured before `terminal create` is stale and fails with
+`tab_not_found`.
+
+```bash
+orca terminal list --worktree "id:$WT" --json \
+  | python3 -c "import json,sys;print('\n'.join(t['handle'] for t in json.load(sys.stdin)['result']['terminals'] if t['handle']!='$H'))" \
+  | xargs -I{} orca terminal close --terminal {} --tab --json
+```
+
+`--tab` removes the pane and the tab that holds it. Without `--tab`, the empty
+tab stays. The close does not stop the harness in `$H`, and `$H` still accepts
+`send` after it. `$H` is the only handle you prompt. Teardown kills what is
+left.
 
 ## 4. send (one step — types **and** submits)
 
