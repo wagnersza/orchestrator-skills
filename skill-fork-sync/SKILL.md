@@ -84,6 +84,14 @@ the **Sync plan** and the runs it may spend, `--promote` for the ordered promote
 steps with the fast-forward check and the install-shape decision. Its stdlib-only
 test suite is `scripts/test_fork_state.py`.
 
+The judgment half — the part that reads two skill bodies and says `PROMOTE` or
+`HOLD` — is gated by an eval set of its own,
+[`evals/skill-fork-sync/sync-judgment.json`](../evals/skill-fork-sync/sync-judgment.json),
+whose regression case constructs a candidate that genuinely loses a guarantee this
+repo depends on. **That set has never been executed**; how to run it, and what it
+would cost, is in
+[`references/sync.md`](references/sync.md#self-evals-the-gates-own-gate).
+
 **Nothing has yet run against a real fork.** Bootstrap is a human step and has not
 been performed, so `~/.orchestrator/forks/` is empty today; a sync and a promote
 both report that cleanly rather than failing.
