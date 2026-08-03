@@ -26,6 +26,8 @@ claude plugin update prompt-improver@prompt-improver
   git -C ~/.claude/skills/prompt-improver pull --ff-only
 # simple-english is a skills-CLI install, so `claude plugin update` does not apply
 npx skills update simple-english -g -y      # add -p instead of -g for a project install
+# playwright-cli is an npm global package, not a plugin — and the browsers are separate
+npm update -g @playwright/cli && npx playwright install
 ```
 
 **Use the full `plugin@marketplace` id** — a bare name fails (`Plugin "<name>" not
@@ -42,15 +44,16 @@ which needs no restart.
 
 ```bash
 # binaries
-for b in orca cmux herdr claude codex pi copilot cursor-agent gh glab playwright sqlite3 node npm uv; do
+for b in orca cmux herdr claude codex pi copilot cursor-agent gh glab playwright-cli sqlite3 node npm uv; do
   printf "%-14s " "$b"; command -v "$b" || echo "(missing)"
 done
 # claude plugins
 python3 -c "import json;p=json.load(open('$HOME/.claude/plugins/installed_plugins.json'))['plugins'];[print(k, 'OK' if k in p else 'MISSING') for k in ['mattpocock-skills@mattpocock','ponytail@ponytail','prompt-improver@prompt-improver']]"
 # MCP servers configured for claude
 python3 -c "import json;d=json.load(open('$HOME/.claude.json'));print('mcp:', list(d.get('mcpServers',{}).keys()))"
-# playwright-cli skill (this repo)
-ls playwright-cli/SKILL.md 2>/dev/null && echo "playwright-cli skill present"
+# playwright browser binaries — a separate requirement from the CLI above
+ls -d "${PLAYWRIGHT_BROWSERS_PATH:-$HOME/Library/Caches/ms-playwright}"/chromium-* 2>/dev/null \
+  | head -1 || echo "playwright browsers: MISSING"
 # prompt-improver — any of three install shapes satisfies it. Print which:
 claude plugin list 2>/dev/null | grep -o 'prompt-improver@[a-z-]*' || \
   ls ~/.claude/skills/prompt-improver/SKILL.md .claude/skills/prompt-improver/SKILL.md 2>/dev/null || \
@@ -70,7 +73,8 @@ ls ~/.agents/skills/simple-english/SKILL.md ~/.claude/skills/simple-english/SKIL
 | **prompt-improver** (plugin) | **owns all worker/review prompt composition** — the per-model tuning rules and the code-review coverage rule. The orchestrator drafts a prompt and runs it through this skill; it holds no prompting rules of its own | plugin check above, **or** the clone fallback in the check block | `claude plugin marketplace add wagnersza/prompt-improver && claude plugin install prompt-improver@prompt-improver` — repo <https://github.com/wagnersza/prompt-improver>. Auto-loads next session (`/reload-plugins` picks it up now). No dependencies of its own. |
 | **ponytail** (plugin) | keeps workers lazy/minimal; the completion contract references it | plugin check above | `claude plugin marketplace add DietrichGebert/ponytail && claude plugin install ponytail@ponytail` |
 | **simple-english** (skill) | **owns all writing rules for prose deliverables** — a worker runs the prose it changed through this skill before it commits, and the orchestrator applies the skill to its own reports. This repo restates no rule of the standard, only when to invoke it (see `../CONTEXT.md`) | `simple-english` check above | `npx skills add AminBlg/SimpleEnglish --global --all` — the [`skills` CLI](https://skills.sh), so it needs `node`/`npx` and network access. Repo <https://github.com/AminBlg/SimpleEnglish>, MIT, no dependencies of its own. Not a Claude plugin marketplace install, so it carries no pin (ADR 0011) |
-| **playwright-cli** (skill) | UI evidence screenshots the completion contract requires | `ls playwright-cli/SKILL.md` | shipped in this plugin; install browsers with `playwright install` (<https://playwright.dev>) |
+| **playwright-cli** (CLI) | the **only sanctioned browser surface** for a worker — the UI proof the `evidence` bar asks for runs through it (see `../CONTEXT.md`) | `command -v playwright-cli` | `npm install -g @playwright/cli` — the npm global package, so the update command is `npm update -g @playwright/cli`, never brew. Steps, verification and failure modes: [`../../playwright-cli/references/installation.md`](../../playwright-cli/references/installation.md) |
+| **playwright browsers** | the browser builds the CLI drives — a second requirement, because a machine can have the CLI and no browsers | browser check above | `npx playwright install` (<https://playwright.dev>). Run it again after a CLI update. A new CLI can want a newer build than the cache holds |
 | **codebase-memory-mcp** | code discovery for workers (search_graph, trace_path) | MCP check above | **manual** — no public package resolved; if a binary exists (e.g. `~/.local/bin/codebase-memory-mcp`), register it: `claude mcp add codebase-memory-mcp <path-to-binary>`. Otherwise install per its own docs, then `claude mcp add`. |
 | **tracker CLI** | read the ready queue, claim items, post review notes | `command -v gh` **or** `command -v glab` | see tracker row below |
 
@@ -112,6 +116,26 @@ command is `npx skills update simple-english -g -y` (`-p` for a project install)
 it prints `All global skills are up to date` when nothing moved. Both global shapes
 above ran unattended on 2026-08-03. A new skill directory needs a session restart
 before the harness finds it, the same as a plugin.
+
+**`playwright-cli` is two requirements, and the check must carry the suffix.** Both
+commands ran on this machine on 2026-08-03:
+
+| Command | Observed |
+|---------|----------|
+| `command -v playwright-cli` (CLI present) | prints `/opt/homebrew/bin/playwright-cli`, exits 0 |
+| `env PATH=/usr/bin:/bin sh -c 'command -v playwright-cli'` (CLI off the PATH) | prints nothing, exits 1 |
+| `playwright-cli --version` | `0.1.17` |
+| `command -v playwright` | prints `/Library/Frameworks/Python.framework/Versions/3.11/bin/playwright` |
+
+The last line is why the binary loop probes `playwright-cli` and not `playwright`.
+That path is the entry point of the Python Playwright framework, it reports
+`Version 1.40.0`, and it is unrelated to `@playwright/cli`. On this machine, a loop
+that probes `playwright` reports green even when the required CLI is absent.
+
+The installed path is a symlink to
+`../lib/node_modules/@playwright/cli/playwright-cli.js`. So the **provenance is the
+npm global package**, and the update command is `npm update -g @playwright/cli`.
+The skill body under `playwright-cli/` ships with this plugin. The binary does not.
 
 **Tracker CLI** depends on what `docs/agents/issue-tracker.md` names:
 

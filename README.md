@@ -17,7 +17,8 @@ session coordinates **worker** sessions: each worker is a
   SHA, and when upstream moves, evaluate only the changed skills this repo
   actually consumes — in a throwaway worktree, against the pinned version — before
   you approve a promote. Three modes: `bootstrap`, `sync [<fork>]`, `promote`.
-- **`playwright-cli/`** — browser automation (used for UI evidence).
+- **`playwright-cli/`** — the only sanctioned browser surface for a worker (used
+  for UI evidence). The skill body ships here; the binary installs from npm.
 
 ## Concepts
 
@@ -71,8 +72,18 @@ conventions) · [`prompt-improver`](https://github.com/wagnersza/prompt-improver
 plugin (owns all worker/review prompt composition) ·
 [`simple-english`](https://github.com/AminBlg/SimpleEnglish) skill (owns all
 writing rules for prose deliverables) · `ponytail` plugin · `playwright-cli`
-(ships in this plugin) · `codebase-memory-mcp` · a tracker CLI (`gh`/`glab`, or
-none for local markdown).
+(`npm install -g @playwright/cli`, plus `npx playwright install` for the browser
+binaries) · `codebase-memory-mcp` · a tracker CLI (`gh`/`glab`, or none for local
+markdown).
+
+`playwright-cli` is **the only sanctioned browser surface for a worker**, and only
+its skill body ships in this plugin. The binary is an npm global package, and the
+browser binaries it drives are a second install. A browser MCP that a worker's
+session happens to expose is not a sanctioned surface, whichever one it is. Tool
+availability is not tool endorsement
+([ADR 0012](orchestrator/docs/adr/0012-playwright-cli-is-the-only-browser-surface.md)).
+Steps, verification and failure modes:
+[`playwright-cli/references/installation.md`](playwright-cli/references/installation.md).
 
 `simple-english` is the one dependency that is not a Claude plugin. It installs
 with the `skills` CLI — `npx skills add AminBlg/SimpleEnglish --global --all` — so

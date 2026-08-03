@@ -354,6 +354,11 @@ When local version is available, use `npx playwright cli` in all commands. Other
 npm install -g @playwright/cli@latest
 ```
 
+The browser binaries install separately, with `npx playwright install`. For the
+full procedure — prerequisites, both installs, a verification that opens and
+closes a browser, the update command and the named failure modes — see
+[references/installation.md](references/installation.md).
+
 ## Example: Form submission
 
 ```bash
@@ -409,6 +414,7 @@ playwright-cli show --annotate
 
 ## Specific tasks
 
+* **Installing the CLI and the browsers** [references/installation.md](references/installation.md)
 * **Running and Debugging Playwright tests** [references/playwright-tests.md](references/playwright-tests.md)
 * **Request mocking** [references/request-mocking.md](references/request-mocking.md)
 * **Running Playwright code** [references/running-code.md](references/running-code.md)
