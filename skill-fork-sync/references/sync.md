@@ -147,7 +147,7 @@ directory the guard protects; the tests use both, and a real sync needs neither.
 
 ### Tests
 
-Twenty-four cases in `scripts/test_fork_state.py`, each building throwaway git repos
+Thirty-two cases in `scripts/test_fork_state.py`, each building throwaway git repos
 and config files in a temp directory and asserting on the emitted JSON — external
 behaviour at the seam, not helper return values. Stdlib only, no network, no `gh`,
 no agent runs:
@@ -197,6 +197,9 @@ Ten for the eval plan (`EvalPlanTestCase`), which builds two fork clones — one
 | `test_the_plan_promotes_nothing_and_rejecting_is_a_worktree_removal` | advisory only; reject = remove a worktree |
 | `test_a_fork_with_no_clone_reports_cleanly_and_spends_nothing` | an un-bootstrapped fork is reported, not a blocker |
 | `test_it_runs_for_one_named_fork_or_for_all_of_them` | `--fork <name>` and no argument |
+
+The remaining eight (`PromotePlanTestCase`) belong to the promote mode and are
+listed in [`promote.md`](promote.md).
 
 Running them is part of this repo's `evidence` bar whenever a Python file is
 touched — see `docs/agents/orchestrator.md`.
@@ -483,6 +486,55 @@ Stated as a guarantee rather than an intention: `--evals` raises rather than emi
 a plan naming a path inside the plugin directory, and `--check-path` applies the
 same check to a worktree path the configured tool chose. The one thing a sync does
 touch there is a read — `known_marketplaces.json`, to discover the fork set.
+
+## Self-evals: the gate's own gate
+
+The deterministic half has its [test suite](#tests). The judgment half above — the
+part that reads two bodies and says `PROMOTE` or `HOLD` — has an eval set of its
+own at [`evals/skill-fork-sync/sync-judgment.json`](../../evals/skill-fork-sync/sync-judgment.json),
+in the same shape as a fork's eval set and read by the same `read_eval_set()` /
+`merge_eval_set()`. Its `fork` is `skill-fork-sync` and its `skill_name` is
+`sync-judgment`, because the seam derives the path from that pair
+(`evals/<fork>/<skill>.json`); the subject is this repo's own skill rather than a
+**Fork** of an **Upstream**, and the file's `subject` field says so.
+
+Four assertions over three scenarios, and the one that carries the set is
+`holds-a-candidate-that-drops-the-blocked-by-section`: a constructed `to-tickets`
+candidate that deletes the `## Blocked by` section the ready queue is gated on. A
+set that only ever sees a healthy candidate proves nothing about a gate whose whole
+value is refusing.
+
+**Cost: 3 of the 5 runs** [ADR 0008](../../orchestrator/docs/adr/0008-diff-targeted-run-budget.md)
+allows a sync — countable from the file as the sum of the assertions' `runs`. One run
+per `scenario`: the first assertion of a scenario carries `runs: 1` and later
+assertions on the same transcript carry `runs: 0`, which is just step 6's rule that
+every assertion is graded against each transcript. A scenario is one run rather than
+two because this repo's own skill has no **Pinned SHA** of itself to use as a
+baseline.
+
+To run it:
+
+1. **Read the set.** Each assertion's `prompt` builds its own throwaway fixture —
+   a scratch upstream repo, a clone standing in for the **Fork**, and a commit
+   standing in for the **Sync candidate**. No fixture touches
+   `~/.orchestrator/forks/`, so a real bootstrap is not a prerequisite, and none of
+   them writes inside this repo.
+2. **Compose each prompt through `prompt-improver`**, as step 6 requires — the
+   `prompt` field is the eval's content, not its phrasing.
+3. **Launch one worker per scenario** with the configured harness at the config's
+   model and effort (`docs/agents/orchestrator.md`), and save each transcript under
+   `.orchestrator/fork-sync/self-evals/` — gitignored, like every other result.
+   **The eval set is committed; nothing it produces is.**
+4. **Grade each assertion from its scenario's transcript using its `check` field**,
+   which names a token, a section, a count or an ordering rather than anything that
+   needs the drafter's taste. Report the same way a sync reports: an assertion
+   table, the budget with what was covered and what was not, and a terminal verdict.
+
+**This set has never been executed.** It was drafted as part of issue #7 and no
+transcript exists, so nothing in the file records an outcome — the `runs` fields are
+what it *would* cost, not what it spent. Extend it the same way a fork's set is
+extended, with `--merge-eval-set --fork skill-fork-sync --skill sync-judgment`,
+which keeps every existing assertion and its `first_seen_candidate` verbatim.
 
 ## Fixed here, inherited there
 
