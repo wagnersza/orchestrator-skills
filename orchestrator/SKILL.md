@@ -53,11 +53,34 @@ four install shapes (global or project, `.agents/` or `.claude/`) **satisfies th
 check**, for the same reason `prompt-improver` gets three: you invoke the skill,
 not a path. The skill is not a plugin, so `claude plugin list` never shows it.
 
+**Check the Browser surface only when the recipe asks for browser evidence.** The
+gate is the project recipe: a non-blank `run_recipe`, or an `evidence` bar that asks
+for UI proof. Where the gate holds, check `playwright-cli` and the browser binaries
+it drives. Those are two rows in
+[`references/requirements.md`](references/requirements.md), because a machine can
+have the CLI and no browsers. Run the check commands those rows give you.
+**Preflight does not demand the browser CLI from a repo with a blank `run_recipe`
+and no UI proof in its `evidence` bar.** There it does not check the surface at all.
+This repo is that case: its `run_recipe` is blank, and its `evidence` bar asks for a
+test run and resolved cross-references. So a documentation item here is never
+blocked on a browser install. Requirements in this catalog are conditional on config
+already, and this gate follows that rule. The concept is the **Browser surface**
+entry in [`CONTEXT.md`](CONTEXT.md). The decision is
+[`docs/adr/0012-playwright-cli-is-the-only-browser-surface.md`](docs/adr/0012-playwright-cli-is-the-only-browser-surface.md).
+
 If any of them is missing, stop and point the user at `/orchestrator-setup` (it
 installs deps). The full catalog is
 [`references/requirements.md`](references/requirements.md). Don't try to spawn
 against a missing binary. Don't compose a prompt without `prompt-improver`. And
 never tell a worker to invoke a skill that is not installed.
+
+**A failed browser-surface check reports a next step, not a missing binary.** Point
+the user at
+[`../playwright-cli/references/installation.md`](../playwright-cli/references/installation.md)
+as well as `/orchestrator-setup`. That file holds the steps, the check that a browser
+opens, and the failure modes. One of those modes is invisible to a bare `command -v`:
+the CLI check is green and a browser session still cannot start. Never restate one of
+its commands here or in a report. A copied command drifts from the maintained one.
 
 Throughout, address a worker by its **slug** (the work-item's ticket prefix, e.g.
 `#38 B5 · Contacts` → `b5-contacts`).
@@ -234,6 +257,25 @@ Three things `prompt-improver` can't know, so state them in the draft:
 - **Scope edges are the exception to positive-framing.** Name the neighbouring
   files, features, and refactors the worker must not touch — negatively, on
   purpose.
+- **One scope edge ships on every item: the Browser surface.** Where an item needs
+  UI proof, the worker drives the declared surface, `playwright-cli`. **A browser MCP
+  that the worker's session happens to expose is out of bounds, whichever one it
+  is.** Write the edge about the class, so a new ambient MCP that appears tomorrow is
+  already covered. Name Chrome DevTools MCP as the recognisable instance. Carry the
+  reason with the rule, because a worker that reads a bare prohibition is the worker
+  that reverses it later. The reason has two halves. The declared surface emits
+  Playwright code, which is the raw material for a durable test, and an MCP call emits
+  a transcript entry that dies with the session. And an undeclared tool has no home in
+  this repo, which is this repo's named failure mode in a different form. **Tool
+  availability is not tool endorsement.** An unattended worker's tool list comes from
+  global config the worker did not choose. So anything this repo has not declared is
+  not sanctioned by default. That framing holds for the next ambient dependency too,
+  not only for this one. The edge ships even on an item with no UI. There it costs one
+  sentence, and it closes the reading that an idle browser tool is an invitation.
+  Definition: the **Browser surface** entry in [`CONTEXT.md`](CONTEXT.md). Rationale
+  and the accepted risk:
+  [`docs/adr/0012-playwright-cli-is-the-only-browser-surface.md`](docs/adr/0012-playwright-cli-is-the-only-browser-surface.md).
+  Enforcement is documentary, so this prompt is where the rule reaches the worker.
 
 **Writing quality is not this skill's job either — it's `simple-english`'s.** That
 skill (a dependency, see
