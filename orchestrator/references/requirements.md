@@ -24,6 +24,8 @@ claude plugin update prompt-improver@prompt-improver
 # only if prompt-improver was installed the legacy way (git clone, no plugin entry)
 [ -d ~/.claude/skills/prompt-improver/.git ] && \
   git -C ~/.claude/skills/prompt-improver pull --ff-only
+# simple-english is a skills-CLI install, so `claude plugin update` does not apply
+npx skills update simple-english -g -y      # add -p instead of -g for a project install
 ```
 
 **Use the full `plugin@marketplace` id** — a bare name fails (`Plugin "<name>" not
@@ -53,6 +55,10 @@ ls playwright-cli/SKILL.md 2>/dev/null && echo "playwright-cli skill present"
 claude plugin list 2>/dev/null | grep -o 'prompt-improver@[a-z-]*' || \
   ls ~/.claude/skills/prompt-improver/SKILL.md .claude/skills/prompt-improver/SKILL.md 2>/dev/null || \
   echo "prompt-improver: MISSING"
+# simple-english — global or project install, each with two paths. Print every hit:
+ls ~/.agents/skills/simple-english/SKILL.md ~/.claude/skills/simple-english/SKILL.md \
+   .agents/skills/simple-english/SKILL.md .claude/skills/simple-english/SKILL.md 2>/dev/null \
+  | grep . || echo "simple-english: MISSING"
 ```
 
 ## Always required
@@ -63,6 +69,7 @@ claude plugin list 2>/dev/null | grep -o 'prompt-improver@[a-z-]*' || \
 | **mattpocock-skills** (plugin) | tracker config (`/setup-matt-pocock-skills`) + `to-tickets`/`to-spec` conventions the resolver reads | plugin check above | `claude plugin marketplace add mattpocock/skills && claude plugin install mattpocock-skills@mattpocock` — repo <https://github.com/mattpocock/skills> |
 | **prompt-improver** (plugin) | **owns all worker/review prompt composition** — the per-model tuning rules and the code-review coverage rule. The orchestrator drafts a prompt and runs it through this skill; it holds no prompting rules of its own | plugin check above, **or** the clone fallback in the check block | `claude plugin marketplace add wagnersza/prompt-improver && claude plugin install prompt-improver@prompt-improver` — repo <https://github.com/wagnersza/prompt-improver>. Auto-loads next session (`/reload-plugins` picks it up now). No dependencies of its own. |
 | **ponytail** (plugin) | keeps workers lazy/minimal; the completion contract references it | plugin check above | `claude plugin marketplace add DietrichGebert/ponytail && claude plugin install ponytail@ponytail` |
+| **simple-english** (skill) | **owns all writing rules for prose deliverables** — a worker runs the prose it changed through this skill before it commits, and the orchestrator applies the skill to its own reports. This repo restates no rule of the standard, only when to invoke it (see `../CONTEXT.md`) | `simple-english` check above | `npx skills add AminBlg/SimpleEnglish --global --all` — the [`skills` CLI](https://skills.sh), so it needs `node`/`npx` and network access. Repo <https://github.com/AminBlg/SimpleEnglish>, MIT, no dependencies of its own. Not a Claude plugin marketplace install, so it carries no pin (ADR 0011) |
 | **playwright-cli** (skill) | UI evidence screenshots the completion contract requires | `ls playwright-cli/SKILL.md` | shipped in this plugin; install browsers with `playwright install` (<https://playwright.dev>) |
 | **codebase-memory-mcp** | code discovery for workers (search_graph, trace_path) | MCP check above | **manual** — no public package resolved; if a binary exists (e.g. `~/.local/bin/codebase-memory-mcp`), register it: `claude mcp add codebase-memory-mcp <path-to-binary>`. Otherwise install per its own docs, then `claude mcp add`. |
 | **tracker CLI** | read the ready queue, claim items, post review notes | `command -v gh` **or** `command -v glab` | see tracker row below |
@@ -85,6 +92,26 @@ list` — but `claude plugin update prompt-improver@prompt-improver` fails on it
 `~/.claude/plugins/installed_plugins.json`. Read the suffix before choosing an
 update command, and don't install the plugin on top of a clone — that leaves two
 copies shadowing each other.
+
+**`simple-english` has four install shapes, and all four satisfy the check.** The
+`skills` CLI writes the skill body to `<scope>/.agents/skills/simple-english/`. Then
+it makes a symlink or a copy at `<scope>/.claude/skills/simple-english/` for Claude
+Code. The check block prints every hit, so **an existing install is never reported
+missing and never needs migrating.** One update command covers all four:
+
+| Shape | Where `SKILL.md` sits | Install with |
+|-------|-----------------------|--------------|
+| **Global, every agent** (what setup runs) | `~/.agents/skills/…`, symlinked to `~/.claude/skills/…` | `npx skills add AminBlg/SimpleEnglish --global --all` |
+| **Global, Claude Code only** | `~/.claude/skills/…` (a copy) | `npx skills add AminBlg/SimpleEnglish --global --skill simple-english --agent claude-code --yes` |
+| **Project, every agent** | `<repo>/.agents/skills/…`, symlinked to `<repo>/.claude/skills/…` | the global command without `--global` |
+| **Manual fallback** (no `npx`, or the CLI has no network access) | wherever you copy it | `git clone https://github.com/AminBlg/SimpleEnglish`, then copy its `skills/simple-english` directory to `~/.claude/skills/simple-english` |
+
+**The skill is not a plugin, so it is absent from `claude plugin list` and from
+`installed_plugins.json`.** Do not run `claude plugin update` against it. The update
+command is `npx skills update simple-english -g -y` (`-p` for a project install), and
+it prints `All global skills are up to date` when nothing moved. Both global shapes
+above ran unattended on 2026-08-03. A new skill directory needs a session restart
+before the harness finds it, the same as a plugin.
 
 **Tracker CLI** depends on what `docs/agents/issue-tracker.md` names:
 
