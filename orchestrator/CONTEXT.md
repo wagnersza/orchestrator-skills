@@ -53,6 +53,29 @@ One cycle of adversarial review: the review worker posts a verdict (approve / re
 The external skill that owns **all** prompt composition — the diagnosis checklist, the shared rules (front-load the spec, positive examples over prohibitions, no stale verification/status scaffolding, coverage-not-filtering for code review), and the per-model tuning. A dependency, not vendored: <https://github.com/wagnersza/prompt-improver>. Installs three ways — as a **plugin** (`prompt-improver@prompt-improver`), as a clone under `~/.claude/skills/` (auto-registered as `prompt-improver@skills-dir`), or as a project-level clone. The skill body is identical and the orchestrator invokes the skill rather than a path, so all three satisfy the dependency; only the update command differs (see `references/requirements.md`). The orchestrator drafts a prompt and runs it through this skill; it holds no prompting rules of its own, so the rules never drift out of sync with the upstream guides.
 _Avoid_: prompting guide, composing rules (both were vendored files, now removed).
 
+**simple-english**:
+The external skill that owns **all** writing rules for a **Prose deliverable**. It applies ASD-STE100 Simplified Technical English: the sentence limits, the vocabulary discipline, and the mode definitions. A dependency, not vendored: <https://github.com/AminBlg/SimpleEnglish> (MIT, no dependencies of its own). This repo states only *when* to invoke the skill and *what counts as a prose deliverable*, and copies no rule of the standard. Same posture as **prompt-improver**, for the same reason: a copied rule set drifts from the upstream that maintains it. The default mode here is **pragmatic**, which keeps domain vocabulary. Every glossary term in this file therefore survives a writing pass unchanged, and a worker must never "simplify" Tool, Harness, Worker or Pinned SHA. **Strict** mode needs the official ASD-STE100 dictionary, which this repo does not have, so nothing here asks for strict. The skill installs through the `skills` CLI (`npx skills add AminBlg/SimpleEnglish`), which registers no Claude plugin marketplace. So `/skill-fork-sync` cannot pin the skill, and it never appears in a **Sync plan** — the accepted risk in `docs/adr/0010-delegate-technical-writing-to-simple-english.md`. Install shapes and commands: `references/requirements.md`.
+_Avoid_: STE, ASD-STE100 (both name the standard, not the dependency), style guide, house style (both name the thing this repo refuses to own).
+
+**Prose deliverable**:
+Text a human or a later agent reads as prose. A worker routes this text through **simple-english** before it commits. Four classes, all in scope:
+
+1. **Markdown in the diff** — skill bodies, reference files, ADRs, `README.md`, `CLAUDE.md`, config docs. Scoped to the prose the worker already changes, so a one-line doc item does not permit a repo-wide rewrite.
+2. **Completion-contract artifacts** — the review note on the **Work item** and the PR/MR body. These apply on every item, even a pure-code one.
+3. **Shipped strings** — `argparse` help, warnings and error text in `scripts/*.py`.
+4. **Orchestrator reports** — this session's status lines and tables to the maintainer.
+
+A writing pass can change the sentences and paragraphs of running prose, and nothing else. These stay byte-identical: code blocks, identifiers, file paths, commands, quoted error strings, YAML and JSON keys, link targets, and proper nouns. An edit to any of them can break a cross-reference, which is this repo's main failure mode.
+
+Three dependencies now shape a worker's output, and each owns a different artifact:
+
+- **prompt-improver** shapes the prompt the orchestrator sends.
+- **simple-english** shapes the prose the worker produces.
+- `ponytail` shapes how much code and prose exist at all.
+
+One collision is real: the `ponytail` shortest-explanation rule conflicts with the standard's rules for articles and against telegraph style. The resolution is a split of authority. `ponytail` decides whether a paragraph exists, and **simple-english** decides how a kept paragraph reads. So `ponytail` can delete a paragraph, and a worker that compresses a kept paragraph into telegraph style commits a violation.
+_Avoid_: documentation, docs, copy, text (all four are broader than the four classes).
+
 **Tuning profile**:
 Which of `prompt-improver`'s per-model rule sets a spawn prompt uses. Two: **Claude Opus 5** and **Claude Sonnet 5**. `references/models.md` maps each supported model to one — GPT-5.6's **sol** tier takes the Opus 5 profile, **terra** the Sonnet 5 profile.
 

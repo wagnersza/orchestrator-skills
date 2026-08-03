@@ -24,6 +24,15 @@ its stdlib-only test suite: **run the tests when you touch a Python file**, per 
   orchestrator drafts a prompt and runs it through that dependency. Don't
   re-vendor prompting guidance into this repo — see
   [ADR 0006](orchestrator/docs/adr/0006-delegate-prompting-to-prompt-improver.md).
+- **Writing rules live in the `simple-english` skill, not here.** Before you
+  commit, run the prose you changed through that dependency in pragmatic mode.
+  This covers the markdown in your diff, your review note, your PR body, and each
+  string a Python file prints. Code blocks, identifiers, paths, commands, quoted
+  error strings, YAML and JSON keys, link targets and proper nouns stay
+  byte-identical. This repo defines only what counts as a **prose deliverable**
+  ([`orchestrator/CONTEXT.md`](orchestrator/CONTEXT.md)) and restates no rule of
+  the standard, per
+  [ADR 0010](orchestrator/docs/adr/0010-delegate-technical-writing-to-simple-english.md).
 - **Every claim in a skill body traces to a reference file or an ADR.** A rule with
   no home rots.
 - **A decision that reverses or narrows an earlier one gets a new ADR** under

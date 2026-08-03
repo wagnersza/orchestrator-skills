@@ -32,6 +32,7 @@ session coordinates **worker** sessions: each worker is a
 | **Worker** | A `(tool, harness, model)` triple on one work item. |
 | **Adversarial review** | Optional review by a second worker on a **different-vendor** model (e.g. implement opus-5, review gpt-5.6). Prompted for **coverage**, not self-filtering. |
 | **Fork / Pinned SHA** | `/skill-fork-sync`'s version dial: a fork of an upstream skill repo whose default branch sits at a known-good commit, because `claude plugin marketplace add` takes no ref/branch/tag flag. Nothing reaches your sessions until you promote. |
+| **Prose deliverable** | Text a worker routes through `simple-english` before it commits — the markdown in its diff, its review note, its PR body, and any string a Python file prints. Code, identifiers, paths, commands and link targets stay byte-identical. |
 
 Full glossary: [`orchestrator/CONTEXT.md`](orchestrator/CONTEXT.md). Design
 rationale: [`orchestrator/docs/adr/`](orchestrator/docs/adr/).
@@ -67,9 +68,19 @@ catalog with check + install commands:
 
 **Always:** git · `mattpocock-skills` plugin (tracker config + ticket
 conventions) · [`prompt-improver`](https://github.com/wagnersza/prompt-improver)
-plugin (owns all worker/review prompt composition) · `ponytail` plugin ·
-`playwright-cli` (ships in this plugin) · `codebase-memory-mcp` · a tracker CLI
-(`gh`/`glab`, or none for local markdown).
+plugin (owns all worker/review prompt composition) ·
+[`simple-english`](https://github.com/AminBlg/SimpleEnglish) skill (owns all
+writing rules for prose deliverables) · `ponytail` plugin · `playwright-cli`
+(ships in this plugin) · `codebase-memory-mcp` · a tracker CLI (`gh`/`glab`, or
+none for local markdown).
+
+`simple-english` is the one dependency that is not a Claude plugin. It installs
+with the `skills` CLI — `npx skills add AminBlg/SimpleEnglish --global --all` — so
+it needs `node`. A worker runs the prose it changed through that skill before it
+commits, and the orchestrator applies the skill to its own reports. This repo
+restates no rule of the standard, only what counts as a prose deliverable
+([ADR 0010](orchestrator/docs/adr/0010-delegate-technical-writing-to-simple-english.md)).
+There is no marketplace to fork, so `/skill-fork-sync` cannot pin it.
 
 `prompt-improver` also ships as a plugin now — `claude plugin marketplace add
 wagnersza/prompt-improver && claude plugin install prompt-improver@prompt-improver`.
