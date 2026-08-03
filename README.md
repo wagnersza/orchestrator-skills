@@ -79,7 +79,7 @@ with the `skills` CLI — `npx skills add AminBlg/SimpleEnglish --global --all` 
 it needs `node`. A worker runs the prose it changed through that skill before it
 commits, and the orchestrator applies the skill to its own reports. This repo
 restates no rule of the standard, only what counts as a prose deliverable
-([ADR 0010](orchestrator/docs/adr/0010-delegate-technical-writing-to-simple-english.md)).
+([ADR 0011](orchestrator/docs/adr/0011-delegate-technical-writing-to-simple-english.md)).
 There is no marketplace to fork, so `/skill-fork-sync` cannot pin it.
 
 `prompt-improver` also ships as a plugin now — `claude plugin marketplace add

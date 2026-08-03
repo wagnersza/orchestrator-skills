@@ -32,7 +32,7 @@ its stdlib-only test suite: **run the tests when you touch a Python file**, per 
   byte-identical. This repo defines only what counts as a **prose deliverable**
   ([`orchestrator/CONTEXT.md`](orchestrator/CONTEXT.md)) and restates no rule of
   the standard, per
-  [ADR 0010](orchestrator/docs/adr/0010-delegate-technical-writing-to-simple-english.md).
+  [ADR 0011](orchestrator/docs/adr/0011-delegate-technical-writing-to-simple-english.md).
 - **Every claim in a skill body traces to a reference file or an ADR.** A rule with
   no home rots.
 - **A decision that reverses or narrows an earlier one gets a new ADR** under
