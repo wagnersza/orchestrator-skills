@@ -19,8 +19,9 @@ upstream SHA — see
 [ADR 0007](../orchestrator/docs/adr/0007-fork-and-pin-skill-dependencies.md).
 
 The vocabulary — **Fork**, **Upstream**, **Pinned SHA**, **Sync candidate**,
-**Consumed skill**, **Sync plan**, **Promote**, **Run budget** — is defined in
-the orchestrator's [`CONTEXT.md`](../orchestrator/CONTEXT.md). Use those terms.
+**Consumed skill**, **Sync plan**, **Promote**, **Run budget**, **Invocation
+overlay** — is defined in the orchestrator's
+[`CONTEXT.md`](../orchestrator/CONTEXT.md). Use those terms.
 
 ```
 upstream/main (moves)  ->  sync: plan + evals  ->  you approve  ->  fork/main (the pin)  ->  sessions
@@ -32,9 +33,9 @@ Three, and the mode word is part of the invocation:
 
 | Invoke | Does | Reference |
 |--------|------|-----------|
-| `/skill-fork-sync bootstrap` | Per declared dependency, idempotently: fork upstream into the maintainer's account, clone the fork under `~/.orchestrator/forks/<marketplace-name>/`, add the `upstream` remote, reset the fork's default branch to the **currently-installed** SHA and force-push, write `FORK.md`, then swap the marketplace registration from upstream to the fork. Behaviour-neutral by construction: day one after bootstrap runs exactly the code that ran before it. | [`references/bootstrap.md`](references/bootstrap.md) |
+| `/skill-fork-sync bootstrap` | Per declared dependency, idempotently: fork upstream into the maintainer's account, clone the fork under `~/.orchestrator/forks/<marketplace-name>/`, add the `upstream` remote, reset the fork's default branch to the **currently-installed** SHA and force-push, write `FORK.md`, swap the marketplace registration from upstream to the fork, then apply the **Invocation overlay**. Version-neutral by construction: day one after bootstrap runs exactly the code that ran before it, and the only thing that changes is *who* may invoke a skill. | [`references/bootstrap.md`](references/bootstrap.md) |
 | `/skill-fork-sync sync [<fork>]` | For one named fork or all of them: resolve the **Pinned SHA** and the **Sync candidate** live from git, diff them, map changed paths to skills, mark each changed skill **consumed** or skipped, allocate the **Run budget**, then evaluate the consumed ones candidate-vs-pinned in a throwaway worktree and report an assertion table with a promote/hold recommendation. A delta touching nothing consumed costs zero runs. | [`references/sync.md`](references/sync.md) |
-| `/skill-fork-sync promote` | On explicit approval only, four ordered steps: advance and push the fork's default branch to the candidate as a **fast-forward** — refusing rather than force-pushing if it cannot — rewrite `FORK.md`'s synced SHA, update the marketplace, then update the plugin with the command that matches the dependency's install shape. Marketplace before plugin, because the plugin installs out of the marketplace's clone. One act, so the fork and the install never disagree; ends by stating that the new skill body loads next session. | [`references/promote.md`](references/promote.md) |
+| `/skill-fork-sync promote` | On explicit approval only, four ordered steps plus an overlay re-apply: advance and push the fork's default branch to the candidate as a **fast-forward** — refusing rather than force-pushing if it cannot — rewrite `FORK.md`'s synced SHA, update the marketplace, then update the plugin with the command that matches the dependency's install shape. Marketplace before plugin, because the plugin installs out of the marketplace's clone. One act, so the fork and the install never disagree; ends by stating that the new skill body loads next session. | [`references/promote.md`](references/promote.md) |
 
 Read the mode's reference file before acting. `SKILL.md` names the modes; the
 references own the steps.
@@ -47,6 +48,12 @@ references own the steps.
   see [ADR 0008](../orchestrator/docs/adr/0008-diff-targeted-run-budget.md).
 - **The Pinned SHA comes from git, never from `FORK.md`.** `FORK.md` is a record
   for humans; a stale one must not be able to drive a wrong decision.
+- **A fork carries exactly one local change: the invocation overlay.** Two keys
+  deleted so an unattended worker can reach every registered skill — no skill
+  body, name or description is edited. It is re-applied after every promote,
+  because an upstream commit adding a user-invoked skill re-introduces the keys.
+  Anything beyond those two keys means the dial moved and the promote is refused —
+  see [ADR 0010](../orchestrator/docs/adr/0010-invocation-overlay-on-the-forks.md).
 - **The live install is never touched during an evaluation.** The candidate is
   read from a worktree path injected into the eval worker's prompt, so a bad
   candidate cannot break the session evaluating it, and rejecting a candidate is
@@ -82,8 +89,13 @@ All three modes are implemented. Their deterministic halves live in one seam,
 `--bootstrap` for the fork targets and their pins, the default and `--evals` for
 the **Sync plan** and the runs it may spend, `--promote` for the ordered promote
 steps with the fast-forward check and the install-shape decision. Its stdlib-only
-test suite is `scripts/test_fork_state.py`.
+test suite is `scripts/test_fork_state.py`. The **Invocation overlay** is the one
+piece that writes: `scripts/invocation_overlay.py`, dry unless given `--apply`,
+tested by `scripts/test_invocation_overlay.py`.
 
-**Nothing has yet run against a real fork.** Bootstrap is a human step and has not
-been performed, so `~/.orchestrator/forks/` is empty today; a sync and a promote
-both report that cleanly rather than failing.
+**`mattpocock` is bootstrapped and overlaid; `ponytail` is not.**
+`wagnersza/skills` exists, is pinned at the SHA that was installed on 2026-07-31
+(`ed37663`, 1.2.0), carries `FORK.md` and the overlay, and is the registered source
+for the `mattpocock` marketplace. `DietrichGebert/ponytail` is still un-forked —
+its skills are all model-invocable upstream, so it needed no overlay, and bootstrap
+reports its six steps as `todo` rather than failing.

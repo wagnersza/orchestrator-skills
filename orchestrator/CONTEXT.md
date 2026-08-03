@@ -91,7 +91,7 @@ A persistent, file-based task list that survives context loss and works across e
 
 ## Skill dependency versioning
 
-Vocabulary for `/skill-fork-sync` (`../skill-fork-sync/SKILL.md`), which holds each declared skill dependency at a version this repo controls. Rationale: `docs/adr/0007-fork-and-pin-skill-dependencies.md` and `docs/adr/0008-diff-targeted-run-budget.md`.
+Vocabulary for `/skill-fork-sync` (`../skill-fork-sync/SKILL.md`), which holds each declared skill dependency at a version this repo controls. Rationale: `docs/adr/0007-fork-and-pin-skill-dependencies.md`, `docs/adr/0008-diff-targeted-run-budget.md` and `docs/adr/0010-invocation-overlay-on-the-forks.md`.
 
 **Fork**:
 A copy of an upstream skill repo in the maintainer's own GitHub account, created with `gh repo fork` and registered as the marketplace source in place of the upstream. Its **default branch is the version dial**: whatever sits there is what sessions load, because `claude plugin marketplace add` accepts no ref/branch/tag flag. Public, and explicitly a fork (GitHub's fork banner, the `parent` API field, plus a `FORK.md` recording upstream, fork date, last-synced SHA and why it exists). Clone lives under `~/.orchestrator/forks/<marketplace-name>/`, never inside `~/.claude/plugins/marketplaces/`.
@@ -124,3 +124,7 @@ _Avoid_: merge, upgrade, release, sync (sync only evaluates and recommends; prom
 **Run budget**:
 The cap on what one sync may spend: **5 worker runs total, pinned-baseline runs included**. So either two paired candidate-vs-pinned comparisons plus a tiebreak, or up to five candidate runs. The allocation and any coverage dropped for budget is always reported, so "tested" never silently means "partially tested". Diff-targeted rather than a fixed contract suite, which at this ceiling could consume the whole budget and leave nothing for the change that triggered the sync.
 _Avoid_: cost cap, token budget, quota, test budget.
+
+**Invocation overlay**:
+The one local change a **Fork** may carry: every skill the fork's plugin manifest registers is made reachable by a model, by deleting two keys and nothing else — `disable-model-invocation: true` from `SKILL.md` frontmatter, and the `policy.allow_implicit_invocation: false` block from `agents/openai.yaml`. A worker session has no human in it, so a skill only a human can type is a skill that never runs. Applied by `scripts/invocation_overlay.py` (idempotent, dry by default), it is bootstrap's **step 7** and must be **re-applied after every Promote**, since an upstream commit adding a user-invoked skill re-introduces the keys. Recognised as acceptable divergence by diff *content*, not by filename, so a skill-body edit in an overlaid file still reads as a moved dial and refuses the promote. See ADR 0010.
+_Avoid_: patch, fix, customisation, local changes (ADR 0007 uses that phrase for the `FORK.md` field this overlay is the sole entry in), enabling skills.

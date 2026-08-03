@@ -300,10 +300,26 @@ class BootstrapPlanTestCase(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
 
         # --- Upstream: two commits, so the installed SHA is not upstream's head.
+        #     `implement` ships user-invoked-only, which is what the invocation
+        #     overlay (step 7) exists to undo.
         self.upstream = self.root / "upstream"
         self.upstream.mkdir()
         git(self.upstream, "init", "-q", "-b", "main")
         write(self.upstream / "skills" / "tdd" / "SKILL.md", "base body\n")
+        write(
+            self.upstream / "skills" / "implement" / "SKILL.md",
+            "---\nname: implement\ndescription: fixture\n"
+            "disable-model-invocation: true\n---\n\nbase body\n",
+        )
+        write(
+            self.upstream / "skills" / "implement" / "agents" / "openai.yaml",
+            'interface:\n  display_name: "Implement"\n'
+            "policy:\n  allow_implicit_invocation: false\n",
+        )
+        write(
+            self.upstream / ".claude-plugin" / "plugin.json",
+            json.dumps({"skills": ["./skills/tdd", "./skills/implement"]}),
+        )
         git(self.upstream, "add", "-A")
         git(self.upstream, "commit", "-qm", "the installed version")
         self.installed_sha = rev(self.upstream, "main")
@@ -420,7 +436,7 @@ class BootstrapPlanTestCase(unittest.TestCase):
                 return entry
         self.fail(f"step {name} missing: {[s['name'] for s in target['steps']]}")
 
-    def bootstrap_the_fork(self, fork_md=True):
+    def bootstrap_the_fork(self, fork_md=True, overlay=True):
         """Do to a fixture clone what a real bootstrap would do, so a re-run is
         planned against an already-bootstrapped fork."""
         self.write_gh_fixture(fork_exists=True)
@@ -443,7 +459,29 @@ class BootstrapPlanTestCase(unittest.TestCase):
             write(self.clone / "FORK.md", "# Fork of mattpocock/skills\n")
             git(self.clone, "add", "FORK.md")
             git(self.clone, "commit", "-qm", "Record the fork and its pin")
+        if overlay:
+            self.apply_the_overlay()
         self.write_config(mattpocock_repo="me/skills")
+
+    def apply_the_overlay(self):
+        """Run the real overlay against the fixture clone and commit it, so the
+        divergence under test is the one the script actually produces."""
+        proc = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "scripts.invocation_overlay",
+                "--clone",
+                str(self.clone),
+                "--apply",
+            ],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(proc.returncode, 0, f"stderr: {proc.stderr}")
+        git(self.clone, "add", "-A")
+        git(self.clone, "commit", "-qm", "invocation overlay")
 
     # --- the cases ----------------------------------------------------------
 
@@ -476,16 +514,24 @@ class BootstrapPlanTestCase(unittest.TestCase):
         self.assertIn(self.installed_sha, self.step(target, "pin")["command"])
         self.assertNotIn(self.upstream_head, text)
 
-    def test_dry_run_prints_all_six_actions_and_takes_none(self):
+    def test_dry_run_prints_all_seven_actions_and_takes_none(self):
         before = sorted(str(p) for p in self.root.rglob("*"))
         plan, text = self.bootstrap()
         target = self.target(plan)
 
         self.assertEqual(
             [s["name"] for s in target["steps"]],
-            ["fork", "clone", "remote", "pin", "FORK.md", "marketplace swap"],
+            [
+                "fork",
+                "clone",
+                "remote",
+                "pin",
+                "FORK.md",
+                "marketplace swap",
+                "invocation overlay",
+            ],
         )
-        self.assertEqual([s["step"] for s in target["steps"]], [1, 2, 3, 4, 5, 6])
+        self.assertEqual([s["step"] for s in target["steps"]], [1, 2, 3, 4, 5, 6, 7])
         self.assertIn("gh repo fork mattpocock/skills", text)
         self.assertIn(f"git clone https://github.com/me/skills.git {self.clone}", text)
         self.assertIn("remote add upstream", text)
@@ -513,7 +559,10 @@ class BootstrapPlanTestCase(unittest.TestCase):
         self.assertIn("**Fork date:** 2026-07-31", body)  # fork date
         self.assertIn(f"`{self.installed_sha}`", body)  # last-synced SHA
         self.assertIn("**Why this fork exists:**", body)  # why
-        self.assertIn("**Local changes:** none", body)  # local changes
+        # Local changes: the invocation overlay, and the record says so — the one
+        # divergence a fork may carry (ADR 0010).
+        self.assertIn("**Local changes:** none but the **invocation overlay**", body)
+        self.assertIn("--clone", body)  # how to re-apply it after a promote
         self.assertIn("read live from git", body)
         self.assertIn(body.splitlines()[0], text)
 
@@ -522,13 +571,60 @@ class BootstrapPlanTestCase(unittest.TestCase):
         plan, text = self.bootstrap()
         target = self.target(plan)
 
-        self.assertEqual([s["status"] for s in target["steps"]], ["done"] * 6)
+        self.assertEqual([s["status"] for s in target["steps"]], ["done"] * 7)
         self.assertTrue(target["already_bootstrapped"])
         self.assertIn("already bootstrapped", text)
-        # FORK.md sits one commit ahead of the pin, and that must still read as
+        # FORK.md and the overlay sit ahead of the pin, and that must still read as
         # pinned — otherwise a re-run would reset the record away.
         self.assertNotEqual(rev(self.clone, "main"), self.installed_sha)
         self.assertIn("already pinned", self.step(target, "pin")["note"])
+        self.assertIn(
+            "already model-invocable", self.step(target, "invocation overlay")["note"]
+        )
+
+    def test_the_overlay_step_names_the_skills_a_worker_cannot_reach(self):
+        """A fork pinned but not overlaid is a fork whose skills a model can't fire."""
+        self.bootstrap_the_fork(overlay=False)
+        plan, text = self.bootstrap()
+        overlay = self.step(self.target(plan), "invocation overlay")
+
+        self.assertEqual(overlay["status"], "todo")
+        self.assertIn("implement", overlay["note"])
+        self.assertNotIn("tdd", overlay["note"])  # already model-invocable upstream
+        self.assertIn("scripts.invocation_overlay", overlay["command"])
+        self.assertIn("--apply", overlay["command"])
+        # Still a dry run: the flag is untouched in the clone.
+        self.assertIn(
+            "disable-model-invocation",
+            (self.clone / "skills" / "implement" / "SKILL.md").read_text(),
+        )
+
+    def test_the_overlay_alone_still_reads_as_pinned(self):
+        """The overlay is the one non-FORK.md divergence a fork may carry, so a
+        re-run must not plan a reset that would wipe it (ADR 0010)."""
+        self.bootstrap_the_fork()
+        plan, _ = self.bootstrap()
+        target = self.target(plan)
+
+        self.assertEqual(self.step(target, "pin")["status"], "done")
+        self.assertNotIn(
+            "disable-model-invocation",
+            (self.clone / "skills" / "implement" / "SKILL.md").read_text(),
+        )
+
+    def test_a_body_edit_hiding_behind_the_overlay_is_not_pinned(self):
+        """Content-checked, not path-allowlisted: editing a skill body in the same
+        file the overlay touches must still read as a moved dial."""
+        self.bootstrap_the_fork()
+        write(
+            self.clone / "skills" / "implement" / "SKILL.md",
+            "---\nname: implement\ndescription: fixture\n---\n\nsmuggled body\n",
+        )
+        git(self.clone, "add", "-A")
+        git(self.clone, "commit", "-qm", "not the overlay")
+
+        plan, _ = self.bootstrap()
+        self.assertEqual(self.step(self.target(plan), "pin")["status"], "todo")
 
     def test_a_moved_default_branch_is_not_reported_as_pinned(self):
         self.bootstrap_the_fork()
@@ -1018,9 +1114,22 @@ class PromotePlanTestCase(unittest.TestCase):
         git(self.upstream, "init", "-q", "-b", "main")
         write(
             self.upstream / ".claude-plugin" / "plugin.json",
-            json.dumps({"name": "mattpocock-skills", "version": "1.2.0"}),
+            json.dumps(
+                {
+                    "name": "mattpocock-skills",
+                    "version": "1.2.0",
+                    "skills": ["./skills/tdd", "./skills/implement"],
+                }
+            ),
         )
         write(self.upstream / "skills" / "tdd" / "SKILL.md", "tdd: base body\n")
+        # Ships user-invoked-only upstream, so the fork's overlay has something to
+        # strip — the divergence `test_an_overlaid_fork_is_still_promotable` needs.
+        write(
+            self.upstream / "skills" / "implement" / "SKILL.md",
+            "---\nname: implement\ndescription: fixture\n"
+            "disable-model-invocation: true\n---\n\nbase body\n",
+        )
         git(self.upstream, "add", "-A")
         git(self.upstream, "commit", "-qm", "the pinned version")
         self.pin_base = rev(self.upstream, "main")
@@ -1186,6 +1295,27 @@ class PromotePlanTestCase(unittest.TestCase):
         self.assertEqual(before, sorted(str(p) for p in self.root.rglob("*")))
         self.assertNotEqual(rev(self.clone, "main"), candidate)
         self.assertIn("Nothing below is executed", text)
+
+    def test_an_overlaid_fork_is_still_promotable(self):
+        """ADR 0010: the invocation overlay is the one divergence a promote takes.
+
+        Without this, the first promote after the overlay lands is refused forever
+        — the fork carries changes upstream does not have, by construction.
+        """
+        write(
+            self.clone / "skills" / "implement" / "SKILL.md",
+            "---\nname: implement\ndescription: fixture\n---\n\nbase body\n",
+        )
+        git(self.clone, "add", "-A")
+        git(self.clone, "commit", "-qm", "invocation overlay")
+        candidate = self.advance_upstream()
+
+        plan, _ = self.promote()
+        fork = self.fork(plan)
+
+        self.assertTrue(fork["promotable"])
+        self.assertEqual(fork["candidate_sha"], candidate)
+        self.assertEqual(self.step(fork, "advance the pin")["status"], "todo")
 
     def test_a_diverged_pin_is_refused_rather_than_force_pushed(self):
         """AC 1: a promote needing a force-push means the pin moved — stop."""

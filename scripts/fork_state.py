@@ -122,6 +122,49 @@ def changed_paths(clone, pinned, candidate):
     return [line for line in diff.splitlines() if line]
 
 
+# The **invocation overlay** (ADR 0010): the two keys a fork may delete so an
+# unattended worker can reach every registered skill. `scripts/invocation_overlay.py`
+# writes it; this is the half that lets a promote still recognise it as the
+# overlay rather than a rogue local commit. Keep the two in step.
+OVERLAY_KEYS = ("disable-model-invocation", "allow_implicit_invocation")
+
+
+def overlay_diff(clone, pinned, candidate, path):
+    """Whether `path`'s diff is the invocation overlay and nothing else.
+
+    Checked on *content*, not on the filename: an overlaid file's diff is
+    deletions of the two `OVERLAY_KEYS` lines (plus the `policy:` header that
+    only held one of them). A commit that edits a skill body under cover of the
+    overlay adds or deletes something else, and this returns False — which is the
+    whole point of reading the diff rather than allowlisting paths.
+    """
+    body = git(clone, "diff", "--unified=0", f"{pinned}..{candidate}", "--", path)
+    for line in body.splitlines():
+        if line.startswith(("+++", "---", "@@", "diff ", "index ")):
+            continue
+        if line.startswith("+"):
+            return False  # the overlay only ever deletes
+        if line.startswith("-"):
+            gone = line[1:].strip()
+            if gone == "policy:" or any(key in gone for key in OVERLAY_KEYS):
+                continue
+            return False
+    return True
+
+
+def overlay_only(clone, pinned, candidate):
+    """Whether `pinned..candidate` is nothing but `FORK.md` and the overlay.
+
+    This is the divergence bootstrap and every promote legitimately leave on a
+    fork's default branch, so both `pinned_at()` and `fast_forwardable()` ask it
+    rather than comparing SHAs or trusting a path allowlist.
+    """
+    return all(
+        path == FORK_RECORD or overlay_diff(clone, pinned, candidate, path)
+        for path in changed_paths(clone, pinned, candidate)
+    )
+
+
 # --- fork discovery ---------------------------------------------------------
 
 
@@ -612,7 +655,68 @@ def bootstrap_steps(target, gh, fork_exists=None):
             swap_note,
         )
     )
+
+    # Step 7 goes after the swap, not before: it is the one step that changes what
+    # a skill *does* rather than which version is in force, and a fork whose pin
+    # has not landed has nothing worth overlaying (ADR 0010).
+    overlay_status, overlay_note = "blocked", "needs the clone from step 2"
+    if cloned:
+        pending = overlay_pending(clone)
+        if pending is None:
+            overlay_status, overlay_note = "blocked", (
+                "no .claude-plugin/plugin.json in the clone — nothing declares "
+                "which skills load"
+            )
+        elif pending:
+            overlay_status, overlay_note = "todo", (
+                f"{len(pending)} registered skill(s) still block model invocation "
+                f"({', '.join(pending[:3])}{'…' if len(pending) > 3 else ''}) — an "
+                "unattended worker cannot reach them"
+            )
+        else:
+            overlay_status, overlay_note = "done", (
+                "every registered skill is already model-invocable"
+            )
+    steps.append(
+        step(
+            7,
+            "invocation overlay",
+            f"python3 -m scripts.invocation_overlay --clone {clone} --apply && "
+            f"git -C {clone} add -A && "
+            f'git -C {clone} commit -m "Make every registered skill model-invocable '
+            f'(invocation overlay)" && '
+            f"git -C {clone} push origin {PINNED_REF}",
+            overlay_status,
+            overlay_note,
+        )
+    )
     return steps
+
+
+def overlay_pending(clone):
+    """Registered skills in `clone` that still block model invocation, or None.
+
+    None means the manifest is unreadable, so nothing declares which skills load.
+    An empty list means the overlay is already applied — which is what makes step
+    7 idempotent and safe to re-run after every promote (ADR 0010).
+    """
+    manifest = Path(clone) / ".claude-plugin" / "plugin.json"
+    try:
+        registered = json.loads(manifest.read_text()).get("skills", [])
+    except (OSError, json.JSONDecodeError):
+        return None
+    pending = []
+    for rel in registered:
+        skill_md = Path(clone) / rel / "SKILL.md"
+        try:
+            text = skill_md.read_text()
+        except OSError:
+            continue
+        if any(
+            line.strip().startswith(f"{OVERLAY_KEYS[0]}:") for line in text.splitlines()
+        ):
+            pending.append(Path(rel).name)
+    return pending
 
 
 def step(n, name, command, status, note):
@@ -637,10 +741,11 @@ def has_commit(clone, sha):
 def pinned_at(clone, sha):
     """Whether the default branch is pinned at `sha`.
 
-    Not `main == sha`: step 5 commits `FORK.md` on top of the pin, so an
-    already-bootstrapped fork sits one commit ahead of the installed SHA. The pin
-    holds as long as the installed SHA is an ancestor and every commit after it
-    touches nothing but `FORK.md` — anything else means the dial has moved and
+    Not `main == sha`: step 5 commits `FORK.md` on top of the pin and the
+    invocation overlay (ADR 0010) commits on top of that, so an
+    already-bootstrapped fork sits a couple of commits ahead of the installed SHA.
+    The pin holds as long as the installed SHA is an ancestor and everything after
+    it is `FORK.md` or the overlay — anything else means the dial has moved and
     re-running the reset would be a promote nobody approved.
     """
     try:
@@ -648,10 +753,9 @@ def pinned_at(clone, sha):
     except GitError:
         return False
     try:
-        changed = changed_paths(clone, sha, PINNED_REF)
+        return overlay_only(clone, sha, PINNED_REF)
     except GitError:
         return False
-    return all(path == "FORK.md" for path in changed)
 
 
 def fork_md(target, today):
@@ -674,12 +778,28 @@ def fork_md(target, today):
   commits accumulate on the `upstream` remote and reach no session until a sync
   evaluates them and the maintainer promotes. See ADR 0007 in
   wagnersza/orchestrator-skills.
-- **Local changes:** none, and none intended. This fork pins a version; it is not
-  a development branch. The only commit ahead of the pinned upstream SHA is this
-  file.
+- **Local changes:** none but the **invocation overlay**, and none else intended.
+  This fork pins a version; it is not a development branch. The overlay deletes
+  two keys and nothing more — `disable-model-invocation` from `SKILL.md`
+  frontmatter and `policy.allow_implicit_invocation` from `agents/openai.yaml` —
+  so every registered skill is reachable by an unattended orchestrator worker. No
+  skill body, name or description is edited. See ADR 0010 in
+  wagnersza/orchestrator-skills.
 
 The pinned SHA that drives any decision is read live from git (`git rev-parse
 {PINNED_REF}` in this clone), never from this file.
+
+## Re-applying the overlay after a promote
+
+The overlay is a deletion of two known keys, so an upstream commit that adds a new
+user-invoked skill re-introduces them. After every promote, from the
+`orchestrator-skills` repo root:
+
+```bash
+python3 -m scripts.invocation_overlay --clone {target['clone']} --apply
+```
+
+Without `--apply` it prints what it would change and touches nothing.
 """
 
 
@@ -1087,9 +1207,10 @@ def fast_forwardable(clone, pinned, candidate):
     intact:
 
     - `candidate` is a descendant of the **Pinned SHA** — a literal fast-forward;
-    - the pin diverges from their shared base by nothing but `FORK.md` commits,
-      which is exactly the shape bootstrap leaves behind (`pinned_at`) and every
-      earlier promote adds to. Merging then adds commits and rewrites none.
+    - the pin diverges from their shared base by nothing but `FORK.md` and the
+      **invocation overlay** (ADR 0010), which is exactly the shape bootstrap
+      leaves behind (`pinned_at`) and every earlier promote adds to. Merging then
+      adds commits and rewrites none.
 
     Anything else — a real commit on the fork, or a pin ahead of the candidate —
     is refused with the reason, rather than promoted with a `--force`.
@@ -1099,9 +1220,13 @@ def fast_forwardable(clone, pinned, candidate):
     try:
         base = git(clone, "merge-base", pinned, candidate)
         local = changed_paths(clone, base, pinned)
+        extra = [
+            path
+            for path in local
+            if path != FORK_RECORD and not overlay_diff(clone, base, pinned, path)
+        ]
     except GitError as exc:
         return False, str(exc)
-    extra = [path for path in local if path != FORK_RECORD]
     if extra:
         return False, (
             f"the fork's default branch carries local changes upstream does not "
@@ -1109,8 +1234,8 @@ def fast_forwardable(clone, pinned, candidate):
             "produce the evaluated tree. Re-sync; never force"
         )
     return True, (
-        f"the pin diverges from the candidate's history by {FORK_RECORD} only, so "
-        "the merge adds commits and rewrites none"
+        f"the pin diverges from the candidate's history by {FORK_RECORD} and the "
+        "invocation overlay only, so the merge adds commits and rewrites none"
     )
 
 

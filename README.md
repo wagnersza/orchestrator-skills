@@ -126,10 +126,13 @@ phrases:
 | **review #N adversarially** | Spawn a cross-vendor reviewer even if review is off in config. |
 | **close task #N** / it's done | Advance tracker state, tear down the worktree (after merge). |
 
-`/skill-fork-sync` is invoked with its mode word — `bootstrap` to create and pin
-the forks, `sync [<fork>]` to check whether upstream moved and evaluate the delta,
-`promote` to advance the pin and refresh the install. The promote decision is
-always yours; nothing auto-promotes.
+`/skill-fork-sync` is invoked with its mode word — `bootstrap` to create, pin and
+overlay the forks, `sync [<fork>]` to check whether upstream moved and evaluate the
+delta, `promote` to advance the pin and refresh the install. The promote decision is
+always yours; nothing auto-promotes. A fork carries exactly one local change, the
+**invocation overlay**: two keys deleted so every registered skill is reachable by
+an unattended worker, since a worker session has no human in it to type a slash
+command.
 
 Each worker keeps a file-based **checklist** (`.orchestrator/checklist-<item>.md`,
 gitignored) it ticks as it completes each contract step; the orchestrator reads it
@@ -157,4 +160,8 @@ skill-fork-sync/
   SKILL.md
   references/{bootstrap,sync,promote}.md   # one per mode
 playwright-cli/
+scripts/
+  fork_state.py                # the sync/bootstrap/promote plans — mutates nothing
+  invocation_overlay.py        # the invocation overlay — dry unless --apply
+  test_*.py                    # stdlib-only; python3 -m unittest discover -s scripts
 ```
