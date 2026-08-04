@@ -104,9 +104,12 @@ routed to in the report ([Reporting to the user](#reporting-to-the-user)). An
 implementation work here" holds. A verb that writes source is a `worker` row, and
 that law is what puts it there.
 
-**Lane `worker` — nothing changes yet.** A `worker` verb keeps the spawn flow below
-exactly as it is today. The splice of the invocation into the spawn prompt is
-separate work, and it has not landed.
+**Lane `worker` — hand the skill to the worker.** Invoke nothing here. The
+invocation goes into the spawn prompt, so the worker's first act inside its own
+worktree is to enter the skill. [Spawn a worker](#spawn-a-worker-implement-x)
+preflights the skill and splices it. This section only resolves which skill it is. A
+worked trace of both lanes, end to end, is
+[`references/examples/routed-run.md`](references/examples/routed-run.md).
 
 **A queue question is not a verb.** A bare `/orchestrator`, and *what next* / *what
 should I run* / *what's ready*, resolve to no skill and route nowhere. Answer them
@@ -163,8 +166,11 @@ read it before the first spawn of a session.
    item to a harness that reaches it. Validate the effort string against the ladder
    **yourself**: `claude` accepts a typo'd `--effort` with only a warning and then
    runs at the default, which scrolls away unseen in a TUI worker.
-4. **Report the choice** when reporting the spawn: `#N → heavy · opus-5 · xhigh`.
-   A wrong call is then visible and correctable in one sentence.
+4. **Report the choice** when reporting the spawn, after the routed skill:
+   `#23 → /implement · heavy · opus-5 · xhigh`. A wrong call is then visible and
+   correctable in one sentence. The skill field is the routed one, and it is a
+   separate resolution from this one — see
+   [Reporting to the user](#reporting-to-the-user).
 
 Neither flag fails loudly when wrong: `claude` warns-and-defaults on a bad effort,
 and `codex` silently ignores a `--model` placed before its subcommand. Where the
@@ -218,8 +224,13 @@ next?" (recurse through any `user-story` child to reach implementable leaves).
 Ports stay per-item (`N` = work-item number), so batch-spawned siblings never
 collide. **Classify each child's role separately** — a batch usually mixes heavy
 and light items, and giving them all one model is exactly the hardcoding this
-avoids. Report which were spawned (with role · model · effort each), which are busy
-(a worker owns them), and what each blocked child waits on.
+avoids. **Resolve each child's verb separately too**, for the same reason: a batch
+that mixes a bug and a feature splices `/diagnosing-bugs` into one prompt and
+`/implement` into the other. One blanket skill for the whole batch is the same defect
+as one blanket model. The verb is the one the child's own work item carries, and
+where the child names none, the batch's own verb applies. Report which were spawned
+(with skill · role · model · effort each), which are busy (a worker owns them), and
+what each blocked child waits on.
 
 Parent lifecycle and the `relates_to`/`## Parent` conventions are tracker/
 `to-tickets` behaviour — see the project's `issue-tracker.md` and the worked
@@ -236,7 +247,23 @@ When the user says **implement #N / implement X / start work on X**:
    `(model, effort)` pair (see [Right model for the job](#right-model-for-the-job)),
    then compose `$CMD` from `references/harnesses/<harness>.md` using harness +
    model + effort + yolo. Preflight any harness-specific requirement the reference
-   names (e.g. claude `/implement` plugins); abort rather than send a dead prompt.
+   names; abort rather than send a dead prompt. **The routed skill is one of those
+   requirements.** Where the verb resolved to a `worker` row
+   ([Resolve the verb before you act](#resolve-the-verb-before-you-act)), confirm the
+   skill is reachable by *this* harness, before you compose the prompt:
+   - **claude** — the skill is a plugin skill, so confirm the plugin that ships it is
+     installed. Every row in the routing table ships in `mattpocock-skills`, so the
+     check is the `mattpocock-skills` line of the plugin check block in
+     [`references/requirements.md`](references/requirements.md). Don't write a check
+     of your own.
+   - **any other harness** — there is no slash command to reach, so the reachable
+     form is the row's Notes prose. Confirm the row has it. A `worker` row with no
+     prose contract is not reachable on this harness.
+
+   A failed check **aborts the spawn**. Say which skill, which harness, and that
+   `/orchestrator-setup` installs the missing plugin. This is the one place a routed
+   verb fails hard. So it fails before a worktree exists, and not inside a worker that
+   cannot run its first instruction.
 3. **worktree-create** (op 2) — branch + checkout + run `setup_cmd` via the tool's
    setup hook, off the default branch (or stacked, if the item stacks). Capture
    the worktree id/path.
@@ -273,7 +300,11 @@ the diagnosis checklist, the shared rules, and the per-model tuning. Don't resta
 its rules here or work from memory of them.
 
 1. **Draft** the worker prompt: the task, the acceptance criteria, the checklist,
-   the project recipe, the evidence bar, the scope edges.
+   the project recipe, the evidence bar, the scope edges — and the **routed skill**,
+   where the verb resolved to a `worker` row. The invocation is one more item in that
+   list, at the same level as the criteria and the scope edges, and it goes into the
+   **draft**, not into the sent prompt afterwards. The `prompt-improver` pass below
+   must see it.
 2. **Run it through `prompt-improver`**, naming the role's model so it applies the
    right profile (look the model up in [`references/models.md`](references/models.md)
    → its `prompt-improver` profile). Send the improved prompt, not the draft.
@@ -281,7 +312,23 @@ its rules here or work from memory of them.
    case explicitly: it keeps the tight task framing and the checklist, and applies
    only the model-specific tuning. A worker prompt must be deterministic and
    finishable unattended, so the open senior-partner rewrite must **not** be
-   applied — say so when invoking, or it may reshape the contract.
+   applied — say so when invoking, or it can reshape the contract. **This framing is
+   also what protects the spliced invocation.** The rewrite keeps a literal
+   instruction literal. The open rewrite is the one that turns a command into a
+   suggestion, and a suggestion is the *may* this change exists to remove.
+
+**Word the routed skill as a command the worker runs, not as advice.** The first
+thing the prompt asks of the worker is to enter the skill: `Run /implement.` — an
+imperative, in the prompt's own voice. Never *you may use*, *consider*, *if it
+helps*, or a mention of the skill inside a sentence about something else. A worker
+that reads a suggestion does the work freehand, which is the defect the routing
+table exists to close. The skill then runs **inside** the completion contract, not in
+place of it. The checklist above still holds every box, and
+`.orchestrator/checklist-<item>.md` stays the file this session reads for progress.
+Which skill it is comes from the routing table
+([Resolve the verb before you act](#resolve-the-verb-before-you-act)), and what to
+hand it comes from that row's Notes. How to word the rest of the prompt is
+`prompt-improver`'s, as above.
 
 Three things `prompt-improver` can't know, so state them in the draft:
 
@@ -371,10 +418,20 @@ commands — the label swap and the `In review` write, with the real ids from
 `issue-tracker.md`'s `## Project board` section substituted in. A worker can't look
 up a field id it wasn't given. Omit the board command if that section is absent.
 
-**Harness shape:** a **claude** worker may use its slash skills (`/implement`,
-`/ponytail:ponytail`) — see `references/harnesses/claude.md`. **Any other harness**
-gets the **same contract in plain English** — no slash commands, no "TodoWrite"
-wording; spell out the numbered checklist steps as prose.
+**Harness shape:** a **claude** worker **does** enter the routed skill — the
+invocation is a literal slash command in the prompt (`/implement`), and its other
+slash skills (`/ponytail:ponytail`) stay available on top. See
+`references/harnesses/claude.md`. **Any other harness** gets the **same contract in
+plain English** — no slash commands, no "TodoWrite" wording; spell out the numbered
+checklist steps as prose. **The routed skill takes that same split.** A harness with
+no slash commands gets the skill's contract as prose, from the *Without slash
+commands* sentences in the row's Notes column of
+[`references/skill-routing.md`](references/skill-routing.md). Copy the substance of
+those sentences into the draft prompt as the worker's opening instruction, in the
+place the slash command takes on claude. **Never send a slash command to a harness
+that cannot parse one** — it reads as literal text and the worker starts cold, which
+is worse than the prose contract because it looks like it worked. This is the same
+plain-English rule as every other part of the contract, not a second mechanism.
 
 **Per-item ports.** Derive from the work-item number `N` per config's `ports`
 (e.g. `FE=3000+N`), so parallel workers never collide and the port reads back to
@@ -416,7 +473,10 @@ When a work item reaches the review state and review is enabled:
    findings to fix, then re-review. Loop, bounded at `review.rounds` (default 3).
    Each fix round steps the impl worker's effort up one rung — a finding the model
    missed at `high` is what `xhigh` is for. In a fix round, one finding is one slice,
-   so the reviewer can map each fix to the finding it answers.
+   so the reviewer can map each fix to the finding it answers. **The fix prompt
+   re-enters the same routed skill the original spawn used** — not a re-resolution of
+   the verb, and not `/code-review` because a review produced the findings. The worker
+   resumes in the posture it started in. Effort steps up, and the skill does not change.
 4. **On approve, or after the last round regardless:** gather evidence and flip
    the item to **human review**. The item stays `in-progress` through the loop (a
    worker owns it); it flips only when the loop concludes. Merge is always a human
@@ -458,7 +518,8 @@ cannot hold "we're on round 2 of 3 for #38" across turns, so every report restat
 it. Shape output for acting on, not for completeness:
 
 - **Lead with state, not narration.** First line is the board: what changed and
-  what's running. `#38 b5-contacts spawned · heavy · opus-5 · xhigh. 2 workers live.`
+  what's running.
+  `#38 b5-contacts spawned · /implement · heavy · opus-5 · xhigh. 2 workers live.`
   Never open with what you're about to do.
 - **Name the skill you routed to.** A verb resolved through
   [`references/skill-routing.md`](references/skill-routing.md) names its skill in the
@@ -467,6 +528,12 @@ it. Shape output for acting on, not for completeness:
   was routed to — an unmapped verb the user declined, or a session that cannot reach
   the skill — say that instead. The lane needs no line of its own: `ran here` and a
   spawn already read as the two lanes.
+- **A spawn line carries four fields, in this order:** the routed skill, the role,
+  the model, the effort — `#23 → /implement · heavy · opus-5 · xhigh`. The skill sits
+  first because it is what the worker does. The other three are how hard it thinks.
+  A batch-spawn reports the four fields **per child**, so a mixed batch shows two
+  different skills. A spawn with no routed skill drops the field and keeps the other
+  three.
 - **Restate position every turn.** A worker's progress is `checklist 4/7`, a review
   loop is `round 2 of 3`. Read it off the checklist file and the round counter —
   don't ask the user to remember.
