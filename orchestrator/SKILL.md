@@ -496,7 +496,24 @@ are the prose below. Steps 4 to 8 need none, so `scripts/close_item.py` owns the
 Rationale:
 [`docs/adr/0015-close-is-a-deterministic-transaction.md`](docs/adr/0015-close-is-a-deterministic-transaction.md).
 
-First **find the worktree** (op 8) — display name = branch = slug. Keep its id and
+**The maintainer's words are the gate.** Read the instruction against this table
+before you touch anything:
+
+| Instruction | Teardown |
+|---|---|
+| "task done, merge and close" | yes |
+| "close 20" | yes |
+| "wrap up 20" | yes |
+| "flip 20 to review", "advance 20" | no |
+| ambiguous, or not said | ask first |
+
+The explicit ask **is** the confirmation. So never ask again for a merge the
+maintainer requested in the same turn. A **no** row is an advance and not a close:
+swap the label to the review state, move the card to `In review`
+([Board status](#board-status)), and stop there. On the **ask first** row, ask in one
+line and wait.
+
+Then **find the worktree** (op 8) — display name = branch = slug. Keep its id and
 its path. If nothing matches, the item is probably closed already. Do the label steps
 that still apply, and say so.
 
@@ -549,8 +566,8 @@ Three things the seam never learns, so you pass them in:
   ([Board status](#board-status)).
 - **Whether to mutate. The default invocation is a dry run.** It resolves every
   precondition, prints the plan as JSON, and changes nothing. Read that plan. Then
-  re-run it with `--execute`. Teardown needs `--execute --teardown` together, so
-  confirm it first ([Safety](#safety)).
+  re-run it with `--execute`. Teardown needs `--execute --teardown` together, and
+  only where the table above says yes.
 
 **Parent-close stays yours.** The seam closes one item. Where the tracker conventions
 define a parent close, apply it after the seam exits clean. That is the last child
@@ -606,13 +623,16 @@ enforces the standard on every worker, so its own output cannot be the
 counter-example.
 
 Break this when the user asks you to **explain** a routing or review decision
-(answer in full), or before a **destructive** step — teardown confirmation and a
-dirty-tree warning are spelled out, never compressed.
+(answer in full), or before a **destructive** step — a teardown confirmation and a
+refusal reason are spelled out, never compressed.
 
 ## Safety
 
-- Confirm with the user before teardown — it kills the live worker terminal and
-  can drop uncommitted work. The data-loss case is a dirty tree (step 3).
+- Confirm with the user before teardown **where the instruction is ambiguous or
+  unsaid** — it kills the live worker terminal and can drop uncommitted work. An
+  explicit "merge and close" **is** that confirmation, so a second ask is friction
+  rather than safety (the table in [Close a task](#close-a-task)). The data-loss case
+  is a dirty tree, and step 6 of the transaction refuses it rather than warning.
 - Keep the main checkout (config's `repo`) on the default branch — all
   tracker/git-state ops run there. This orchestrator's own worktree branch is
   separate and irrelevant.
