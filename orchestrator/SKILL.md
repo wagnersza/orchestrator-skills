@@ -311,6 +311,18 @@ on the prompt. The worker invokes `simple-english` on its own deliverable prose.
 collision sit in the **Prose deliverable** entry of [`CONTEXT.md`](CONTEXT.md).
 Point the worker at that entry rather than re-deriving the rule in the prompt.
 
+**The `commit` box is a loop, not a step.** It covers a series of commits, and the
+worker lands each one as soon as that slice is complete. So the prompt carries the two
+conditions for one slice: one logical change, and the branch self-consistent at that
+commit. It names the message convention — Conventional Commits, an imperative subject,
+and a body that says why when the subject cannot carry it. It says that a trivial item
+is one commit, and that this is not a violation. It puts the writing pass before the
+commit that carries the prose, which is what the writing-pass box on the checklist also
+says. Give the worker the rule in plain English, whatever the harness. Definition: the
+**Commit slice** entry in [`CONTEXT.md`](CONTEXT.md), which the prompt points at rather
+than restating. Rationale, the rejected options and the accepted risk:
+[`docs/adr/0013-workers-commit-in-contextualised-slices.md`](docs/adr/0013-workers-commit-in-contextualised-slices.md).
+
 Bake in the project recipe: boot the app with `run_recipe` on the per-item `ports`
 for evidence; satisfy `db_gate` if configured; meet the `evidence` bar (real-data
 proof + full suite — unit tests alone are not enough); post the review note on the
@@ -367,7 +379,8 @@ When a work item reaches the review state and review is enabled:
 3. **On request-changes:** re-prompt the **original impl worker** with the
    findings to fix, then re-review. Loop, bounded at `review.rounds` (default 3).
    Each fix round steps the impl worker's effort up one rung — a finding the model
-   missed at `high` is what `xhigh` is for.
+   missed at `high` is what `xhigh` is for. In a fix round, one finding is one slice,
+   so the reviewer can map each fix to the finding it answers.
 4. **On approve, or after the last round regardless:** gather evidence and flip
    the item to **human review**. The item stays `in-progress` through the loop (a
    worker owns it); it flips only when the loop concludes. Merge is always a human
