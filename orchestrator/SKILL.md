@@ -379,7 +379,8 @@ When a work item reaches the review state and review is enabled:
 3. **On request-changes:** re-prompt the **original impl worker** with the
    findings to fix, then re-review. Loop, bounded at `review.rounds` (default 3).
    Each fix round steps the impl worker's effort up one rung — a finding the model
-   missed at `high` is what `xhigh` is for.
+   missed at `high` is what `xhigh` is for. In a fix round, one finding is one slice,
+   so the reviewer can map each fix to the finding it answers.
 4. **On approve, or after the last round regardless:** gather evidence and flip
    the item to **human review**. The item stays `in-progress` through the loop (a
    worker owns it); it flips only when the loop concludes. Merge is always a human
