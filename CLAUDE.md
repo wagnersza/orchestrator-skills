@@ -33,6 +33,14 @@ its stdlib-only test suite: **run the tests when you touch a Python file**, per 
   ([`orchestrator/CONTEXT.md`](orchestrator/CONTEXT.md)) and restates no rule of
   the standard, per
   [ADR 0011](orchestrator/docs/adr/0011-delegate-technical-writing-to-simple-english.md).
+- **Commit in slices, not one blob per item.** One commit holds one logical change. It
+  also leaves the branch self-consistent, so every cross-reference it adds resolves
+  inside the same commit. Commit each slice as soon as it is complete. Conventional
+  Commits prefix, imperative subject, and a body that says why when the subject cannot
+  carry it. A trivial item is one commit, and that is not a violation. The unit is the
+  **Commit slice** entry in [`orchestrator/CONTEXT.md`](orchestrator/CONTEXT.md). The
+  rationale is
+  [ADR 0013](orchestrator/docs/adr/0013-workers-commit-in-contextualised-slices.md).
 - **Every claim in a skill body traces to a reference file or an ADR.** A rule with
   no home rots.
 - **A decision that reverses or narrows an earlier one gets a new ADR** under

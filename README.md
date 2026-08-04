@@ -34,6 +34,7 @@ session coordinates **worker** sessions: each worker is a
 | **Adversarial review** | Optional review by a second worker on a **different-vendor** model (e.g. implement opus-5, review gpt-5.6). Prompted for **coverage**, not self-filtering. |
 | **Fork / Pinned SHA** | `/skill-fork-sync`'s version dial: a fork of an upstream skill repo whose default branch sits at a known-good commit, because `claude plugin marketplace add` takes no ref/branch/tag flag. Nothing reaches your sessions until you promote. |
 | **Prose deliverable** | Text a worker routes through `simple-english` before it commits — the markdown in its diff, its review note, its PR body, and any string a Python file prints. Code, identifiers, paths, commands and link targets stay byte-identical. |
+| **Commit slice** | One commit on a worker's branch: one logical change, with the branch self-consistent at that commit (every cross-reference it adds resolves inside it). Committed as soon as the slice is done, not batched to the end. A trivial item is one commit. `main` still squash-merges to one commit per item ([ADR 0013](orchestrator/docs/adr/0013-workers-commit-in-contextualised-slices.md)). |
 
 Full glossary: [`orchestrator/CONTEXT.md`](orchestrator/CONTEXT.md). Design
 rationale: [`orchestrator/docs/adr/`](orchestrator/docs/adr/).
