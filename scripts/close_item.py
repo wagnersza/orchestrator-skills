@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run steps 4 to 7 of the **Close transaction**, in the one order they hold.
+"""Run steps 4 to 8 of the **Close transaction**, in the one order they hold.
 
 The order is the contract (ADR 0015). Steps 1 to 3 of the transaction need
 judgement, so they stay prose. Steps 4 to 8 need none — they are two gates, a
@@ -19,7 +19,13 @@ execute run would use:
 
     python3 -m scripts.close_item --issue 32 --pr 48 ... --execute
 
-The steps, and what each one does:
+**Teardown needs `--execute --teardown` together**, so no single flag is
+destructive and a bare invocation can only read:
+
+    python3 -m scripts.close_item ... --execute --teardown \\
+        --teardown-command '<the command the tool reference gives, ids filled in>'
+
+The five steps, and what each one does:
 
 | Step | Behaviour |
 |---|---|
@@ -27,10 +33,14 @@ The steps, and what each one does:
 | 5. pull the merge | do it. A step, not a gate — behind is normal after a merge |
 | 6. worktree clean? | refuse if dirty, and name the files. Nothing recovers that |
 | 7. label, close, card | one step, so a label cannot move without its card |
+| 8. remove the worktree | only with `--execute --teardown` |
 
-Two things this seam never learns, because each one turns it from a testable part
-into a coupled one:
+Three things this seam never learns, because each one turns it from a testable
+part into a coupled one:
 
+- **The workspace tool.** The teardown command arrives as `--teardown-command`.
+  The caller reads it from its tool reference and substitutes the ids. So a new
+  tool stays a Markdown change and this seam holds no tool command of its own.
 - **The project board.** The coordinates arrive as arguments. This seam reads no
   Markdown and holds no board.
 - **Any tracker but GitHub.** See the `ponytail:` comment on `GH` below.
@@ -368,6 +378,28 @@ def build_plan(args, tracker):
         )
     )
 
+    # --- 8. remove the worktree. Two flags, or it does not run.
+    command = args.teardown_command or "(no teardown command)"
+    if refusal:
+        status, note = STATUS_BLOCKED, not_reached(refusal)
+    elif not args.teardown_command:
+        status, note = STATUS_SKIPPED, (
+            "there is no --teardown-command, so nothing removes the worktree. The "
+            "caller reads that command from its tool reference and passes it in"
+        )
+    elif not args.teardown:
+        status, note = STATUS_SKIPPED, (
+            "teardown needs --execute and --teardown together, and --teardown is "
+            "absent"
+        )
+    elif worktree is not None and not worktree.exists():
+        status, note = STATUS_SKIPPED, f"there is no worktree at {worktree} any more"
+    else:
+        status, note = STATUS_TODO, (
+            "removes the worktree. This is the only step that destroys anything"
+        )
+    steps.append(step(8, "teardown", command, status, note))
+
     return steps, refusal
 
 
@@ -441,6 +473,7 @@ def build(args, tracker):
         "pr": args.pr,
         "repo": str(Path(args.repo)),
         "worktree": args.worktree or "",
+        "teardown_requested": bool(args.teardown),
         "refused": refusal,
         "exit_code": refusal["exit_code"] if refusal else EXIT_OK,
         "ran": [],
@@ -464,13 +497,17 @@ def execute(plan, tracker):
             continue
         try:
             plan["ran"] += run_step(entry, tracker)
-        except (GitError, GhError) as exc:
+        except (GitError, GhError, TeardownError) as exc:
             entry["status"] = STATUS_FAILED
             plan["error"] = str(exc)
             plan["exit_code"] = EXIT_ERROR
             return EXIT_ERROR
         entry["status"] = STATUS_DONE
     return plan["exit_code"]
+
+
+class TeardownError(RuntimeError):
+    """The teardown command exited non-zero."""
 
 
 def run_step(entry, tracker):
@@ -489,6 +526,18 @@ def run_step(entry, tracker):
             item["status"] = STATUS_DONE
             ran.append(item["command"])
         return ran
+    if entry["step"] == 8:
+        # The command is a string the caller composed from its tool reference, so
+        # a shell runs it. This is the only step that destroys anything, and it
+        # is reached only behind --execute --teardown and every gate above.
+        proc = subprocess.run(
+            entry["command"], shell=True, capture_output=True, text=True
+        )
+        if proc.returncode != 0:
+            raise TeardownError(
+                f"the teardown command failed: {proc.stderr.strip() or proc.stdout.strip()}"
+            )
+        return [entry["command"]]
     raise GhError(f"step {entry['step']} has no runner")
 
 
@@ -499,11 +548,11 @@ def main(argv=None):
     parser = argparse.ArgumentParser(
         prog="python3 -m scripts.close_item",
         description=(
-            "Run steps 4 to 7 of the close transaction, in the one order they hold. "
+            "Run steps 4 to 8 of the close transaction, in the one order they hold. "
             "The steps are the PR gate, the pull into the local default branch, the "
-            "clean-tree gate, and the tracker writes. The default prints the plan as "
-            "JSON and mutates nothing. --execute runs the plan and stops at the first "
-            "refusal."
+            "clean-tree gate, the tracker writes, and teardown. The default prints "
+            "the plan as JSON and mutates nothing. --execute runs the plan and stops "
+            "at the first refusal. Teardown needs --execute and --teardown together."
         ),
     )
     parser.add_argument("--issue", required=True, type=int, help="the work item number")
@@ -522,8 +571,8 @@ def main(argv=None):
     )
     parser.add_argument(
         "--worktree",
-        help="the item's worktree. Step 6 reads it for uncommitted work. If you do "
-        "not give it, step 6 does nothing",
+        help="the item's worktree. Step 6 reads it for uncommitted work, and step 8 "
+        "removes it. If you do not give it, both steps do nothing",
     )
     parser.add_argument(
         "--remove-label",
@@ -549,9 +598,21 @@ def main(argv=None):
         "--done-option-id", help="the id of the done option in that status field"
     )
     parser.add_argument(
+        "--teardown-command",
+        help="the command that removes the worktree, with the ids already in it. "
+        "The caller reads it from its tool reference, so this seam holds no "
+        "command of its own",
+    )
+    parser.add_argument(
         "--execute",
         action="store_true",
         help="run the plan instead of printing it. The run stops at the first refusal",
+    )
+    parser.add_argument(
+        "--teardown",
+        action="store_true",
+        help="permit step 8. Step 8 runs only with --execute as well, so no single "
+        "flag destroys a worktree",
     )
     parser.add_argument(
         "--gh-fixture",

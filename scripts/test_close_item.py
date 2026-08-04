@@ -8,6 +8,12 @@ framework and no agent runs: `--gh-fixture` stands in for every tracker read, so
 `gh` is never called. `GIT_CONFIG_GLOBAL` and `GIT_CONFIG_SYSTEM` point at
 `os.devnull`, so the developer's git config cannot leak into a fixture.
 
+The teardown command is a passed-in string, which is what makes the destructive
+path testable: every case here passes a command that creates a marker file, and
+then asserts the file exists only when it should. The single most valuable
+assertion in the file is that the marker is absent — see
+`test_a_refused_gate_runs_no_teardown_and_names_the_reason`.
+
     python3 -m pytest scripts/ -q
     python3 -m unittest discover -s scripts -t . -q     # fallback, no pytest
 """
@@ -120,6 +126,7 @@ class CloseItemTestCase(unittest.TestCase):
         )
         git(self.worktree, "checkout", "-qb", f"{ISSUE}-close-item-seam")
 
+        self.marker = self.root / "teardown-ran"
         self.write_fixture()
 
     # --- fixture helpers ----------------------------------------------------
@@ -148,7 +155,11 @@ class CloseItemTestCase(unittest.TestCase):
         self.fixture.write_text(json.dumps(data))
         self.writes = self.root / "gh.json.writes"
 
-    def close(self, *extra, board=True, worktree=True, expect=0):
+    def teardown_command(self):
+        """A teardown command that leaves proof it ran, and destroys nothing."""
+        return f"touch {self.marker}"
+
+    def close(self, *extra, board=True, worktree=True, teardown_command=True, expect=0):
         """Run the seam and return the parsed plan."""
         argv = [
             sys.executable,
@@ -169,6 +180,8 @@ class CloseItemTestCase(unittest.TestCase):
             argv += ["--worktree", str(self.worktree)]
         if board:
             argv += BOARD
+        if teardown_command:
+            argv += ["--teardown-command", self.teardown_command()]
         proc = subprocess.run(
             [*argv, *extra],
             cwd=REPO_ROOT,
@@ -198,9 +211,10 @@ class CloseItemTestCase(unittest.TestCase):
         return self.writes.read_text().splitlines() if self.writes.exists() else []
 
     def assertNothingMutated(self, before):
-        """The default invocation touched no branch and no tracker."""
+        """The default invocation touched no branch, no tracker and no worktree."""
         self.assertEqual(before, self.disk_state())
         self.assertEqual(self.tracker_writes(), [])
+        self.assertFalse(self.marker.exists())
 
     def disk_state(self):
         return (
@@ -219,10 +233,10 @@ class CloseItemTestCase(unittest.TestCase):
         self.assertEqual(plan["mutates"], "nothing")
         self.assertIsNone(plan["refused"])
         self.assertEqual(plan["exit_code"], EXIT_OK)
-        self.assertEqual([s["step"] for s in plan["steps"]], [4, 5, 6, 7])
+        self.assertEqual([s["step"] for s in plan["steps"]], [4, 5, 6, 7, 8])
         self.assertEqual(
             [s["name"] for s in plan["steps"]],
-            ["pr merged", "pull", "worktree clean", "tracker"],
+            ["pr merged", "pull", "worktree clean", "tracker", "teardown"],
         )
         self.assertEqual(self.step(plan, 4)["status"], "done")
         self.assertEqual(self.step(plan, 4)["merge_commit"], self.merge_commit)
@@ -232,6 +246,8 @@ class CloseItemTestCase(unittest.TestCase):
         self.assertNotEqual(rev(self.checkout, "main"), self.merge_commit)
         self.assertEqual(self.step(plan, 6)["status"], "done")
         self.assertEqual(self.step(plan, 7)["status"], "todo")
+        self.assertEqual(self.step(plan, 8)["status"], "skipped")
+        self.assertIn("--teardown", self.step(plan, 8)["note"])
 
         self.assertNothingMutated(before)
 
@@ -247,8 +263,8 @@ class CloseItemTestCase(unittest.TestCase):
         self.assertIn("`In review`", plan["refused"]["reason"])
         self.assertEqual(plan["exit_code"], EXIT_PR_NOT_MERGED)
         # Everything after the refusal is blocked, and each one says why.
-        self.assertEqual(self.statuses(plan), ["refused"] + ["blocked"] * 3)
-        for number in (5, 6, 7):
+        self.assertEqual(self.statuses(plan), ["refused"] + ["blocked"] * 4)
+        for number in (5, 6, 7, 8):
             self.assertIn("step 4 refused", self.step(plan, number)["note"])
 
         self.assertNothingMutated(before)
@@ -270,7 +286,9 @@ class CloseItemTestCase(unittest.TestCase):
         self.assertIn("no reflog", plan["refused"]["reason"])
         self.assertEqual(plan["exit_code"], EXIT_WORKTREE_DIRTY)
         # The gates above it passed, and the step below it is blocked.
-        self.assertEqual(self.statuses(plan), ["done", "todo", "refused", "blocked"])
+        self.assertEqual(
+            self.statuses(plan), ["done", "todo", "refused", "blocked", "blocked"]
+        )
 
         self.assertNothingMutated(before)
 
@@ -291,6 +309,9 @@ class CloseItemTestCase(unittest.TestCase):
         self.assertIn("there is no worktree to check", self.step(plan, 6)["note"])
         self.assertIsNone(plan["refused"])
         self.assertEqual(plan["exit_code"], EXIT_OK)
+        # The teardown command still owns the removal, because the caller asked
+        # for it and no gate above refused.
+        self.assertEqual(self.step(plan, 8)["status"], "skipped")
 
     def test_the_label_the_close_and_the_card_are_one_step(self):
         """A label that moves without its card cannot happen inside one step."""
@@ -312,7 +333,9 @@ class CloseItemTestCase(unittest.TestCase):
         plan = self.close("--execute")
 
         self.assertEqual(plan["mode"], "execute")
-        self.assertEqual(self.statuses(plan), ["done"] * 4)
+        self.assertEqual(
+            self.statuses(plan), ["done", "done", "done", "done", "skipped"]
+        )
         self.assertEqual(rev(self.checkout, "main"), self.merge_commit)
         self.assertEqual(
             [w.split()[1:3] for w in self.tracker_writes()],
@@ -356,9 +379,102 @@ class CloseItemTestCase(unittest.TestCase):
     def test_the_default_invocation_mutates_nothing_at_all(self):
         """No --execute, so this seam is a read whatever else it is given."""
         before = self.disk_state()
-        for extra in ([], ["--indent", "0"]):
+        for extra in ([], ["--teardown"], ["--indent", "0"]):
             self.close(*extra)
             self.assertNothingMutated(before)
+
+    # --- teardown: two flags, or it does not run ----------------------------
+
+    def test_every_gate_passing_with_both_flags_runs_the_teardown_command(self):
+        """The happy path, asserted by the marker file rather than by reading code."""
+        plan = self.close("--execute", "--teardown")
+
+        self.assertTrue(plan["teardown_requested"])
+        self.assertEqual(self.statuses(plan), ["done"] * 5)
+        self.assertTrue(self.marker.exists())
+        self.assertEqual(plan["ran"][-1], self.teardown_command())
+        # And the tracker half of the close happened before it.
+        self.assertEqual(len(self.tracker_writes()), 3)
+        self.assertEqual(rev(self.checkout, "main"), self.merge_commit)
+
+    def test_execute_without_the_teardown_flag_leaves_the_worktree_alone(self):
+        """One flag is not destructive: the tracker moves and the worktree stays."""
+        plan = self.close("--execute")
+
+        self.assertEqual(self.step(plan, 8)["status"], "skipped")
+        self.assertFalse(self.marker.exists())
+        self.assertTrue(self.worktree.exists())
+        self.assertFalse(plan["teardown_requested"])
+        # The tracker steps did run, so this is a real close minus teardown.
+        self.assertEqual(len(self.tracker_writes()), 3)
+
+    def test_the_teardown_flag_alone_is_not_destructive_either(self):
+        """--teardown with no --execute is still a plan, so nothing runs."""
+        before = self.disk_state()
+        plan = self.close("--teardown")
+
+        self.assertEqual(plan["mode"], "plan")
+        self.assertEqual(self.step(plan, 8)["status"], "todo")  # planned, not run
+        self.assertNothingMutated(before)
+
+    def test_a_refused_gate_runs_no_teardown_and_names_the_reason(self):
+        """The most valuable assertion here: teardown did not run.
+
+        Both flags are given and a gate refuses, so the destructive step must not
+        happen and the exit code must say which gate stopped it.
+        """
+        write(self.worktree / "unsaved.md", "work nobody committed\n")
+
+        plan = self.close("--execute", "--teardown", expect=EXIT_WORKTREE_DIRTY)
+
+        self.assertFalse(self.marker.exists())
+        self.assertTrue(self.worktree.exists())
+        self.assertTrue((self.worktree / "unsaved.md").exists())
+        self.assertEqual(self.step(plan, 8)["status"], "blocked")
+        self.assertEqual(plan["refused"]["step"], 6)
+        self.assertEqual(plan["exit_code"], EXIT_WORKTREE_DIRTY)
+        # The tracker was never written either, so the board cannot say done.
+        self.assertEqual(self.tracker_writes(), [])
+        self.assertEqual(self.step(plan, 7)["status"], "blocked")
+
+        # An unmerged PR is the other refusal, and it carries its own exit code.
+        self.write_fixture(pr_state="OPEN")
+        plan = self.close("--execute", "--teardown", expect=EXIT_PR_NOT_MERGED)
+        self.assertFalse(self.marker.exists())
+        self.assertEqual(self.tracker_writes(), [])
+        self.assertNotEqual(EXIT_PR_NOT_MERGED, EXIT_WORKTREE_DIRTY)
+
+    def test_the_teardown_command_is_only_ever_the_passed_in_string(self):
+        """A second command changes step 8, so the seam holds none of its own."""
+        plan = self.close("--teardown")
+        self.assertEqual(self.step(plan, 8)["command"], self.teardown_command())
+
+        other = self.root / "other-marker"
+        plan = self.close(
+            "--execute",
+            "--teardown",
+            "--teardown-command",
+            f"touch {other}",
+            teardown_command=False,
+        )
+        self.assertEqual(self.step(plan, 8)["command"], f"touch {other}")
+        self.assertTrue(other.exists())
+        self.assertFalse(self.marker.exists())
+
+        # And no workspace tool's own command shape is written into the module.
+        source = (REPO_ROOT / "scripts" / "close_item.py").read_text()
+        for shape in ("worktree rm", "worktree remove", "cmux ", "herdr "):
+            self.assertNotIn(shape, source, f"{shape!r} is hardcoded in the seam")
+
+    def test_no_teardown_command_removes_nothing_and_fails_nothing(self):
+        """The caller owns the command, so its absence is a no-op not an error."""
+        plan = self.close("--execute", "--teardown", teardown_command=False)
+
+        self.assertEqual(self.step(plan, 8)["status"], "skipped")
+        self.assertIn("--teardown-command", self.step(plan, 8)["note"])
+        self.assertFalse(self.marker.exists())
+        self.assertIsNone(plan["refused"])
+        self.assertEqual(len(self.tracker_writes()), 3)
 
     # --- the two things the seam must not know ------------------------------
 
