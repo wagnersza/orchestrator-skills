@@ -85,6 +85,33 @@ its commands here or in a report. A copied command drifts from the maintained on
 Throughout, address a worker by its **slug** (the work-item's ticket prefix, e.g.
 `#38 B5 · Contacts` → `b5-contacts`).
 
+## Resolve the verb before you act
+
+The user's phrase usually carries a **verb**, and an installed skill owns that job.
+Before you act on a verb, read
+[`references/skill-routing.md`](references/skill-routing.md) and resolve the verb to
+its **Skill** and its **Lane**. Read that file at the moment you need it, never from
+memory. Never copy a row into this body. One file holds the rows, so a newly declared
+dependency is one new row. The vocabulary is the **Skill routing** and **Lane**
+entries in [`CONTEXT.md`](CONTEXT.md). Rationale:
+[`docs/adr/0014-route-verbs-to-skills-in-two-lanes.md`](docs/adr/0014-route-verbs-to-skills-in-two-lanes.md).
+
+**Lane `inline` — invoke the skill here.** Invoke it in this session, against the
+main checkout (config's `repo`), on the default branch. No worktree, no branch, no
+spawn. Hand it what the row's Notes column says it needs. Then name the skill you
+routed to in the report ([Reporting to the user](#reporting-to-the-user)). An
+`inline` skill writes issues, docs or conversation, and never source, so "never do
+implementation work here" holds. A verb that writes source is a `worker` row, and
+that law is what puts it there.
+
+**Lane `worker` — nothing changes yet.** A `worker` verb keeps the spawn flow below
+exactly as it is today. The splice of the invocation into the spawn prompt is
+separate work, and it has not landed.
+
+**A queue question is not a verb.** A bare `/orchestrator`, and *what next* / *what
+should I run* / *what's ready*, resolve to no skill and route nowhere. Answer them
+with ["What next?"](#what-next--pick-the-next-work), unchanged.
+
 ## Board status
 
 Where the tracker config has a **`## Project board`** section, every work item is
