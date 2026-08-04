@@ -104,9 +104,10 @@ routed to in the report ([Reporting to the user](#reporting-to-the-user)). An
 implementation work here" holds. A verb that writes source is a `worker` row, and
 that law is what puts it there.
 
-**Lane `worker` — nothing changes yet.** A `worker` verb keeps the spawn flow below
-exactly as it is today. The splice of the invocation into the spawn prompt is
-separate work, and it has not landed.
+**Lane `worker` — hand the skill to the worker.** Invoke nothing here. The
+invocation goes into the spawn prompt, so the worker's first act inside its own
+worktree is to enter the skill. [Spawn a worker](#spawn-a-worker-implement-x)
+preflights the skill and splices it. This section only resolves which skill it is.
 
 **A queue question is not a verb.** A bare `/orchestrator`, and *what next* / *what
 should I run* / *what's ready*, resolve to no skill and route nowhere. Answer them
@@ -236,7 +237,23 @@ When the user says **implement #N / implement X / start work on X**:
    `(model, effort)` pair (see [Right model for the job](#right-model-for-the-job)),
    then compose `$CMD` from `references/harnesses/<harness>.md` using harness +
    model + effort + yolo. Preflight any harness-specific requirement the reference
-   names (e.g. claude `/implement` plugins); abort rather than send a dead prompt.
+   names; abort rather than send a dead prompt. **The routed skill is one of those
+   requirements.** Where the verb resolved to a `worker` row
+   ([Resolve the verb before you act](#resolve-the-verb-before-you-act)), confirm the
+   skill is reachable by *this* harness, before you compose the prompt:
+   - **claude** — the skill is a plugin skill, so confirm the plugin that ships it is
+     installed. Every row in the routing table ships in `mattpocock-skills`, so the
+     check is the `mattpocock-skills` line of the plugin check block in
+     [`references/requirements.md`](references/requirements.md). Don't write a check
+     of your own.
+   - **any other harness** — there is no slash command to reach, so the reachable
+     form is the row's Notes prose. Confirm the row has it. A `worker` row with no
+     prose contract is not reachable on this harness.
+
+   A failed check **aborts the spawn**. Say which skill, which harness, and that
+   `/orchestrator-setup` installs the missing plugin. This is the one place a routed
+   verb fails hard. So it fails before a worktree exists, and not inside a worker that
+   cannot run its first instruction.
 3. **worktree-create** (op 2) — branch + checkout + run `setup_cmd` via the tool's
    setup hook, off the default branch (or stacked, if the item stacks). Capture
    the worktree id/path.
@@ -273,7 +290,11 @@ the diagnosis checklist, the shared rules, and the per-model tuning. Don't resta
 its rules here or work from memory of them.
 
 1. **Draft** the worker prompt: the task, the acceptance criteria, the checklist,
-   the project recipe, the evidence bar, the scope edges.
+   the project recipe, the evidence bar, the scope edges — and the **routed skill**,
+   where the verb resolved to a `worker` row. The invocation is one more item in that
+   list, at the same level as the criteria and the scope edges, and it goes into the
+   **draft**, not into the sent prompt afterwards. The `prompt-improver` pass below
+   must see it.
 2. **Run it through `prompt-improver`**, naming the role's model so it applies the
    right profile (look the model up in [`references/models.md`](references/models.md)
    → its `prompt-improver` profile). Send the improved prompt, not the draft.
@@ -281,7 +302,23 @@ its rules here or work from memory of them.
    case explicitly: it keeps the tight task framing and the checklist, and applies
    only the model-specific tuning. A worker prompt must be deterministic and
    finishable unattended, so the open senior-partner rewrite must **not** be
-   applied — say so when invoking, or it may reshape the contract.
+   applied — say so when invoking, or it can reshape the contract. **This framing is
+   also what protects the spliced invocation.** The rewrite keeps a literal
+   instruction literal. The open rewrite is the one that turns a command into a
+   suggestion, and a suggestion is the *may* this change exists to remove.
+
+**Word the routed skill as a command the worker runs, not as advice.** The first
+thing the prompt asks of the worker is to enter the skill: `Run /implement.` — an
+imperative, in the prompt's own voice. Never *you may use*, *consider*, *if it
+helps*, or a mention of the skill inside a sentence about something else. A worker
+that reads a suggestion does the work freehand, which is the defect the routing
+table exists to close. The skill then runs **inside** the completion contract, not in
+place of it. The checklist above still holds every box, and
+`.orchestrator/checklist-<item>.md` stays the file this session reads for progress.
+Which skill it is comes from the routing table
+([Resolve the verb before you act](#resolve-the-verb-before-you-act)), and what to
+hand it comes from that row's Notes. How to word the rest of the prompt is
+`prompt-improver`'s, as above.
 
 Three things `prompt-improver` can't know, so state them in the draft:
 
