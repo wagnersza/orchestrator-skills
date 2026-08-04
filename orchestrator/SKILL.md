@@ -164,8 +164,11 @@ read it before the first spawn of a session.
    item to a harness that reaches it. Validate the effort string against the ladder
    **yourself**: `claude` accepts a typo'd `--effort` with only a warning and then
    runs at the default, which scrolls away unseen in a TUI worker.
-4. **Report the choice** when reporting the spawn: `#N → heavy · opus-5 · xhigh`.
-   A wrong call is then visible and correctable in one sentence.
+4. **Report the choice** when reporting the spawn, after the routed skill:
+   `#23 → /implement · heavy · opus-5 · xhigh`. A wrong call is then visible and
+   correctable in one sentence. The skill field is the routed one, and it is a
+   separate resolution from this one — see
+   [Reporting to the user](#reporting-to-the-user).
 
 Neither flag fails loudly when wrong: `claude` warns-and-defaults on a bad effort,
 and `codex` silently ignores a `--model` placed before its subcommand. Where the
@@ -513,7 +516,8 @@ cannot hold "we're on round 2 of 3 for #38" across turns, so every report restat
 it. Shape output for acting on, not for completeness:
 
 - **Lead with state, not narration.** First line is the board: what changed and
-  what's running. `#38 b5-contacts spawned · heavy · opus-5 · xhigh. 2 workers live.`
+  what's running.
+  `#38 b5-contacts spawned · /implement · heavy · opus-5 · xhigh. 2 workers live.`
   Never open with what you're about to do.
 - **Name the skill you routed to.** A verb resolved through
   [`references/skill-routing.md`](references/skill-routing.md) names its skill in the
@@ -522,6 +526,12 @@ it. Shape output for acting on, not for completeness:
   was routed to — an unmapped verb the user declined, or a session that cannot reach
   the skill — say that instead. The lane needs no line of its own: `ran here` and a
   spawn already read as the two lanes.
+- **A spawn line carries four fields, in this order:** the routed skill, the role,
+  the model, the effort — `#23 → /implement · heavy · opus-5 · xhigh`. The skill sits
+  first because it is what the worker does. The other three are how hard it thinks.
+  A batch-spawn reports the four fields **per child**, so a mixed batch shows two
+  different skills. A spawn with no routed skill drops the field and keeps the other
+  three.
 - **Restate position every turn.** A worker's progress is `checklist 4/7`, a review
   loop is `round 2 of 3`. Read it off the checklist file and the round counter —
   don't ask the user to remember.
