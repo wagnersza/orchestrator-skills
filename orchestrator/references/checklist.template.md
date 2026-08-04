@@ -13,8 +13,14 @@ item.
 - [ ] run the prose you changed through the `simple-english` skill in pragmatic mode
       — the markdown in your diff, the strings a Python file prints, your review note,
       and your PR/MR body. Identifiers, paths, commands, code blocks, link targets,
-      YAML/JSON keys and proper nouns stay byte-identical.
-- [ ] commit
+      YAML/JSON keys and proper nouns stay byte-identical. This box binds **per
+      commit**. Run the pass before the commit that carries that prose, not before the
+      last commit of the item.
+- [ ] commit in slices — this box covers a **series** of commits, not one. Commit each
+      slice as soon as that slice is complete. Do not wait for the end of the item. One
+      slice holds one logical change. The branch is also self-consistent at that commit:
+      every cross-reference the commit adds resolves inside the same commit. A trivial
+      item is one commit, and that is not a violation.
 - [ ] push the branch
 - [ ] open the PR/MR (description links back to the work item for the review note + evidence)
 - [ ] if a DB gate is configured, satisfy it (back up, migrate, verify schema)
