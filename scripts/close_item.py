@@ -6,10 +6,10 @@ judgement, so they stay prose. Steps 4 to 8 need none — they are two gates, a
 pull, two tracker writes and a passed-in command — so this seam owns them and no
 reader can put them in a different order.
 
-**Plan mode is the default and it mutates nothing.** It resolves every
-precondition and emits JSON: the ordered steps, each marked `todo`, `done`,
-`refused`, `skipped` or `blocked`, the refusal reason, and the exit code an
-execute run would use:
+**Plan mode is the default and mutates nothing.** It resolves every precondition
+and emits JSON: the five ordered steps, each marked `todo`, `done`, `refused`,
+`skipped` or `blocked`, the refusal reason, and the exit code an execute run
+would use:
 
     python3 -m scripts.close_item --issue 32 --pr 48 \\
         --repo /path/to/main/checkout --worktree /path/to/worktree \\
@@ -39,8 +39,8 @@ Three things this seam never learns, because each one turns it from a testable
 part into a coupled one:
 
 - **The workspace tool.** The teardown command arrives as `--teardown-command`.
-  The caller reads it from its tool reference and substitutes the ids. So a new
-  tool stays a Markdown change and this seam holds no tool command of its own.
+  The caller reads it from `references/tools/<tool>.md` and substitutes the ids.
+  So a new tool stays a Markdown change and no `orca` command is written here.
 - **The project board.** The coordinates arrive as arguments. This seam reads no
   Markdown and holds no board.
 - **Any tracker but GitHub.** See the `ponytail:` comment on `GH` below.
@@ -62,7 +62,7 @@ EXIT_WORKTREE_DIRTY = 3
 
 # ponytail: `gh` is hardcoded, so this seam speaks to GitHub and to no other
 # tracker. One tracker does not pay for an abstraction. Whoever first needs
-# GitLab has two upgrade paths, and both stop at `Tracker`: swap the command
+# GitLab has two upgrade paths, and both stop at `Tracker`: swap the six command
 # builders in that class for their `glab` equivalents, or put a `--tracker-cli`
 # argument in front of them. The gates, the plan and the order above them do not
 # change, because none of them knows which CLI ran.
@@ -148,7 +148,8 @@ class Tracker:
          "issues": {"32": {"state": "OPEN", "labels": ["to-review"]}},
          "project_items": {"32": "PVTI_x"}}
 
-    A number absent from a key reads as an empty record.
+    A number absent from a key reads as an empty record, which is the same answer
+    a repo with no board card gives.
 
     In fixture mode a write runs nothing. It appends its command to
     `<fixture path>.writes`, one per line. That file is what a test reads to see
@@ -245,10 +246,10 @@ def not_reached(refusal):
 
 
 def build_plan(args, tracker):
-    """Resolve every precondition and return the ordered steps.
+    """Resolve every precondition and return the five ordered steps.
 
-    Reads only. The order here is the order the steps hold, and there is no
-    second list of them anywhere.
+    Reads only. The statuses it writes are what an execute run acts on, so the
+    order here is the order there — there is no second list of steps.
     """
     steps = []
     refusal = None
@@ -308,9 +309,7 @@ def build_plan(args, tracker):
     #        no reflog, so this is the one unrecoverable case in the flow.
     check_tree = f"git -C {worktree or '<worktree>'} status --porcelain"
     if refusal:
-        steps.append(
-            step(6, "worktree clean", check_tree, STATUS_BLOCKED, not_reached(refusal))
-        )
+        steps.append(step(6, "worktree clean", check_tree, STATUS_BLOCKED, not_reached(refusal)))
     elif worktree is None or not worktree.exists():
         steps.append(
             step(
@@ -353,9 +352,7 @@ def build_plan(args, tracker):
                 )
             else:
                 steps.append(
-                    step(
-                        6, "worktree clean", check_tree, STATUS_DONE, "the tree is clean"
-                    )
+                    step(6, "worktree clean", check_tree, STATUS_DONE, "the tree is clean")
                 )
 
     # --- 7. the label, the close and the card, as one step. A label that moves
@@ -363,6 +360,8 @@ def build_plan(args, tracker):
     parts = tracker_parts(args, tracker)
     if refusal:
         status, note = STATUS_BLOCKED, not_reached(refusal)
+    elif all(part["status"] in (STATUS_DONE, STATUS_SKIPPED) for part in parts):
+        status, note = STATUS_DONE, "the label, the item and the card are already set"
     else:
         status, note = STATUS_TODO, (
             "one step, so the label and the card always move together"
@@ -371,7 +370,7 @@ def build_plan(args, tracker):
         step(
             7,
             "tracker",
-            " && ".join(part["command"] for part in parts),
+            " && ".join(part["command"] for part in parts) or "(nothing to write)",
             status,
             note,
             parts=parts,
@@ -404,31 +403,71 @@ def build_plan(args, tracker):
 
 
 def tracker_parts(args, tracker):
-    """The three writes step 7 holds, each with its own command."""
+    """The three writes step 7 holds, each with its own status.
+
+    Each part is idempotent, which is what makes a part-applied close resumable:
+    a re-run finds the parts that landed already `done` and finishes the rest.
+    """
+    issue = tracker.issue(args.issue)
+    labels = issue.get("labels") or []
+    closed = (issue.get("state") or "").upper() == "CLOSED"
+
     flags = []
     for name in args.remove_label:
         flags += ["--remove-label", name]
     for name in args.add_label:
         flags += ["--add-label", name]
-    label = part(
-        "label",
-        [GH, "issue", "edit", str(args.issue), *flags],
-        STATUS_TODO,
-        f"the item carries "
-        f"{', '.join(tracker.issue(args.issue).get('labels') or []) or 'no work-state label'}",
-    )
+    label_argv = [GH, "issue", "edit", str(args.issue), *flags]
+    if not flags:
+        label = part("label", label_argv, STATUS_SKIPPED, "there is no label to move")
+    elif not any(name in labels for name in args.remove_label) and all(
+        name in labels for name in args.add_label
+    ):
+        label = part("label", label_argv, STATUS_DONE, "the labels are already correct")
+    else:
+        label = part(
+            "label",
+            label_argv,
+            STATUS_TODO,
+            f"the item carries {', '.join(labels) or 'no work-state label'}",
+        )
+
+    close_argv = [GH, "issue", "close", str(args.issue)]
     close = part(
         "close",
-        [GH, "issue", "close", str(args.issue)],
-        STATUS_TODO,
-        f"closes issue #{args.issue}",
+        close_argv,
+        STATUS_DONE if closed else STATUS_TODO,
+        f"issue #{args.issue} is already closed"
+        if closed
+        else f"closes issue #{args.issue}",
     )
+
     return [label, close, card_part(args, tracker)]
 
 
 def card_part(args, tracker):
-    """The board write, built from the coordinates the caller passed in."""
+    """The board write, or a no-op where there is no board to write to."""
+    missing = [
+        "--" + name.replace("_", "-")
+        for name in BOARD_ARGS
+        if not getattr(args, name)
+    ]
+    if missing:
+        return part(
+            "card",
+            [],
+            STATUS_SKIPPED,
+            f"there is no board write, because {', '.join(missing)} is absent. A repo "
+            f"with no board runs on labels alone",
+        )
     item = tracker.board_item(args.issue, args.project_number, args.project_owner)
+    if not item:
+        return part(
+            "card",
+            [],
+            STATUS_SKIPPED,
+            f"issue #{args.issue} has no card on project {args.project_number}",
+        )
     argv = [
         GH,
         "project",
@@ -588,7 +627,11 @@ def main(argv=None):
         metavar="LABEL",
         help="a label to add to the item. Repeatable",
     )
-    parser.add_argument("--project-number", help="the number of the board")
+    parser.add_argument(
+        "--project-number",
+        help="the number of the board. Step 7 writes no card unless all five board "
+        "arguments are present",
+    )
     parser.add_argument("--project-owner", help="the owner of the board")
     parser.add_argument("--project-id", help="the node id of the board")
     parser.add_argument(

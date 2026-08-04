@@ -292,6 +292,53 @@ class CloseItemTestCase(unittest.TestCase):
 
         self.assertNothingMutated(before)
 
+    def test_absent_board_arguments_skip_the_card_and_keep_the_close_valid(self):
+        """A repo with no board is supported, so the card write is a no-op."""
+        plan = self.close(board=False)
+
+        card = self.part(plan, "card")
+        self.assertEqual(card["status"], "skipped")
+        self.assertIn("--project-number", card["note"])
+        self.assertIn("labels alone", card["note"])
+        self.assertEqual(card["argv"], [])
+        # And the close is still valid: the label and the close still run.
+        self.assertIsNone(plan["refused"])
+        self.assertEqual(plan["exit_code"], EXIT_OK)
+        self.assertEqual(self.step(plan, 7)["status"], "todo")
+        self.assertEqual(self.part(plan, "label")["status"], "todo")
+        self.assertEqual(self.part(plan, "close")["status"], "todo")
+
+    def test_an_issue_with_no_card_is_skipped_not_failed(self):
+        """An empty item id is the answer a repo with no card for this issue gives."""
+        self.write_fixture(card="")
+        plan = self.close()
+
+        card = self.part(plan, "card")
+        self.assertEqual(card["status"], "skipped")
+        self.assertIn("no card", card["note"])
+        self.assertIsNone(plan["refused"])
+        self.assertEqual(plan["exit_code"], EXIT_OK)
+
+    def test_an_already_closed_item_reads_done_and_the_plan_stays_valid(self):
+        """Idempotence: a part-applied close is resumable rather than broken."""
+        self.write_fixture(issue_state="CLOSED", labels=())
+        git(self.checkout, "pull", "-q", "--ff-only", "origin", "main")
+        plan = self.close()
+
+        self.assertEqual(self.step(plan, 5)["status"], "done")
+        self.assertIn("already has the merge", self.step(plan, 5)["note"])
+        self.assertEqual(self.part(plan, "label")["status"], "done")
+        self.assertEqual(self.part(plan, "close")["status"], "done")
+        self.assertEqual(self.step(plan, 7)["status"], "todo")  # the card is left
+        self.assertIsNone(plan["refused"])
+        self.assertEqual(plan["exit_code"], EXIT_OK)
+
+        # With the card written too, step 7 reads done as a whole.
+        self.write_fixture(issue_state="CLOSED", labels=(), card="")
+        plan = self.close()
+        self.assertEqual(self.step(plan, 7)["status"], "done")
+        self.assertEqual(self.statuses(plan)[:4], ["done", "done", "done", "done"])
+
     def test_a_local_branch_that_already_has_the_merge_is_not_pulled_again(self):
         """Behind is a step, and caught up is nothing to do — never a refusal."""
         git(self.checkout, "pull", "-q", "--ff-only", "origin", "main")
@@ -443,6 +490,30 @@ class CloseItemTestCase(unittest.TestCase):
         self.assertFalse(self.marker.exists())
         self.assertEqual(self.tracker_writes(), [])
         self.assertNotEqual(EXIT_PR_NOT_MERGED, EXIT_WORKTREE_DIRTY)
+
+    def test_a_rerun_after_a_part_applied_close_finishes_it(self):
+        """Resumable: the first run stops short of teardown, the second finishes."""
+        self.close("--execute")
+        self.assertFalse(self.marker.exists())
+
+        self.write_fixture(issue_state="CLOSED", labels=())
+        plan = self.close("--execute", "--teardown")
+
+        self.assertEqual(self.step(plan, 5)["status"], "done")
+        self.assertEqual(self.part(plan, "label")["status"], "done")
+        self.assertEqual(self.part(plan, "close")["status"], "done")
+        self.assertEqual(self.step(plan, 8)["status"], "done")
+        self.assertTrue(self.marker.exists())
+        # The label and the close were not written twice.
+        self.assertEqual(
+            [w.split()[1:3] for w in self.tracker_writes()],
+            [
+                ["issue", "edit"],
+                ["issue", "close"],
+                ["project", "item-edit"],
+                ["project", "item-edit"],
+            ],
+        )
 
     def test_the_teardown_command_is_only_ever_the_passed_in_string(self):
         """A second command changes step 8, so the seam holds none of its own."""
