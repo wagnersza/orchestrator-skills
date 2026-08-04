@@ -177,6 +177,11 @@ and `codex` silently ignores a `--model` placed before its subcommand. Where the
 harness prints a startup banner (codex prints `model:` and `reasoning effort:`),
 read it once after the spawn to confirm both landed.
 
+**Both are members of one family: a failure mode that reports success.** The third is
+the readiness gate — see
+[Gate readiness before the first prompt](#gate-readiness-before-the-first-prompt),
+which names the family and says how to answer the next one.
+
 Thinking stays **on** for every worker at every effort. Thinking-off leaks tool
 calls into plain text — they never execute and they poison later turns of an
 unattended loop.
@@ -268,7 +273,8 @@ When the user says **implement #N / implement X / start work on X**:
    setup hook, off the default branch (or stacked, if the item stacks). Capture
    the worktree id/path.
 4. **worker-create** (op 3) — start `$CMD`; capture the **stable** handle to
-   prompt.
+   prompt. Then **gate on readiness** before any prompt — see
+   [Gate readiness before the first prompt](#gate-readiness-before-the-first-prompt).
 5. **Claim the item first** — swap `ready-for-agent` → `in-progress` on the
    tracker (labels from `issue-tracker.md`), before prompting, so the board
    reflects the worker and "what next?" won't hand it out twice. Then **move its
@@ -279,6 +285,47 @@ When the user says **implement #N / implement X / start work on X**:
 6. **Write the checklist + deliver the prompt** — see below.
 7. **Follow-along panel** (op 7, if the tool supports it) — open the work item as
    a tab inside the worker's worktree.
+
+### Gate readiness before the first prompt
+
+**A handle is not a worker.** Between `worker-create` (op 3) and the first `send`
+(op 4), confirm the agent is actually accepting input. This gate applies to **every
+harness** and to **every** first prompt, the review spawn included.
+
+**The authoritative signal is a live agent process whose working directory is the
+worktree.** That is a **process check**, not a screen check. Nothing else qualifies.
+Three states leave no such process: a harness that has died, one waiting on a
+first-run dialog, and one that never authenticated. From outside they are
+indistinguishable, which is why one check covers all three.
+
+**Two things that look like the signal and are not.** A terminal that reports itself as
+running is reporting on the **shell**, which outlives the agent and is what then
+receives the prompt. An idle-screen condition is met by an idle shell. Both report
+ready for a worker that is already dead. On an alt-screen TUI the screen is worse than
+useless. The buffer comes back as box-drawing noise. Scraping it for a shell prompt
+finds one under a healthy TUI, and misses one under a dead agent.
+
+**The concrete command belongs to the tool, not here** — it is op **3a** in
+[`references/tools/<tool>.md`](references/tools/_operations.md), which is where a
+command that changes per tool has its home. Which dialogs a harness can sit behind
+belongs to [`references/harnesses/<harness>.md`](references/harnesses/codex.md).
+
+**Where the harness reference names a first-run dialog, send and submit are two
+steps:** type the prompt, confirm it reached the composer, then submit. One call that
+does both cannot be inspected between them, and a prompt submitted into a dialog is
+lost — worse, it can reach the shell underneath and execute as commands. Where the
+harness has no such dialog, op 4 stays one step. The tool reference documents both
+halves.
+
+**This is the third member of a named family: a failure mode that reports success.**
+The other two are already recorded — `claude` warns-and-defaults on a typo'd
+`--effort`, and `codex` silently ignores a `--model` placed before its subcommand (see
+[Right model for the job](#right-model-for-the-job)). Each returns a value meaning
+"fine" for a question next to the one asked, and each costs a whole run before anyone
+notices. **Recognise the shape, and do not answer it with a louder check of the same
+kind.** Find the signal that is true of the thing you are asking about, and gate on
+that. Rationale:
+[`docs/adr/0017-gate-worker-readiness-on-a-process-check.md`](docs/adr/0017-gate-worker-readiness-on-a-process-check.md).
 
 ### The prompt: checklist + completion contract
 
@@ -459,7 +506,13 @@ When a work item reaches the review state and review is enabled:
    `--base-branch <impl-branch>`), harness per config, model + effort =
    `models.review` (default effort `high` — review accuracy holds at lower effort).
    Assert the review model's vendor differs from the impl model's
-   (`references/models.md`) — refuse if same vendor.
+   (`references/models.md`) — refuse if same vendor. **Then gate on readiness before
+   the review prompt**, per
+   [Gate readiness before the first prompt](#gate-readiness-before-the-first-prompt).
+   A review spawn needs this more than an impl spawn, not less. Its worktree is fresh,
+   and its harness is usually the *other* vendor's — so it is the one this machine has
+   launched least often. A lost review round is also silent: the impl worker waits, the
+   findings never arrive, and nothing reports an error.
 2. **Prompt it to review** the diff/MR against the work item's acceptance
    criteria — drafted, then run through `prompt-improver` for the review model's
    profile, same as a spawn prompt. Say it's a **code-review prompt**:
@@ -469,6 +522,22 @@ When a work item reaches the review state and review is enabled:
    that literally and silently drops real bugs. The orchestrator ranks when it
    reads the verdict. The reviewer posts a verdict on the work item: **approve**
    or **request-changes + findings**.
+
+   **Four substitutions this prompt needs, learned by running the flow.** Each closes a
+   way a reviewer produces a plausible verdict that is not a review:
+
+   - **Run the suites yourself, rather than trusting the commit messages.** A worker's
+     own claim that a suite is green is the claim under review, not evidence for it.
+   - **Give every acceptance-criteria checkbox its own verdict.** One verdict per box,
+     named. A summary over a group of boxes hides the one box that failed.
+   - **Do not spawn sub-agents.** The reviewer is already the second opinion. A
+     sub-agent's findings arrive unattributed and cost a round.
+   - **Report per axis, with a confidence and a severity on each finding.** The axes
+     stay `/code-review`'s two. This adds only the two per-finding fields, which is
+     what lets this session rank without re-reading the diff.
+
+   These four are prompt *content*, so they go into the draft and through
+   `prompt-improver` with the rest — they restate no rule of the two-axis contract.
 3. **On request-changes:** re-prompt the **original impl worker** with the
    findings to fix, then re-review. Loop, bounded at `review.rounds` (default 3).
    Each fix round steps the impl worker's effort up one rung — a finding the model
@@ -477,6 +546,27 @@ When a work item reaches the review state and review is enabled:
    re-enters the same routed skill the original spawn used** — not a re-resolution of
    the verb, and not `/code-review` because a review produced the findings. The worker
    resumes in the posture it started in. Effort steps up, and the skill does not change.
+
+   **A fix prompt written from the findings alone is incomplete.** The findings say what
+   is wrong. They carry nothing about who is fixing it. Three things go in besides:
+
+   - **The routed skill, as a literal invocation.** `/implement`, not a sentence
+     mentioning `/implement`. Same rule as a spawn prompt, for the same reason — a
+     mention reads as a suggestion, and the worker then works freehand. **A fix prompt
+     is a fresh prompt to a worker whose context can be gone**, so it re-states the
+     invocation instead of relying on the worker to remember entering it.
+   - **The worker's own harness, model, effort and role.** Effort steps up each round,
+     so the worker cannot infer its current setting from the last one it saw.
+   - **The reviewer's model, effort and harness, with the cross-vendor fact stated.**
+     Not a footnote. A worker that does not know a **different vendor** produced the
+     findings reads them as its own second-guessing, and argues with them instead of
+     fixing them.
+
+   Word these the way a spawn prompt words the same facts. Then run the fix prompt
+   through `prompt-improver` as an agentic-pipeline prompt. A fix prompt is a worker
+   prompt, so every rule in
+   [The prompt: checklist + completion contract](#the-prompt-checklist--completion-contract)
+   applies to it unchanged.
 4. **On approve, or after the last round regardless:** gather evidence and flip
    the item to **human review**. The item stays `in-progress` through the loop (a
    worker owns it); it flips only when the loop concludes. Merge is always a human

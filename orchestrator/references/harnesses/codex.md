@@ -70,7 +70,73 @@ reasoning effort: medium
 The startup header prints `model:` and `reasoning effort:` — read it once after a
 spawn to confirm both landed, and re-order rather than trusting the flag position.
 
+## First-run dialogs — the yolo flag does not skip them
+
+A fresh `codex` can sit behind **two** dialogs before it accepts any input, and on the
+run that produced this section it showed both and then exited:
+
+1. **Directory trust** — `Do you trust the contents of this directory?`
+2. **Hooks review** — `Hooks need review`, where a hook is configured whose hash is
+   not yet trusted.
+
+`--dangerously-bypass-approvals-and-sandbox` governs command approvals **inside** a
+session. It does not answer either dialog, so it does not get a worker to a composer.
+
+**Trust is answered once per project root, then persisted** in `~/.codex/config.toml`:
+
+```toml
+[projects."<project-root>"]
+trust_level = "trusted"
+```
+
+**Do not assume a subdirectory worktree inherits the main checkout's trust.** Measured
+on `codex-cli` 0.146.0, `codex` resolves the project root from git, and for a **linked
+worktree** that root is *the worktree itself*, not the repository the worktree belongs
+to:
+
+| Working directory | Project root codex resolved |
+|-------------------|-----------------------------|
+| the repository root | the repository root |
+| a plain subdirectory of it | the repository root |
+| a **linked git worktree** of it | **the linked worktree** |
+
+A plain subdirectory does inherit. A linked worktree does not, and a linked worktree is
+exactly what every worker runs in. So each new worktree is a new project root, with its
+own unanswered trust dialog. Treat a first spawn in a fresh worktree as a dialog to
+answer, never as trusted-by-inheritance.
+
+The **hooks** dialog is keyed separately, by the hash of each hook entry
+(`[hooks.state."<file>:<event>:<i>:<j>"]` with a `trusted_hash`), so it reappears
+whenever a hook file changes rather than per project. `--dangerously-bypass-hook-trust`
+runs enabled hooks without persisted trust for one invocation. It is a separate flag
+from the yolo one, and it carries its own risk.
+
+**This is why the readiness gate is a process check.** Behind either dialog, the
+process is alive and the composer is closed, so `terminal read` reports
+`status: running` and `terminal wait --for tui-idle` reports `satisfied: true`.
+Measured: text sent to a dialog-blocked `codex` appeared **nowhere** in the read
+buffer. So this harness is the one that needs the conditional split of op 4 — type the
+prompt, confirm it is in the composer, then submit
+([`../tools/orca.md`](../tools/orca.md#4a-send-in-two-steps-where-a-harness-needs-a-dialog-answered)).
+The gate itself is in the skill body and the command is in the tool reference
+([`../../docs/adr/0017-gate-worker-readiness-on-a-process-check.md`](../../docs/adr/0017-gate-worker-readiness-on-a-process-check.md)).
+
+## Startup noise that is not a failure
+
+A `codex` worker can print these while booting normally. **None of them blocks the
+model path**, so do not read one as a dead spawn or tear the worker down over it:
+
+- `Failed to refresh token: refresh_token_reused` — repeated lines. Authentication is
+  already valid for the session.
+- MCP `HTTP 401` lines. One configured MCP server failed to authenticate. The harness
+  runs without that server's tools.
+
+The signal that a spawn worked is the startup header's `model:` and
+`reasoning effort:` lines, plus the readiness gate. Judge the spawn on those two and
+ignore the noise above.
+
 ## Notes
 
 - Send the completion contract as **plain English** — spell out every checklist step in prose; no slash commands, no "TodoWrite" wording.
 - The worker maintains the checklist file itself (told to in the prompt); the orchestrator reads it to monitor.
+- **Preflight a fresh worktree for the dialogs above** before the first prompt. That is this harness's entry in the "preflight any harness-specific requirement the reference names" rule in the skill body's spawn step 2.
