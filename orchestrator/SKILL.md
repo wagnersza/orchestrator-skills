@@ -613,8 +613,12 @@ it. Shape output for acting on, not for completeness:
   rank and split (`start now` vs `blocked`, `must-fix` vs `noted`). Five ranked
   beats twelve flat, and the ready queue already promises "at least 5".
 - **End with one action the user can take now.** `Spawn #41 next?` / `#38's MR is
-  green — merge it and say "close 38".` Merge and teardown are the only human steps;
-  name whichever is pending.
+  green — merge it and say "close 38".` The merge decision and the teardown
+  authorisation are the only human steps; name whichever is pending.
+- **A close report names which steps ran and which refused**, read off the plan the
+  seam emitted ([Close a task](#close-a-task)), and ends with the one action left.
+  `#20 closed: steps 1 to 7 ran, teardown refused. Cause: the worktree holds
+  src/api.ts. Commit it or stash it, then say "close 20" again.`
 - **Matter-of-fact failures.** Location, cause, fix — no "uh oh", no apology.
   `#38 idle with checklist 4/7 (evidence unchecked). Cause: port 3038 in use.
   Re-prompting with the remaining steps.`
