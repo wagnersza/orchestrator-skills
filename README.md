@@ -35,6 +35,7 @@ session coordinates **worker** sessions: each worker is a
 | **Fork / Pinned SHA** | `/skill-fork-sync`'s version dial: a fork of an upstream skill repo whose default branch sits at a known-good commit, because `claude plugin marketplace add` takes no ref/branch/tag flag. Nothing reaches your sessions until you promote. |
 | **Prose deliverable** | Text a worker routes through `simple-english` before it commits — the markdown in its diff, its review note, its PR body, and any string a Python file prints. Code, identifiers, paths, commands and link targets stay byte-identical. |
 | **Commit slice** | One commit on a worker's branch: one logical change, with the branch self-consistent at that commit (every cross-reference it adds resolves inside it). Committed as soon as the slice is done, not batched to the end. A trivial item is one commit. `main` still squash-merges to one commit per item ([ADR 0013](orchestrator/docs/adr/0013-workers-commit-in-contextualised-slices.md)). |
+| **Close transaction** | The eight steps that finish a work item, in one fixed order, after you ask for them. The orchestrator session runs steps 1 to 3 — resolve conflicts, push, merge — because they need judgement. `scripts/close_item.py` owns steps 4 to 8, because they need none: it refuses rather than warns, and its default invocation mutates nothing ([ADR 0015](orchestrator/docs/adr/0015-close-is-a-deterministic-transaction.md), [ADR 0016](orchestrator/docs/adr/0016-the-orchestrator-merges-when-asked.md)). |
 
 Full glossary: [`orchestrator/CONTEXT.md`](orchestrator/CONTEXT.md). Design
 rationale: [`orchestrator/docs/adr/`](orchestrator/docs/adr/).
@@ -147,7 +148,7 @@ phrases:
 | **work on #N, max K** | Batch-spawn every unblocked child of #N, capped at K. |
 | **what are the workers doing** | Monitor via checklist files + terminal idle state. |
 | **review #N adversarially** | Spawn a cross-vendor reviewer even if review is off in config. |
-| **close task #N** / it's done | Advance tracker state, tear down the worktree (after merge). |
+| **close task #N** / it's done | Run the close transaction: resolve, merge, then the seam's five deterministic steps. |
 
 `/skill-fork-sync` is invoked with its mode word — `bootstrap` to create and pin
 the forks, `sync [<fork>]` to check whether upstream moved and evaluate the delta,
@@ -159,7 +160,9 @@ gitignored) it ticks as it completes each contract step; the orchestrator reads 
 to track progress and catch a worker that stalls before opening the PR/MR. This
 replaces claude-only `TodoWrite` so it works across every harness.
 
-Merge is always a human step — the orchestrator never auto-merges.
+The merge decision is always a human one — the orchestrator never auto-merges. It
+carries out that decision only where you asked it to, as a **Close transaction**
+([ADR 0016](orchestrator/docs/adr/0016-the-orchestrator-merges-when-asked.md)).
 
 ## Layout
 

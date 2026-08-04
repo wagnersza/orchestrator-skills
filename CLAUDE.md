@@ -41,6 +41,14 @@ its stdlib-only test suite: **run the tests when you touch a Python file**, per 
   **Commit slice** entry in [`orchestrator/CONTEXT.md`](orchestrator/CONTEXT.md). The
   rationale is
   [ADR 0013](orchestrator/docs/adr/0013-workers-commit-in-contextualised-slices.md).
+- **Closing a work item is a transaction, not a checklist.** Its eight steps hold one
+  order. Steps 1 to 3 need judgement, so the orchestrator session runs them in prose
+  and invokes `resolving-merge-conflicts`. Steps 4 to 8 need none, so
+  `scripts/close_item.py` owns them and refuses rather than warns. The session merges
+  only where the maintainer asked it to. The unit is the **Close transaction** entry in
+  [`orchestrator/CONTEXT.md`](orchestrator/CONTEXT.md). The rationale is
+  [ADR 0015](orchestrator/docs/adr/0015-close-is-a-deterministic-transaction.md) and
+  [ADR 0016](orchestrator/docs/adr/0016-the-orchestrator-merges-when-asked.md).
 - **Every claim in a skill body traces to a reference file or an ADR.** A rule with
   no home rots.
 - **A decision that reverses or narrows an earlier one gets a new ADR** under
