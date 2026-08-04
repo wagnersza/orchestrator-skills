@@ -219,8 +219,13 @@ next?" (recurse through any `user-story` child to reach implementable leaves).
 Ports stay per-item (`N` = work-item number), so batch-spawned siblings never
 collide. **Classify each child's role separately** — a batch usually mixes heavy
 and light items, and giving them all one model is exactly the hardcoding this
-avoids. Report which were spawned (with role · model · effort each), which are busy
-(a worker owns them), and what each blocked child waits on.
+avoids. **Resolve each child's verb separately too**, for the same reason: a batch
+that mixes a bug and a feature splices `/diagnosing-bugs` into one prompt and
+`/implement` into the other. One blanket skill for the whole batch is the same defect
+as one blanket model. The verb is the one the child's own work item carries, and
+where the child names none, the batch's own verb applies. Report which were spawned
+(with skill · role · model · effort each), which are busy (a worker owns them), and
+what each blocked child waits on.
 
 Parent lifecycle and the `relates_to`/`## Parent` conventions are tracker/
 `to-tickets` behaviour — see the project's `issue-tracker.md` and the worked
@@ -463,7 +468,10 @@ When a work item reaches the review state and review is enabled:
    findings to fix, then re-review. Loop, bounded at `review.rounds` (default 3).
    Each fix round steps the impl worker's effort up one rung — a finding the model
    missed at `high` is what `xhigh` is for. In a fix round, one finding is one slice,
-   so the reviewer can map each fix to the finding it answers.
+   so the reviewer can map each fix to the finding it answers. **The fix prompt
+   re-enters the same routed skill the original spawn used** — not a re-resolution of
+   the verb, and not `/code-review` because a review produced the findings. The worker
+   resumes in the posture it started in. Effort steps up, and the skill does not change.
 4. **On approve, or after the last round regardless:** gather evidence and flip
    the item to **human review**. The item stays `in-progress` through the loop (a
    worker owns it); it flips only when the loop concludes. Merge is always a human
