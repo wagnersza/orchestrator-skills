@@ -141,6 +141,14 @@ Which of `prompt-improver`'s per-model rule sets a spawn prompt uses. Two: **Cla
 **Agentic-pipeline prompt**:
 What a worker prompt is: deterministic, complete in one turn, finishable unattended. `prompt-improver` treats this as an explicit case — it keeps the tight task framing and the checklist and applies only the model tuning, rather than doing its open senior-partner rewrite. The orchestrator says so when invoking it.
 
+**Skill routing**:
+The resolution of a user's verb to the installed skill that owns that job. One table holds it — `references/skill-routing.md` — with a row per verb and its aliases, the skill, the **Lane**, and what the skill needs handed to it. Hand-maintained, and a property of the installed skill set rather than of a project, so a newly declared dependency is one new row. Every row names a skill that `references/requirements.md` already declares, so a route never points at something uninstalled. Independent of **Role**: verb → skill and work item → `(Model, Effort)` are two resolutions over the same item, and neither constrains the other. It carries no prompting rule. The wording of a routed invocation stays **prompt-improver**'s (`docs/adr/0006-delegate-prompting-to-prompt-improver.md`). Rationale and the rejected options: `docs/adr/0014-route-verbs-to-skills-in-two-lanes.md`.
+_Avoid_: skill selection, verb mapping, dispatch, skill registry (the last one names the plugin-set scan this deliberately is not).
+
+**Lane**:
+Where a routed skill runs. Two values, and a **Skill routing** row carries exactly one. **inline** — the **Orchestrator** invokes the skill in this session, in the main checkout. **worker** — the orchestrator invokes nothing, and the invocation goes into the spawn prompt, so a **Worker** enters the skill inside its own worktree. The split follows the nature of the skill's output, not its volume. A skill whose output is issues, docs or conversation is inline, and that breaches no rule, because "never do implementation work here" is about writing source. A skill that writes source is worker. `/wayfinder` and `/research` are the boundary: both write outside the conversation, and both stay inline because their output is non-source and a delete or an edit undoes it. There is no third value and no blank — a verb whose lane is not decided gets no row.
+_Avoid_: mode, channel, side, track, local/remote (none of them says where the skill runs).
+
 **Tracker**:
 Where work items live (GitHub / GitLab / local markdown). The orchestrator does not own a tracker abstraction — it reuses the mattpocock engineering skills' config, written to `docs/agents/issue-tracker.md` by `/setup-matt-pocock-skills`.
 _Avoid_: issue tracker, board (when the layer is meant).
