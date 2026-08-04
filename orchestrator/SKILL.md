@@ -91,9 +91,9 @@ The user's phrase usually carries a **verb**, and an installed skill owns that j
 Before you act on a verb, read
 [`references/skill-routing.md`](references/skill-routing.md) and resolve the verb to
 its **Skill** and its **Lane**. Read that file at the moment you need it, never from
-memory. Never copy a row into this body. One file holds the rows, so a newly declared
-dependency is one new row. The vocabulary is the **Skill routing** and **Lane**
-entries in [`CONTEXT.md`](CONTEXT.md). Rationale:
+memory. Never copy a row into this body. One file holds the rows, so a new dependency
+is one new row. The vocabulary is the **Skill routing** and **Lane** entries in
+[`CONTEXT.md`](CONTEXT.md). Rationale:
 [`docs/adr/0014-route-verbs-to-skills-in-two-lanes.md`](docs/adr/0014-route-verbs-to-skills-in-two-lanes.md).
 
 **Lane `inline` — invoke the skill here.** Invoke it in this session, against the
@@ -116,10 +116,10 @@ with ["What next?"](#what-next--pick-the-next-work), unchanged.
 not a near miss to act on. Ask once, in one line: name the closest row and the verb
 it holds, and ask whether to route there. `Nothing routes "<the user's phrase>".
 Closest row is <verb> → <skill>. Route there?` Then wait for the answer. On yes, take
-that lane. On no, or on a decline of the whole question, answer the verb freehand, the
-way this session does today, and say in the report that no skill was routed to. Two
-failures this closes: a fuzzy match into a skill nobody chose, and a silent freehand
-answer to a verb that clearly wanted one.
+that lane. On no, answer the verb freehand, the way this session does today. Then say
+in the report that no skill was routed to. A decline of the whole question reads as a
+no. This closes two failures: a fuzzy match into a skill nobody chose, and a silent
+freehand answer to a verb that wanted one.
 
 ## Board status
 
@@ -461,12 +461,12 @@ it. Shape output for acting on, not for completeness:
   what's running. `#38 b5-contacts spawned · heavy · opus-5 · xhigh. 2 workers live.`
   Never open with what you're about to do.
 - **Name the skill you routed to.** A verb resolved through
-  [`references/skill-routing.md`](references/skill-routing.md) puts the skill in the
-  same turn it ran, in the lead line, so a wrong route costs the user one sentence to
+  [`references/skill-routing.md`](references/skill-routing.md) names its skill in the
+  lead line, in the same turn the skill ran. A wrong route then costs one sentence to
   correct. `/to-spec ran here. Spec is #47, labelled ready-for-agent.` Where no skill
   was routed to — an unmapped verb the user declined, or a session that cannot reach
-  the skill — say that instead. The lane the skill ran in needs no line: `ran here`
-  and a spawn already read as the two lanes.
+  the skill — say that instead. The lane needs no line of its own: `ran here` and a
+  spawn already read as the two lanes.
 - **Restate position every turn.** A worker's progress is `checklist 4/7`, a review
   loop is `round 2 of 3`. Read it off the checklist file and the round counter —
   don't ask the user to remember.
