@@ -8,7 +8,9 @@ description: Orchestrate agent worker sessions across any workspace tool (orca/c
 This session is the **orchestrator**. It coordinates **worker** sessions. A
 worker is a `(Tool, Harness, Model)` triple running against one work item in its
 own worktree/terminal. Never do implementation work here — spawn a worker and
-prompt it.
+prompt it. One bounded exception: step 1 of a [close](#close-a-task) resolves
+conflicts in the item's own worktree, on the maintainer's explicit instruction
+([`docs/adr/0016-the-orchestrator-merges-when-asked.md`](docs/adr/0016-the-orchestrator-merges-when-asked.md)).
 
 The vocabulary (Tool, Harness, Model, Effort, Role, Vendor, Worker, Yolo mode,
 Adversarial review, Ready queue, Checklist, Project recipe) is defined in
@@ -487,29 +489,73 @@ off in config.
 
 ## Close a task
 
-When the user says **close task #N / it's done / wrap up <slug>**: run teardown in
-order.
+When the user says **close task #N / it's done / wrap up <slug>**: run one **Close
+transaction**. It is eight steps in one fixed order, defined in
+[`CONTEXT.md`](CONTEXT.md). The split is by judgement. Steps 1 to 3 need it, so they
+are the prose below. Steps 4 to 8 need none, so `scripts/close_item.py` owns them.
+Rationale:
+[`docs/adr/0015-close-is-a-deterministic-transaction.md`](docs/adr/0015-close-is-a-deterministic-transaction.md).
 
-1. **Find the worktree** (op 8) — display name = branch = slug. Set the worktree
-   id/path. If none matches, say so (maybe already closed) and do only the label
-   steps that still apply.
-2. **Advance the tracker state** (labels from `issue-tracker.md`, states mutually
-   exclusive — swap, never stack), from the main checkout (config's `repo`), and
-   move the card with it ([Board status](#board-status)):
-   - work done, PR/MR open → review state, card → `In review`.
-   - **merged** → pull the merge into local default branch **first**, then flip to
-     done and close the item, card → `Done`. Merging is a human step; only advance
-     to done once the PR/MR is actually merged. If unmerged, stop at the review
-     state — the card **stays** at `In review`; never write `Done` for an unmerged
-     PR — and say what's pending.
-   - Apply parent-close if the tracker conventions define it (last child closed →
-     close the parent), including the parent's card → `Done`.
-3. **Confirm nothing is lost** — check the worktree is clean before removing. A
-   **dirty** tree with intentional work is the data-loss case; call it out before
-   proceeding.
-4. **teardown** (op 10) — removes the worktree, kills the worker terminal, deletes
-   the branch. The checklist file dies with the worktree (gitignored) — no
-   cleanup.
+First **find the worktree** (op 8) — display name = branch = slug. Keep its id and
+its path. If nothing matches, the item is probably closed already. Do the label steps
+that still apply, and say so.
+
+### Steps 1 to 3 — judgement, in this session
+
+**This orchestrator session does all three, and no worker is prompted for any of
+them.** A worker can be idle or out of context by now, and its worktree is what step
+8 removes. Step 1 needs a working tree, so it runs **inside the item's worktree**.
+That worktree is still there, because teardown has not run yet. The main checkout
+(config's `repo`) stays on the default branch. Step 3 is an API call and needs no
+checkout, which is why only the first two steps care where they run.
+
+1. **Resolve conflicts against the default branch.** Merge the default branch into
+   the item's branch, inside the item's worktree. If it conflicts, invoke
+   `resolving-merge-conflicts`. That skill owns the procedure and this repo copies no
+   step of it. So never resolve a hunk from memory.
+2. **Push the mergeable branch.**
+3. **Merge the PR.** The maintainer made this decision already, and you are carrying
+   it out
+   ([`docs/adr/0016-the-orchestrator-merges-when-asked.md`](docs/adr/0016-the-orchestrator-merges-when-asked.md)).
+
+### Steps 4 to 8 — `close_item` owns the order
+
+`scripts/close_item.py` holds the ordering, the gates, the exit codes and the
+refusal reasons. **Never restate one of them here, in a prompt, or in a report.** A
+second copy is a second source of truth. Read the plan the seam emits.
+`python3 -m scripts.close_item --help` is the argument surface, and the module
+docstring is the step table.
+
+```bash
+python3 -m scripts.close_item --issue <N> --pr <PR> \
+  --repo <config's repo> --worktree <the path from op 8> \
+  --remove-label <the review label> \
+  --project-number <n> --project-owner <owner> --project-id <id> \
+  --status-field-id <id> --done-option-id <the `Done` option id> \
+  --teardown-command '<op 10, with the ids filled in>'
+```
+
+Three things the seam never learns, so you pass them in:
+
+- **The teardown command, as a string.** Read it from
+  [`references/tools/<tool>.md`](references/tools/_operations.md) (op 10) and
+  substitute the ids. Pass that whole line to `--teardown-command`. So the seam holds
+  no `orca` command, and a new tool stays a markdown change. The checklist file dies
+  with the worktree, so nothing cleans it up.
+- **The board coordinates, as arguments.** Read the five values from
+  `docs/agents/issue-tracker.md`'s
+  [`## Project board`](../docs/agents/issue-tracker.md#project-board) section. Where
+  that section is absent, omit them. The card write is then a no-op
+  ([Board status](#board-status)).
+- **Whether to mutate. The default invocation is a dry run.** It resolves every
+  precondition, prints the plan as JSON, and changes nothing. Read that plan. Then
+  re-run it with `--execute`. Teardown needs `--execute --teardown` together, so
+  confirm it first ([Safety](#safety)).
+
+**Parent-close stays yours.** The seam closes one item. Where the tracker conventions
+define a parent close, apply it after the seam exits clean. That is the last child
+closed → close the parent, and the parent's card → `Done`. Then report per
+[Reporting to the user](#reporting-to-the-user).
 
 ## Reporting to the user
 
