@@ -85,6 +85,42 @@ its commands here or in a report. A copied command drifts from the maintained on
 Throughout, address a worker by its **slug** (the work-item's ticket prefix, e.g.
 `#38 B5 · Contacts` → `b5-contacts`).
 
+## Resolve the verb before you act
+
+The user's phrase usually carries a **verb**, and an installed skill owns that job.
+Before you act on a verb, read
+[`references/skill-routing.md`](references/skill-routing.md) and resolve the verb to
+its **Skill** and its **Lane**. Read that file at the moment you need it, never from
+memory. Never copy a row into this body. One file holds the rows, so a new dependency
+is one new row. The vocabulary is the **Skill routing** and **Lane** entries in
+[`CONTEXT.md`](CONTEXT.md). Rationale:
+[`docs/adr/0014-route-verbs-to-skills-in-two-lanes.md`](docs/adr/0014-route-verbs-to-skills-in-two-lanes.md).
+
+**Lane `inline` — invoke the skill here.** Invoke it in this session, against the
+main checkout (config's `repo`), on the default branch. No worktree, no branch, no
+spawn. Hand it what the row's Notes column says it needs. Then name the skill you
+routed to in the report ([Reporting to the user](#reporting-to-the-user)). An
+`inline` skill writes issues, docs or conversation, and never source, so "never do
+implementation work here" holds. A verb that writes source is a `worker` row, and
+that law is what puts it there.
+
+**Lane `worker` — nothing changes yet.** A `worker` verb keeps the spawn flow below
+exactly as it is today. The splice of the invocation into the spawn prompt is
+separate work, and it has not landed.
+
+**A queue question is not a verb.** A bare `/orchestrator`, and *what next* / *what
+should I run* / *what's ready*, resolve to no skill and route nowhere. Answer them
+with ["What next?"](#what-next--pick-the-next-work), unchanged.
+
+**An unmapped verb costs one line, then proceeds.** A verb that matches no row is
+not a near miss to act on. Ask once, in one line: name the closest row and the verb
+it holds, and ask whether to route there. `Nothing routes "<the user's phrase>".
+Closest row is <verb> → <skill>. Route there?` Then wait for the answer. On yes, take
+that lane. On no, answer the verb freehand, the way this session does today. Then say
+in the report that no skill was routed to. A decline of the whole question reads as a
+no. This closes two failures: a fuzzy match into a skill nobody chose, and a silent
+freehand answer to a verb that wanted one.
+
 ## Board status
 
 Where the tracker config has a **`## Project board`** section, every work item is
@@ -424,6 +460,13 @@ it. Shape output for acting on, not for completeness:
 - **Lead with state, not narration.** First line is the board: what changed and
   what's running. `#38 b5-contacts spawned · heavy · opus-5 · xhigh. 2 workers live.`
   Never open with what you're about to do.
+- **Name the skill you routed to.** A verb resolved through
+  [`references/skill-routing.md`](references/skill-routing.md) names its skill in the
+  lead line, in the same turn the skill ran. A wrong route then costs one sentence to
+  correct. `/to-spec ran here. Spec is #47, labelled ready-for-agent.` Where no skill
+  was routed to — an unmapped verb the user declined, or a session that cannot reach
+  the skill — say that instead. The lane needs no line of its own: `ran here` and a
+  spawn already read as the two lanes.
 - **Restate position every turn.** A worker's progress is `checklist 4/7`, a review
   loop is `round 2 of 3`. Read it off the checklist file and the round counter —
   don't ask the user to remember.
