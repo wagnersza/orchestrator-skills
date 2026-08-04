@@ -47,6 +47,59 @@ tab stays. The close does not stop the harness in `$H`, and `$H` still accepts
 `send` after it. `$H` is the only handle you prompt. Teardown kills what is
 left.
 
+### 3a. readiness gate — before the first `send`
+
+The skill body requires a **readiness gate** between `worker-create` and the first
+prompt, and names a live agent process in the worktree as its authoritative signal.
+This is that check. Run it after `terminal create` and before op 4. `$WT_PATH` is
+`worktree.path` from the create JSON, and `$HARNESS` is the config's harness name.
+
+```bash
+lsof -a -d cwd -Fpn 2>/dev/null \
+  | awk -v w="$WT_PATH" '/^p/{p=substr($0,2)} /^n/{if(substr($0,2)==w) print p}' \
+  | while read -r p; do ps -o comm= -p "$p" 2>/dev/null; done \
+  | grep -qx "$HARNESS" && echo READY || echo "NOT READY"
+```
+
+It prints `NOT READY` until a process named `$HARNESS` holds the worktree as its
+working directory. Poll it, and do not send while it says `NOT READY`. That one answer
+covers every way a worker fails to arrive: still booting, waiting on a first-run
+dialog, exited, or never authenticated. All four look the same from outside, because
+none of them leaves a live agent in the worktree.
+
+**Use `ps -o comm=` and not `pgrep -x <harness>`.** Verified: a `claude` worker
+launched as `claude --model opus --effort xhigh --dangerously-skip-permissions` is
+**absent** from `pgrep -x claude` output while `ps -o comm=` on the same pid returns
+`claude`. So the `pgrep` form reports `NOT READY` for a perfectly healthy worker,
+which is a false negative that stalls a spawn the gate must let through.
+
+**Why `read` and `wait --for tui-idle` are both insufficient here.** Neither looks at
+the agent. Measured against a `codex` worker that had exited behind a first-run
+dialog:
+
+| Signal | Reported | Why it is wrong |
+|--------|----------|-----------------|
+| `terminal read` | `status: running` | The **shell** is running. It outlived the agent, and it is what receives the prompt. |
+| `terminal wait --for tui-idle` | `satisfied: true` | An idle shell is idle. The condition is met by the failure state. |
+| the gate above | `NOT READY` | No process named `codex` holds the worktree. |
+
+`read` is also near-useless for this on an alt-screen TUI. A `--limit 40` read of a
+booting `codex` returned ~4 KB of box-drawing noise and three readable words, all
+three from the shell prompt above the alt screen. Scraping it for a `%` prompt
+misfires both ways: it finds the pre-launch prompt under a healthy TUI, and it misses
+a dead agent whose prompt scrolled past the tail.
+
+Two further measured facts, so nobody re-derives them:
+
+- `wait --for tui-idle` returns `satisfied: true` on a plain non-TUI terminal too, so
+  a `true` here never implies a TUI is up.
+- Where the launched command exits but the shell survives, `read` reports
+  `status: running` and `wait` fails with `{"code":"timeout"}` rather than reporting
+  the exit. `status: exited` appears only when the terminal itself is gone.
+
+Rationale, and why the gate is stated in the skill body but commanded here:
+[`../../docs/adr/0017-gate-worker-readiness-on-a-process-check.md`](../../docs/adr/0017-gate-worker-readiness-on-a-process-check.md).
+
 ## 4. send (one step — types **and** submits)
 
 ```bash
@@ -54,6 +107,31 @@ orca terminal send --terminal "$H" --text "your prompt here" --enter
 ```
 
 Multi-line: send the whole string as one `--text` (embedded `\n` are literal in the box); the single `--enter` submits.
+
+### 4a. send in two steps, where a harness needs a dialog answered
+
+Where the harness reference names a first-run dialog, split the one call above into
+type-then-submit. Then the composer can be inspected while the prompt is still
+uncommitted. `orca` supports both halves:
+
+```bash
+orca terminal send --terminal "$H" --text "your prompt here"     # types, no submit
+orca terminal read --terminal "$H" --limit 40 --json             # is the text in the composer?
+orca terminal send --terminal "$H" --enter                       # submits
+```
+
+Verified: `--text` with no `--enter` leaves the text un-submitted, and a later bare
+`--enter` submits exactly that text. So the split needs no extra flag.
+
+**The inspection fails closed.** Text sent to a dialog-blocked `codex` did not appear
+anywhere in the read buffer. So a composer that does not show the text is evidence
+that the harness is not accepting input. Hold the prompt, answer the dialog, and
+re-check the gate rather than submitting into a dialog. On an alt-screen TUI, look for
+the prompt's own first words in the buffer. Do not expect a clean echo.
+
+This split is **conditional**. Op 4 stays one step everywhere else, and the other tool
+references are unchanged — see the note in
+[`_operations.md`](_operations.md).
 
 ## 5. read
 

@@ -16,7 +16,10 @@ Implements the [operation contract](_operations.md).
   are installed.
 - **send is two steps.** cmux `send` types the text but does **not** submit;
   follow it with a separate `send-key Enter`. The skill body's single logical
-  "send" = `send` + `send-key Enter` on cmux.
+  "send" = `send` + `send-key Enter` on cmux. This is a property of cmux. It is
+  **not** the conditional dialog-inspection split that `orca.md` documents as 4a.
+  cmux gives that inspection point for free: where the harness reference names a
+  first-run dialog, read the composer between the two calls.
 - **teardown is not one call.** cmux needs close-workspace + `git worktree remove`
   + `git branch -d` where orca's `worktree rm --force` does all three.
 
@@ -27,6 +30,7 @@ Implements the [operation contract](_operations.md).
 | 1 | worktree-exists? | `cmux workspace list` → match slug |
 | 2 | worktree-create  | create branch → checkout → run setup → (capture path) — **multi-step** |
 | 3 | worker-create    | open terminal running `$CMD`; capture the handle to prompt |
+| 3a| readiness gate   | a live `$HARNESS` process whose working directory is the worktree — **not** a cmux status field. The check is the tool-independent `lsof`/`ps` one in [`orca.md`](orca.md#3a-readiness-gate--before-the-first-send). Nothing in it is orca-specific, so use it verbatim with cmux's worktree path |
 | 4 | send             | `cmux send <text>` **then** `cmux send-key Enter` — **two steps** |
 | 5 | read             | `cmux read <handle>` |
 | 6 | wait-idle        | poll `read` for the idle prompt, or a native wait if one exists |
