@@ -460,6 +460,13 @@ it. Shape output for acting on, not for completeness:
 - **Lead with state, not narration.** First line is the board: what changed and
   what's running. `#38 b5-contacts spawned · heavy · opus-5 · xhigh. 2 workers live.`
   Never open with what you're about to do.
+- **Name the skill you routed to.** A verb resolved through
+  [`references/skill-routing.md`](references/skill-routing.md) puts the skill in the
+  same turn it ran, in the lead line, so a wrong route costs the user one sentence to
+  correct. `/to-spec ran here. Spec is #47, labelled ready-for-agent.` Where no skill
+  was routed to — an unmapped verb the user declined, or a session that cannot reach
+  the skill — say that instead. The lane the skill ran in needs no line: `ran here`
+  and a spawn already read as the two lanes.
 - **Restate position every turn.** A worker's progress is `checklist 4/7`, a review
   loop is `round 2 of 3`. Read it off the checklist file and the round counter —
   don't ask the user to remember.
