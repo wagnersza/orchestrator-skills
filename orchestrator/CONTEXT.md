@@ -47,7 +47,24 @@ _Avoid_: unattended mode, skip-permissions.
 An optional review of a worker's output by a second worker running a **different-vendor** model (e.g. implement with opus-5, review with gpt-5.6). Config names the review model + effort explicitly (`models.review`) and the orchestrator asserts its vendor differs from the impl model's. The review worker runs on the impl branch (own worktree) and reads the diff/MR against the acceptance criteria. Its prompt asks for **coverage, not filtering** — a "only high-severity" bar makes every current model silently drop real bugs.
 
 **Review round**:
-One cycle of adversarial review: the review worker posts a verdict (approve / request-changes + findings). On **request-changes**, the orchestrator re-prompts the **original impl worker** with the findings to fix, then re-reviews. Bounded at **3 rounds**. After approve — or after the 3rd round regardless — the orchestrator gathers evidence and moves the item to **human review**. The human reviews after the fixes; merge stays a human step.
+One cycle of adversarial review: the review worker posts a verdict (approve / request-changes + findings). On **request-changes**, the orchestrator re-prompts the **original impl worker** with the findings to fix, then re-reviews. Bounded at **3 rounds**. After approve — or after the 3rd round regardless — the orchestrator gathers evidence and moves the item to **human review**. The human reviews after the fixes, and the decision to merge stays theirs. Where the human then asks this session to merge and close, the orchestrator carries out that decision as a **Close transaction**. No worker merges, and no session merges unasked (`docs/adr/0016-the-orchestrator-merges-when-asked.md`).
+
+**Close transaction**:
+The eight steps that finish a **Work item**, in one fixed order, after the human asks for them:
+
+1. Resolve conflicts against the default branch.
+2. Push the mergeable branch.
+3. Merge the PR.
+4. Verify the merge landed.
+5. Pull the merge into the local default branch.
+6. Verify the worktree is clean.
+7. Flip the **Work-state labels**, close the item, and write its **Board status** — as one step.
+8. Remove the worktree.
+
+The eight split in two, by whether the step needs judgement. **Steps 1 to 3 need judgement, so they belong to prose.** No script reads two versions of a change and decides what the merged file means. Step 1 invokes the **resolving-merge-conflicts** skill. **Steps 4 to 8 need no judgement, so they belong to the seam.** They are predicates, a pull, two tracker writes and a passed-in teardown command, which makes them an ordering and nothing else. One seam owns that ordering, because ordering is what code holds perfectly and prose holds poorly. That seam is `scripts/close_item.py`. This entry names it before it exists: the term is declared here, and the file lands with the flow change that consumes it.
+
+**The actor for all eight steps is the orchestrator session**, and never a **Worker**. A worker can be idle or out of context when the human asks, and its worktree is what step 8 removes. The seam refuses rather than warns. An unmerged PR and a dirty worktree each stop the transaction with a distinct exit code. A refused transaction leaves the item at the review state, with its card at `In review`. Nothing destructive happens by default. Rationale, the rejected alternatives, and the risk accepted for the actor: `docs/adr/0015-close-is-a-deterministic-transaction.md` and `docs/adr/0016-the-orchestrator-merges-when-asked.md`.
+_Avoid_: teardown (that names step 8 alone), close flow, closing sequence, wrap-up.
 
 **prompt-improver**:
 The external skill that owns **all** prompt composition — the diagnosis checklist, the shared rules (front-load the spec, positive examples over prohibitions, no stale verification/status scaffolding, coverage-not-filtering for code review), and the per-model tuning. A dependency, not vendored: <https://github.com/wagnersza/prompt-improver>. Installs three ways — as a **plugin** (`prompt-improver@prompt-improver`), as a clone under `~/.claude/skills/` (auto-registered as `prompt-improver@skills-dir`), or as a project-level clone. The skill body is identical and the orchestrator invokes the skill rather than a path, so all three satisfy the dependency; only the update command differs (see `references/requirements.md`). The orchestrator drafts a prompt and runs it through this skill; it holds no prompting rules of its own, so the rules never drift out of sync with the upstream guides.
@@ -75,6 +92,10 @@ Three dependencies now shape a worker's output, and each owns a different artifa
 
 One collision is real: the `ponytail` shortest-explanation rule conflicts with the standard's rules for articles and against telegraph style. The resolution is a split of authority. `ponytail` decides whether a paragraph exists, and **simple-english** decides how a kept paragraph reads. So `ponytail` can delete a paragraph, and a worker that compresses a kept paragraph into telegraph style commits a violation.
 _Avoid_: documentation, docs, copy, text (all four are broader than the four classes).
+
+**resolving-merge-conflicts**:
+The external skill that owns **all** procedure for an in-progress merge or rebase conflict. It holds how to read the current state, how to find the intent behind each side, how to resolve a hunk, and which project checks to run afterwards. A dependency, not vendored — it ships inside `mattpocock-skills` (<https://github.com/mattpocock/skills>), so the plugin this repo already declares provides it. There is nothing separate to install. This repo states only *when* to invoke it: step 1 of a **Close transaction**, in the orchestrator session, inside the item's worktree, before the merge. It copies no step of the procedure. Same posture as **prompt-improver** and **simple-english**, for the same reason: a copied rule set drifts from the upstream that maintains it. Install shapes and the check: `references/requirements.md`.
+_Avoid_: conflict resolution, merge resolution (both name the job, not the dependency), git merge skill.
 
 **Browser surface**:
 The one browser-automation surface a **Worker** drives when an item needs UI proof.
