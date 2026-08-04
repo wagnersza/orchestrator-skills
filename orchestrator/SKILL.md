@@ -55,6 +55,15 @@ four install shapes (global or project, `.agents/` or `.claude/`) **satisfies th
 check**, for the same reason `prompt-improver` gets three: you invoke the skill,
 not a path. The skill is not a plugin, so `claude plugin list` never shows it.
 
+Check the **`resolving-merge-conflicts` skill** in the same pass too, because step 1
+of every [close](#close-a-task) invokes it. Run the `resolving-merge-conflicts` line
+of that same check block — the four-path `ls`. Any of its four install shapes
+**satisfies the check**, for the same reason the other two get theirs: the plugin
+cache, the marketplace clone, or a standalone clone global or project. The skill ships
+inside `mattpocock-skills`, so there is nothing separate to install. **Never begin a
+close against a missing skill.** Stop and point the user at `/orchestrator-setup`, the
+same as any other missing dependency.
+
 **Check the Browser surface only when the recipe asks for browser evidence.** The
 gate is the project recipe: a non-blank `run_recipe`, or an `evidence` bar that asks
 for UI proof. Where the gate holds, check `playwright-cli` and the browser binaries
