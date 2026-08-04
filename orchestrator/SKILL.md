@@ -408,10 +408,20 @@ commands — the label swap and the `In review` write, with the real ids from
 `issue-tracker.md`'s `## Project board` section substituted in. A worker can't look
 up a field id it wasn't given. Omit the board command if that section is absent.
 
-**Harness shape:** a **claude** worker may use its slash skills (`/implement`,
-`/ponytail:ponytail`) — see `references/harnesses/claude.md`. **Any other harness**
-gets the **same contract in plain English** — no slash commands, no "TodoWrite"
-wording; spell out the numbered checklist steps as prose.
+**Harness shape:** a **claude** worker **does** enter the routed skill — the
+invocation is a literal slash command in the prompt (`/implement`), and its other
+slash skills (`/ponytail:ponytail`) stay available on top. See
+`references/harnesses/claude.md`. **Any other harness** gets the **same contract in
+plain English** — no slash commands, no "TodoWrite" wording; spell out the numbered
+checklist steps as prose. **The routed skill takes that same split.** A harness with
+no slash commands gets the skill's contract as prose, from the *Without slash
+commands* sentences in the row's Notes column of
+[`references/skill-routing.md`](references/skill-routing.md). Copy the substance of
+those sentences into the draft prompt as the worker's opening instruction, in the
+place the slash command takes on claude. **Never send a slash command to a harness
+that cannot parse one** — it reads as literal text and the worker starts cold, which
+is worse than the prose contract because it looks like it worked. This is the same
+plain-English rule as every other part of the contract, not a second mechanism.
 
 **Per-item ports.** Derive from the work-item number `N` per config's `ports`
 (e.g. `FE=3000+N`), so parallel workers never collide and the port reads back to
