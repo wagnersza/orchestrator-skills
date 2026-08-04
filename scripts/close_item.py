@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Plan steps 4 to 7 of the **Close transaction**, in the one order they hold.
+"""Run steps 4 to 7 of the **Close transaction**, in the one order they hold.
 
 The order is the contract (ADR 0015). Steps 1 to 3 of the transaction need
 judgement, so they stay prose. Steps 4 to 8 need none — they are two gates, a
 pull, two tracker writes and a passed-in command — so this seam owns them and no
 reader can put them in a different order.
 
-**This mode is the default and it mutates nothing.** It resolves every
+**Plan mode is the default and it mutates nothing.** It resolves every
 precondition and emits JSON: the ordered steps, each marked `todo`, `done`,
 `refused`, `skipped` or `blocked`, the refusal reason, and the exit code an
 execute run would use:
@@ -14,6 +14,10 @@ execute run would use:
     python3 -m scripts.close_item --issue 32 --pr 48 \\
         --repo /path/to/main/checkout --worktree /path/to/worktree \\
         --remove-label to-review
+
+**Execute mode runs that same plan in order** and stops at the first refusal:
+
+    python3 -m scripts.close_item --issue 32 --pr 48 ... --execute
 
 The steps, and what each one does:
 
@@ -32,7 +36,7 @@ into a coupled one:
 - **Any tracker but GitHub.** See the `ponytail:` comment on `GH` below.
 
 The exit code carries the outcome, so the caller reports the cause and parses no
-prose: 0 clean, 2 the PR is not merged, 3 the worktree is dirty, 1 a read failed.
+prose: 0 clean, 2 the PR is not merged, 3 the worktree is dirty, 1 a step failed.
 """
 
 import argparse
@@ -59,6 +63,7 @@ STATUS_TODO = "todo"
 STATUS_REFUSED = "refused"
 STATUS_SKIPPED = "skipped"
 STATUS_BLOCKED = "blocked"
+STATUS_FAILED = "failed"
 
 BOARD_ARGS = (
     "project_number",
@@ -123,17 +128,21 @@ def dirty_files(worktree):
 
 
 class Tracker:
-    """The tracker reads this seam needs, or a fixture in their place.
+    """The tracker reads and writes this seam needs, or a fixture in their place.
 
-    A fixture file (`--gh-fixture`) is how the tests plan a close with no network
-    and no `gh` login, the same way `fork_state.py` plans a bootstrap. Each key
-    holds what the matching `gh` read returns, keyed by number:
+    A fixture file (`--gh-fixture`) is how the tests close an item with no
+    network and no `gh` login, the same way `fork_state.py` plans a bootstrap.
+    Each key holds what the matching `gh` read returns, keyed by number:
 
         {"pull_requests": {"48": {"state": "MERGED", "mergeCommit": {"oid": "a1"}}},
          "issues": {"32": {"state": "OPEN", "labels": ["to-review"]}},
          "project_items": {"32": "PVTI_x"}}
 
     A number absent from a key reads as an empty record.
+
+    In fixture mode a write runs nothing. It appends its command to
+    `<fixture path>.writes`, one per line. That file is what a test reads to see
+    which tracker writes an execute run made.
     """
 
     def __init__(self, fixture_path=None):
@@ -142,6 +151,8 @@ class Tracker:
 
     def _record(self, key, number):
         return (self.fixture.get(key) or {}).get(str(number)) or {}
+
+    # --- reads
 
     def pull_request(self, number):
         """The PR's state and its merge commit."""
@@ -176,6 +187,19 @@ class Tracker:
             "--jq",
             f".items[] | select(.content.number=={number}) | .id",
         )
+
+    # --- writes
+
+    def write(self, argv):
+        """Run one tracker write, or record it where a fixture stands in."""
+        if self.fixture is not None:
+            log = self.path.parent / (self.path.name + ".writes")
+            with log.open("a") as handle:
+                handle.write(" ".join(argv) + "\n")
+            return
+        proc = subprocess.run(argv, capture_output=True, text=True)
+        if proc.returncode != 0:
+            raise GhError(f"{' '.join(argv)} failed: {proc.stderr.strip()}")
 
 
 def gh_json(*args):
@@ -407,20 +431,65 @@ def part(name, argv, status, note):
 
 
 def build(args, tracker):
-    """The whole plan, ready to read."""
+    """The whole plan, ready to read or to run."""
     steps, refusal = build_plan(args, tracker)
     return {
         "generated_by": "scripts.close_item",
-        "mode": "plan",
-        "mutates": "nothing",
+        "mode": "execute" if args.execute else "plan",
+        "mutates": "the steps marked todo below" if args.execute else "nothing",
         "issue": args.issue,
         "pr": args.pr,
         "repo": str(Path(args.repo)),
         "worktree": args.worktree or "",
         "refused": refusal,
         "exit_code": refusal["exit_code"] if refusal else EXIT_OK,
+        "ran": [],
         "steps": steps,
     }
+
+
+# --- execute ----------------------------------------------------------------
+
+
+def execute(plan, tracker):
+    """Run the plan in order and stop at the first refusal.
+
+    Nothing is re-derived here. The step that a refusal stopped keeps its status,
+    and every step after it stays `blocked`, so the emitted plan says what ran.
+    """
+    for entry in plan["steps"]:
+        if entry["status"] == STATUS_REFUSED:
+            return plan["exit_code"]
+        if entry["status"] != STATUS_TODO:
+            continue
+        try:
+            plan["ran"] += run_step(entry, tracker)
+        except (GitError, GhError) as exc:
+            entry["status"] = STATUS_FAILED
+            plan["error"] = str(exc)
+            plan["exit_code"] = EXIT_ERROR
+            return EXIT_ERROR
+        entry["status"] = STATUS_DONE
+    return plan["exit_code"]
+
+
+def run_step(entry, tracker):
+    """Run one step and return the commands it ran."""
+    if entry["step"] == 5:
+        proc = subprocess.run(entry["argv"], capture_output=True, text=True)
+        if proc.returncode != 0:
+            raise GitError(f"{entry['command']} failed: {proc.stderr.strip()}")
+        return [entry["command"]]
+    if entry["step"] == 7:
+        ran = []
+        for item in entry["parts"]:
+            if item["status"] != STATUS_TODO:
+                continue
+            tracker.write(item["argv"])
+            item["status"] = STATUS_DONE
+            ran.append(item["command"])
+        return ran
+    raise GhError(f"step {entry['step']} has no runner")
 
 
 # --- CLI --------------------------------------------------------------------
@@ -430,10 +499,11 @@ def main(argv=None):
     parser = argparse.ArgumentParser(
         prog="python3 -m scripts.close_item",
         description=(
-            "Plan steps 4 to 7 of the close transaction, in the one order they hold. "
+            "Run steps 4 to 7 of the close transaction, in the one order they hold. "
             "The steps are the PR gate, the pull into the local default branch, the "
-            "clean-tree gate, and the tracker writes. This prints the plan as JSON "
-            "and mutates nothing."
+            "clean-tree gate, and the tracker writes. The default prints the plan as "
+            "JSON and mutates nothing. --execute runs the plan and stops at the first "
+            "refusal."
         ),
     )
     parser.add_argument("--issue", required=True, type=int, help="the work item number")
@@ -479,6 +549,11 @@ def main(argv=None):
         "--done-option-id", help="the id of the done option in that status field"
     )
     parser.add_argument(
+        "--execute",
+        action="store_true",
+        help="run the plan instead of printing it. The run stops at the first refusal",
+    )
+    parser.add_argument(
         "--gh-fixture",
         help="JSON that stands in for the tracker reads, so a plan needs no network "
         "(used by the tests)",
@@ -486,14 +561,16 @@ def main(argv=None):
     parser.add_argument("--indent", type=int, default=2)
     args = parser.parse_args(argv)
 
+    tracker = Tracker(args.gh_fixture)
     try:
-        plan = build(args, Tracker(args.gh_fixture))
+        plan = build(args, tracker)
     except (GitError, GhError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return EXIT_ERROR
 
+    code = execute(plan, tracker) if args.execute else plan["exit_code"]
     print(json.dumps(plan, indent=args.indent))
-    return plan["exit_code"]
+    return code
 
 
 if __name__ == "__main__":

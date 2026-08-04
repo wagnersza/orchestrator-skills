@@ -146,6 +146,7 @@ class CloseItemTestCase(unittest.TestCase):
             "project_items": {str(ISSUE): card} if card else {},
         }
         self.fixture.write_text(json.dumps(data))
+        self.writes = self.root / "gh.json.writes"
 
     def close(self, *extra, board=True, worktree=True, expect=0):
         """Run the seam and return the parsed plan."""
@@ -193,6 +194,14 @@ class CloseItemTestCase(unittest.TestCase):
     def statuses(self, plan):
         return [entry["status"] for entry in plan["steps"]]
 
+    def tracker_writes(self):
+        return self.writes.read_text().splitlines() if self.writes.exists() else []
+
+    def assertNothingMutated(self, before):
+        """The default invocation touched no branch and no tracker."""
+        self.assertEqual(before, self.disk_state())
+        self.assertEqual(self.tracker_writes(), [])
+
     def disk_state(self):
         return (
             rev(self.checkout, "main"),
@@ -224,7 +233,7 @@ class CloseItemTestCase(unittest.TestCase):
         self.assertEqual(self.step(plan, 6)["status"], "done")
         self.assertEqual(self.step(plan, 7)["status"], "todo")
 
-        self.assertEqual(before, self.disk_state())
+        self.assertNothingMutated(before)
 
     def test_an_unmerged_pr_refuses_and_the_tracker_steps_are_never_reached(self):
         """The item stays where it is, so nothing has to be undone."""
@@ -242,7 +251,7 @@ class CloseItemTestCase(unittest.TestCase):
         for number in (5, 6, 7):
             self.assertIn("step 4 refused", self.step(plan, number)["note"])
 
-        self.assertEqual(before, self.disk_state())
+        self.assertNothingMutated(before)
 
     def test_a_dirty_worktree_refuses_and_names_the_files(self):
         """Uncommitted work has no reflog, so the files are named to act on."""
@@ -263,7 +272,7 @@ class CloseItemTestCase(unittest.TestCase):
         # The gates above it passed, and the step below it is blocked.
         self.assertEqual(self.statuses(plan), ["done", "todo", "refused", "blocked"])
 
-        self.assertEqual(before, self.disk_state())
+        self.assertNothingMutated(before)
 
     def test_a_local_branch_that_already_has_the_merge_is_not_pulled_again(self):
         """Behind is a step, and caught up is nothing to do — never a refusal."""
@@ -295,6 +304,61 @@ class CloseItemTestCase(unittest.TestCase):
         self.assertIn("move together", self.step(plan, 7)["note"])
         self.assertIn(REVIEW_LABEL, self.part(plan, "label")["command"])
         self.assertIn(f"close {ISSUE}", self.part(plan, "close")["command"])
+
+    # --- execute mode -------------------------------------------------------
+
+    def test_execute_runs_every_step_in_order(self):
+        """The pull lands, then the three tracker writes, in the plan's order."""
+        plan = self.close("--execute")
+
+        self.assertEqual(plan["mode"], "execute")
+        self.assertEqual(self.statuses(plan), ["done"] * 4)
+        self.assertEqual(rev(self.checkout, "main"), self.merge_commit)
+        self.assertEqual(
+            [w.split()[1:3] for w in self.tracker_writes()],
+            [["issue", "edit"], ["issue", "close"], ["project", "item-edit"]],
+        )
+        self.assertEqual(plan["ran"][0], self.step(plan, 5)["command"])
+        self.assertEqual(len(plan["ran"]), 4)
+
+    def test_execute_stops_at_the_first_refusal_and_writes_nothing(self):
+        """A refused gate means the tracker is never touched at all."""
+        write(self.worktree / "unsaved.md", "work nobody committed\n")
+        plan = self.close("--execute", expect=EXIT_WORKTREE_DIRTY)
+
+        self.assertEqual(plan["refused"]["step"], 6)
+        self.assertEqual(self.step(plan, 7)["status"], "blocked")
+        self.assertEqual(self.tracker_writes(), [])
+        # The pull before the refusal did run, and nothing after it did: that is
+        # what stop-at-the-first-refusal means.
+        self.assertEqual(self.step(plan, 5)["status"], "done")
+        self.assertEqual(plan["ran"], [self.step(plan, 5)["command"]])
+
+        # An unmerged PR refuses before even the pull, with its own exit code.
+        self.write_fixture(pr_state="OPEN")
+        before = self.disk_state()
+        plan = self.close("--execute", expect=EXIT_PR_NOT_MERGED)
+        self.assertEqual(self.tracker_writes(), [])
+        self.assertEqual(before, self.disk_state())
+        self.assertNotEqual(EXIT_PR_NOT_MERGED, EXIT_WORKTREE_DIRTY)
+
+    def test_a_checkout_on_another_branch_moves_the_ref_and_merges_nothing(self):
+        """A pull there would merge the default branch into the wrong branch."""
+        git(self.checkout, "checkout", "-qb", "something-else")
+        plan = self.close("--execute")
+
+        self.assertEqual(self.step(plan, 5)["status"], "done")
+        self.assertEqual(rev(self.checkout, "main"), self.merge_commit)
+        # The branch the maintainer is on received nothing.
+        self.assertEqual(rev(self.checkout, "HEAD"), self.base)
+        self.assertFalse((self.checkout / "feature.md").exists())
+
+    def test_the_default_invocation_mutates_nothing_at_all(self):
+        """No --execute, so this seam is a read whatever else it is given."""
+        before = self.disk_state()
+        for extra in ([], ["--indent", "0"]):
+            self.close(*extra)
+            self.assertNothingMutated(before)
 
     # --- the two things the seam must not know ------------------------------
 
