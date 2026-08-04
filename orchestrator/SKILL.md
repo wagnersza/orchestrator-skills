@@ -112,6 +112,15 @@ separate work, and it has not landed.
 should I run* / *what's ready*, resolve to no skill and route nowhere. Answer them
 with ["What next?"](#what-next--pick-the-next-work), unchanged.
 
+**An unmapped verb costs one line, then proceeds.** A verb that matches no row is
+not a near miss to act on. Ask once, in one line: name the closest row and the verb
+it holds, and ask whether to route there. `Nothing routes "audit the labels". Closest
+is triage -> /triage. Route there?` Then wait for the answer. On yes, take that lane.
+On no, or on a decline of the whole question, answer the verb freehand, the way this
+session does today, and say in the report that no skill was routed to. Two failures
+this closes: a fuzzy match into a skill nobody chose, and a silent freehand answer to
+a verb that clearly wanted one.
+
 ## Board status
 
 Where the tracker config has a **`## Project board`** section, every work item is
