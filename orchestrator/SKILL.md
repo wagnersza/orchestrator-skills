@@ -316,10 +316,27 @@ ready for a worker that is already dead. On an alt-screen TUI the screen is wors
 useless. The buffer comes back as box-drawing noise. Scraping it for a shell prompt
 finds one under a healthy TUI, and misses one under a dead agent.
 
-**The concrete command belongs to the tool, not here** — it is op **3a** in
-[`references/tools/<tool>.md`](references/tools/_operations.md), which is where a
-command that changes per tool has its home. Which dialogs a harness can sit behind
-belongs to [`references/harnesses/<harness>.md`](references/harnesses/codex.md).
+**One seam answers the gate, for every tool and every harness.** It is
+`scripts/worker_state.py`, the same seam the **Worker watch** uses. Readiness and a stall
+are one question asked at two moments. No tool file implements this, and the
+operation contract carries that as a prohibition
+([`references/tools/_operations.md`](references/tools/_operations.md)). Rationale:
+[`docs/adr/0019-readiness-is-a-tool-agnostic-process-check.md`](docs/adr/0019-readiness-is-a-tool-agnostic-process-check.md).
+
+```bash
+python3 -m scripts.worker_state ready \
+  --worktree <the path from op 2> \
+  --process '<the pattern from references/harnesses/<harness>.md>'
+```
+
+**The gate is harness-shaped, and the seam names no harness.** Only the `--process` pattern
+varies, and each harness reference holds its own. Read it from there and never from memory.
+Exit `0` is ready. Poll while it is not, and **abort the spawn** rather
+than send a prompt into a dead terminal. Say which harness, which worktree, and what the
+seam printed. Which dialogs a harness can sit behind belongs to that same reference
+([`references/harnesses/<harness>.md`](references/harnesses/codex.md)). The argument
+surface is `python3 -m scripts.worker_state ready --help`, and the module docstring is the
+signal it reads. Never restate either here or in a report.
 
 **Where the harness reference names a first-run dialog, send and submit are two
 steps:** type the prompt, confirm it reached the composer, then submit. One call that
@@ -336,7 +353,8 @@ The other two are already recorded — `claude` warns-and-defaults on a typo'd
 notices. **Recognise the shape, and do not answer it with a louder check of the same
 kind.** Find the signal that is true of the thing you are asking about, and gate on
 that. Rationale:
-[`docs/adr/0017-gate-worker-readiness-on-a-process-check.md`](docs/adr/0017-gate-worker-readiness-on-a-process-check.md).
+[`docs/adr/0017-gate-worker-readiness-on-a-process-check.md`](docs/adr/0017-gate-worker-readiness-on-a-process-check.md),
+whose signal ADR 0019 keeps and whose placement it narrows.
 
 ### The prompt: checklist + completion contract
 
