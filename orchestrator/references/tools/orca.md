@@ -49,29 +49,24 @@ left.
 
 ### 3a. readiness gate — before the first `send`
 
-The skill body requires a **readiness gate** between `worker-create` and the first
-prompt, and names a live agent process in the worktree as its authoritative signal.
-This is that check. Run it after `terminal create` and before op 4. `$WT_PATH` is
-`worktree.path` from the create JSON, and `$HARNESS` is the config's harness name.
+**No command lives here.** The skill body requires a **readiness gate** between
+`worker-create` and the first prompt. One seam answers it for every tool:
+`python3 -m scripts.worker_state ready`. The skill body holds the invocation, and
+`../harnesses/<harness>.md` holds the process pattern it passes in. This section keeps only
+the measurements that chose that signal, because they are why the two signals `orca` does
+offer were rejected. Do not restore a shell pipeline here
+([`../../docs/adr/0019-readiness-is-a-tool-agnostic-process-check.md`](../../docs/adr/0019-readiness-is-a-tool-agnostic-process-check.md)).
 
-```bash
-lsof -a -d cwd -Fpn 2>/dev/null \
-  | awk -v w="$WT_PATH" '/^p/{p=substr($0,2)} /^n/{if(substr($0,2)==w) print p}' \
-  | while read -r p; do ps -o comm= -p "$p" 2>/dev/null; done \
-  | grep -qx "$HARNESS" && echo READY || echo "NOT READY"
-```
+The gate answers not-ready for every way a worker fails to arrive: still booting, waiting
+on a first-run dialog, exited, or never authenticated. All four look the same from outside,
+because none of them leaves a live agent in the worktree.
 
-It prints `NOT READY` until a process named `$HARNESS` holds the worktree as its
-working directory. Poll it, and do not send while it says `NOT READY`. That one answer
-covers every way a worker fails to arrive: still booting, waiting on a first-run
-dialog, exited, or never authenticated. All four look the same from outside, because
-none of them leaves a live agent in the worktree.
-
-**Use `ps -o comm=` and not `pgrep -x <harness>`.** Verified: a `claude` worker
-launched as `claude --model opus --effort xhigh --dangerously-skip-permissions` is
-**absent** from `pgrep -x claude` output while `ps -o comm=` on the same pid returns
-`claude`. So the `pgrep` form reports `NOT READY` for a perfectly healthy worker,
-which is a false negative that stalls a spawn the gate must let through.
+**A process name comes from `ps -o comm=` and not from `pgrep -x <harness>`.** Verified on a
+`claude` worker launched as
+`claude --model opus --effort xhigh --dangerously-skip-permissions`. It is **absent** from
+`pgrep -x claude` output, while `ps -o comm=` on the same pid returns `claude`. So the
+`pgrep` form reports not ready for a healthy worker. That is a false negative, and it
+stalls a spawn the gate must let through. The seam reads `ps -o comm=` for this reason.
 
 **Why `read` and `wait --for tui-idle` are both insufficient here.** Neither looks at
 the agent. Measured against a `codex` worker that had exited behind a first-run
@@ -81,7 +76,7 @@ dialog:
 |--------|----------|-----------------|
 | `terminal read` | `status: running` | The **shell** is running. It outlived the agent, and it is what receives the prompt. |
 | `terminal wait --for tui-idle` | `satisfied: true` | An idle shell is idle. The condition is met by the failure state. |
-| the gate above | `NOT READY` | No process named `codex` holds the worktree. |
+| the readiness gate | not ready | No process named `codex` holds the worktree. |
 
 `read` is also near-useless for this on an alt-screen TUI. A `--limit 40` read of a
 booting `codex` returned ~4 KB of box-drawing noise and three readable words, all
@@ -97,8 +92,10 @@ Two further measured facts, so nobody re-derives them:
   `status: running` and `wait` fails with `{"code":"timeout"}` rather than reporting
   the exit. `status: exited` appears only when the terminal itself is gone.
 
-Rationale, and why the gate is stated in the skill body but commanded here:
+Rationale for the signal:
 [`../../docs/adr/0017-gate-worker-readiness-on-a-process-check.md`](../../docs/adr/0017-gate-worker-readiness-on-a-process-check.md).
+Why the command left this file:
+[`../../docs/adr/0019-readiness-is-a-tool-agnostic-process-check.md`](../../docs/adr/0019-readiness-is-a-tool-agnostic-process-check.md).
 
 ## 4. send (one step — types **and** submits)
 
