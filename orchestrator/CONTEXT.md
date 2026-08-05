@@ -200,6 +200,21 @@ Per-project commands the completion contract needs but that aren't tool/harness/
 **Checklist**:
 A persistent, file-based task list that survives context loss and works across every harness (unlike claude-only `TodoWrite`). Both the orchestrator and each worker keep one, so neither forgets a step (the documented "stalls before opening the MR" failure mode). Written as markdown checkboxes (`- [ ]` / `- [x]`) to `.orchestrator/checklist-<item>.md` at the worktree root (gitignored, torn down with the worktree). The worker ticks each step as it completes; the orchestrator reads the file to see exact progress and detect a stall (unchecked items + idle terminal → re-prompt with the remaining steps).
 
+**Worker watch**:
+One stateless process per live **Worker** that observes the worker's own work product and wakes the **Orchestrator** session when something needs a decision. It is not a worker — it has no **Harness** and no **Model** — and it is not the orchestrator, because it decides nothing. **It reports and never acts.** It blocks, polls two facts on the file system, and exits with one code per outcome: the **Completion signal** fired, no fresh work product inside the stall window, the bounded maximum wait was reached, or the worktree is gone. It composes no prompt, kills no process, writes no label, and spawns nothing, so every destructive act stays in a session a human can interrupt. It holds no state between invocations, which is what makes a restart after each re-prompt free.
+
+**The watch decides when, and the session decides what** — the same split as a **Close transaction**, and the same reason: ordering is what code holds perfectly and prose holds poorly. So the watch is a seam, `scripts/worker_state.py`, and the session answers the wake with the flows `SKILL.md` already holds. The stall counter lives in the session's report rather than in the watch. This entry names the seam before it exists: the term is declared here, and the file lands with the flow change that consumes it. One watch per spawn, impl and review alike, because an opt-in watch is off exactly when the maintainer forgets. Rationale, the rejected alternatives, the reviewer accepted risk, and the context reset that goes with a re-prompt: `docs/adr/0018-the-worker-watch-is-a-stateless-seam.md`. The same seam answers readiness for every **Tool** with one check: `docs/adr/0019-readiness-is-a-tool-agnostic-process-check.md`.
+_Avoid_: watchdog, monitor, supervisor, liveness probe (each implies restart authority this thing does not have).
+
+**Completion signal**:
+How a **Worker**'s finish is detected. Two shapes, and a **Worker watch** takes exactly one, named at launch by the worker's **Role**:
+
+1. **A fully ticked checklist** — every box in `.orchestrator/checklist-<item>.md` is `- [x]`. This is the implementation worker's shape. It docks onto the completion contract the **Checklist** already is, so it adds no second place to record progress.
+2. **A `Verdict:` comment** on the **Work item** — the review worker's shape, because a reviewer ticks no checklist. `Verdict:` is a fixed literal shared by the review prompt and the watch, and its value is `approve` or `request-changes`. It is quoted here, so a writing pass leaves it byte-identical.
+
+Both are **work product**: a worker writes them by doing the work. So neither one reports a finish for a dead worker. `orca terminal read` and `orca terminal wait --for tui-idle` both did report one, which is the failure mode recorded in `docs/adr/0017-gate-worker-readiness-on-a-process-check.md`. Why these two shapes, and why a reviewer's stall detection is weaker as accepted risk: `docs/adr/0018-the-worker-watch-is-a-stateless-seam.md`. Why the same seam also answers readiness for every **Tool**: `docs/adr/0019-readiness-is-a-tool-agnostic-process-check.md`.
+_Avoid_: done signal, exit signal, finish event, heartbeat (the last one names liveness, which is the signal this deliberately is not).
+
 ## Skill dependency versioning
 
 Vocabulary for `/skill-fork-sync` (`../skill-fork-sync/SKILL.md`), which holds each declared skill dependency at a version this repo controls. Rationale: `docs/adr/0007-fork-and-pin-skill-dependencies.md` and `docs/adr/0008-diff-targeted-run-budget.md`.
