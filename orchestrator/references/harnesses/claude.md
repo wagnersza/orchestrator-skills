@@ -46,6 +46,23 @@ A `light`-role worker, `model: sonnet-5`, `effort: medium` →
 claude --model sonnet --effort medium --dangerously-skip-permissions
 ```
 
+## Process pattern and context reset
+
+Two facts the skill body reads from here, one per flow.
+
+- **Process pattern** — the readiness gate's `--process` value: `(^|/)claude$`. Measured
+  on `claude` 2.1.220: `ps -o comm=` returns `claude` for a live worker, and returns the
+  install's absolute path for the launcher process. So anchor the pattern at a path
+  separator. A bare `claude` also matches this machine's `claude bg-pty-host` helper,
+  which is a different process in a different directory.
+- **Context reset** — the command sent before every re-prompt: `/clear`. This harness
+  parses a slash command, so it gets the command itself and not a prose equivalent.
+
+The gate is in the skill body and the check is one seam
+([`../../docs/adr/0019-readiness-is-a-tool-agnostic-process-check.md`](../../docs/adr/0019-readiness-is-a-tool-agnostic-process-check.md)).
+Why a re-prompt resets first:
+[`../../docs/adr/0018-the-worker-watch-is-a-stateless-seam.md`](../../docs/adr/0018-the-worker-watch-is-a-stateless-seam.md).
+
 ## Notes
 
 - Never disable thinking (`/effort` and the flag keep it on). Thinking-on at `low` beats thinking-off at similar cost, and thinking-off leaks tool calls as plain text — fatal in an unattended loop.

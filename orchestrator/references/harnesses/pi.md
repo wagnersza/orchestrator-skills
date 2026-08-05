@@ -31,7 +31,24 @@ Not pinnable in general. `pi --list-models` on this machine showed only older An
 - Setup must run `pi --list-models` and **warn** if the config's model isn't in the output; don't spawn a `pi` worker against a model it can't reach.
 - Add concrete rows here once a machine has the frontier ids available, in the form `config model → provider/id`.
 
+## Process pattern and context reset
+
+Two facts the skill body reads from here, one per flow.
+
+- **Process pattern** — the readiness gate's `--process` value: `(^|/)pi$`. Measured on
+  `pi` 0.74.0: `ps -o comm=` returns `pi` for a live worker, because the CLI sets its own
+  process title. Anchor it. An unanchored `pi` matches about eight unrelated macOS
+  processes, `MTLCompilerService` and `spindump` among them.
+- **Context reset** — the command sent before every re-prompt: `/new`. Measured on the
+  same version: it starts a new session, and the CLI prints `✓ New session started`.
+  `/compact` summarises rather than resets, so it is not the reset command.
+
+The gate is in the skill body and the check is one seam
+([`../../docs/adr/0019-readiness-is-a-tool-agnostic-process-check.md`](../../docs/adr/0019-readiness-is-a-tool-agnostic-process-check.md)).
+Why a re-prompt resets first:
+[`../../docs/adr/0018-the-worker-watch-is-a-stateless-seam.md`](../../docs/adr/0018-the-worker-watch-is-a-stateless-seam.md).
+
 ## Notes
 
-- Plain-English completion contract, same as codex — no slash commands, no `TodoWrite`.
+- Plain-English completion contract, same as codex — no routed skill to invoke, no `TodoWrite`.
 - The worker maintains the checklist file; the orchestrator reads it.

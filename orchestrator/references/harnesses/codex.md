@@ -118,8 +118,29 @@ Measured: text sent to a dialog-blocked `codex` appeared **nowhere** in the read
 buffer. So this harness is the one that needs the conditional split of op 4 — type the
 prompt, confirm it is in the composer, then submit
 ([`../tools/orca.md`](../tools/orca.md#4a-send-in-two-steps-where-a-harness-needs-a-dialog-answered)).
-The gate itself is in the skill body and the command is in the tool reference
-([`../../docs/adr/0017-gate-worker-readiness-on-a-process-check.md`](../../docs/adr/0017-gate-worker-readiness-on-a-process-check.md)).
+Why the gate is a process check:
+[`../../docs/adr/0017-gate-worker-readiness-on-a-process-check.md`](../../docs/adr/0017-gate-worker-readiness-on-a-process-check.md).
+
+## Process pattern and context reset
+
+Two facts the skill body reads from here, one per flow.
+
+- **Process pattern** — the readiness gate's `--process` value: `(^|/)codex$`. Measured
+  on `codex-cli` 0.146.0: `ps -o comm=` returns `codex` for a live worker. The gate catches
+  the dialogs above at the point they cost a run. A dialog-blocked `codex` that then exits
+  leaves the shell behind, and the gate reports not ready where a screen read reports
+  running. While it sits at an open dialog the process is alive, so the gate reports ready.
+  The two-step send is what protects the prompt there.
+- **Context reset** — the command sent before every re-prompt: `/new`. Measured on the
+  same version, where the composer describes it as `start a new chat during a
+  conversation`. `/clear` exists too and it also clears the terminal, so `/new` is the
+  narrower of the two. `/compact` summarises rather than resets, so it is not the reset
+  command.
+
+The gate is in the skill body and the check is one seam
+([`../../docs/adr/0019-readiness-is-a-tool-agnostic-process-check.md`](../../docs/adr/0019-readiness-is-a-tool-agnostic-process-check.md)).
+Why a re-prompt resets first:
+[`../../docs/adr/0018-the-worker-watch-is-a-stateless-seam.md`](../../docs/adr/0018-the-worker-watch-is-a-stateless-seam.md).
 
 ## Startup noise that is not a failure
 

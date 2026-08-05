@@ -43,7 +43,27 @@ Ids as listed by `cursor-agent --list-models` (verify after an upgrade — this 
 cursor-agent --force --model claude-opus-5-thinking-xhigh
 ```
 
+## Process pattern and context reset
+
+Two facts the skill body reads from here, one per flow.
+
+- **Process pattern** — the readiness gate's `--process` value: `(^|/)cursor-agent$`.
+  Measured on `cursor-agent` 2026.07.23: `ps -o comm=` returns the launcher's absolute
+  path, `/Users/<user>/.local/bin/cursor-agent`, and never the bare name. The wrapper is a
+  bash script that `exec -a "$0"`s into node, which keeps the path as the process name. So
+  anchor the pattern at a path separator rather than at the start of the string. For about
+  the first second of boot the same process reports `/usr/bin/env` and then `bash`, so
+  poll the gate rather than reading it once.
+- **Context reset** — the command sent before every re-prompt: `/clear`. Measured on the
+  same version, where the composer titles it `Clear` and describes it as `Start a new chat
+  session`. `new` and `new-chat` are registered aliases of it, so either also works.
+
+The gate is in the skill body and the check is one seam
+([`../../docs/adr/0019-readiness-is-a-tool-agnostic-process-check.md`](../../docs/adr/0019-readiness-is-a-tool-agnostic-process-check.md)).
+Why a re-prompt resets first:
+[`../../docs/adr/0018-the-worker-watch-is-a-stateless-seam.md`](../../docs/adr/0018-the-worker-watch-is-a-stateless-seam.md).
+
 ## Notes
 
-- Plain-English completion contract — no slash commands, no `TodoWrite`.
+- Plain-English completion contract — no routed skill to invoke, no `TodoWrite`.
 - The worker maintains the checklist file; the orchestrator reads it.
