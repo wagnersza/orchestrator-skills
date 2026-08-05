@@ -296,6 +296,8 @@ When the user says **implement #N / implement X / start work on X**:
 6. **Write the checklist + deliver the prompt** — see below.
 7. **Follow-along panel** (op 7, if the tool supports it) — open the work item as
    a tab inside the worker's worktree.
+8. **Start the watch** — mandatory, and the last step of every spawn. See
+   [Watch the worker until it wakes you](#watch-the-worker-until-it-wakes-you).
 
 ### Gate readiness before the first prompt
 
@@ -513,6 +515,41 @@ plain-English rule as every other part of the contract, not a second mechanism.
 (e.g. `FE=3000+N`), so parallel workers never collide and the port reads back to
 the item. Check reuse before booting; tear down after evidence — per the recipe.
 
+### Watch the worker until it wakes you
+
+**A spawn with no watch is incomplete.** The last step of every spawn launches a
+**Worker watch** in the background. One per worker, implementation and review alike. An
+opt-in watch is off exactly when you forget, which is the whole reason this step exists.
+A batch of five siblings gets five watches, one each.
+
+```bash
+python3 -m scripts.worker_state watch --item <N> \
+  --worktree <the path from op 2> --done-when checklist \
+  --stall-after <duration> --max-wait <duration> &
+```
+
+**`--done-when` names which Completion signal this worker's role writes.** An
+implementation worker takes `checklist`, because a ticked
+`.orchestrator/checklist-<item>.md` is the completion contract it already keeps. A review
+worker takes `verdict`, because it ticks no checklist — its finish is the `Verdict:`
+comment it posts. A `verdict` watch also takes `--repo <owner>/<name>`, the tracker
+repository as `OWNER/NAME`, read from `docs/agents/issue-tracker.md`. Definitions: the
+**Worker watch** and **Completion signal** entries in [`CONTEXT.md`](CONTEXT.md).
+
+**Pick both durations per item.** `--stall-after` is longer than the item's slowest single
+step, so a worker thinking hard is never read as stalled. `--max-wait` bounds the watch, so
+it never outlives the work it observes. Both accept `45s`, `30m` or `4h`. `--poll-every` has
+a default and needs no value from you.
+
+**The watch reports and never acts.** It composes no prompt, kills nothing, writes no
+label and spawns nothing. So every destructive act stays in this session, where a human
+can interrupt it. It also holds no state, which is what makes stopping one, re-prompting
+the worker, and starting a fresh watch free. Rationale:
+[`docs/adr/0018-the-worker-watch-is-a-stateless-seam.md`](docs/adr/0018-the-worker-watch-is-a-stateless-seam.md).
+The argument surface is `python3 -m scripts.worker_state watch --help`, and the module
+docstring is the signal table. **Never restate either here or in a report.** What this
+session does when a watch exits is [On the wake](#on-the-wake--one-response-per-exit-code).
+
 ## Monitor workers
 
 - **Topology / handles:** `worktree-list` (op 8), `worker-list` (op 9) — map slug
@@ -522,14 +559,77 @@ the item. Check reuse before booting; tear down after evidence — per the recip
 - **Busy vs idle:** `wait-idle` (op 6). A TUI harness (claude) has sparse
   read-tail, so trust the checklist + idle state over scraping.
 - **Stall detection:** unchecked boxes **and** an idle terminal → the worker
-  stopped early. Re-prompt with the remaining (unchecked) steps (op 4). Prefix a
+  stopped early. Reset its context
+  ([Reset the worker's context before every re-prompt](#reset-the-workers-context-before-every-re-prompt)),
+  then re-prompt with the remaining (unchecked) steps (op 4). Prefix a
   code-changing follow-up appropriately for the harness. A worker that stalls or
   flails **twice** was mis-routed — tear it down and re-spawn a rung up
   (`light` → `heavy`, or `heavy` at `max`), and say that's what happened.
 
+The watch is what fires this rule without your asking
+([Watch the worker until it wakes you](#watch-the-worker-until-it-wakes-you)). The four
+bullets above stay the way to answer *what are the workers doing* between wakes.
+
+## On the wake — one response per exit code
+
+A watch exits with one code per outcome, and prints one line naming it. **The response is
+a lookup, not an interpretation.** Read the code, run the row, and report per
+[Reporting to the user](#reporting-to-the-user).
+
+**`0` complete.** Where config's `review.enabled` holds, run
+[Adversarial review](#adversarial-review-when-configs-reviewenabled) steps 1 and 2. This
+exit is the actor that detects "a work item reaches the review state". Where review is
+off, report the finish and offer the review in one line. The on-demand door
+(`review #N adversarially`) is unchanged either way.
+
+**`1` stalled.** The stall rule at [Monitor workers](#monitor-workers) fires, unchanged.
+Reset the worker's context, then re-prompt with the unchecked boxes. **The re-prompt is
+unconfirmed** — it is additive, and it costs the maintainer nothing to get wrong. On the
+**second** stall the same rule tears the worker down and re-spawns a rung up. **Teardown
+keeps its confirmation** ([Safety](#safety)), because a watch cannot read intent in an
+uncommitted diff. **The stall counter is yours to carry, in the report** — `stall 1 of 2`.
+The seam holds no state between invocations, so it cannot count. Start a fresh watch after
+each re-prompt, which costs nothing for the same reason. Do not diagnose *why* the worker
+stalled: that is judgement on a live terminal and nothing here asks for it.
+
+**`2` max-wait.** Neither a finish nor a proven stall. Report the worker's position off
+the checklist and offer the next step — start a longer watch, read the terminal, or leave
+it. This is also the outcome that carries a silent reviewer, per the accepted risk in
+[`docs/adr/0018-the-worker-watch-is-a-stateless-seam.md`](docs/adr/0018-the-worker-watch-is-a-stateless-seam.md).
+
+**`3` worktree gone.** The worker was torn down. Say so and stop watching. **Never treat
+this as a stall**, and never re-prompt a worker that no longer exists.
+
+### Reset the worker's context before every re-prompt
+
+**Every re-prompt resets the worker's context first** — a stall recovery and an
+adversarial-review fix round alike. A worker that burned a long attempt carries that whole
+attempt into its retry, and the retry is the turn that most needs the headroom.
+
+**The command is harness-shaped.** On `claude` it is `/clear`. Every other harness takes
+whatever its own [`references/harnesses/<harness>.md`](references/harnesses/claude.md)
+names. Where a harness offers no reset command, **the step is skipped and the report says
+so**. Read the command from the reference and never from memory. This is the same
+plain-English split every other part of the contract takes: never send a slash command to
+a harness that cannot parse one.
+
+**The re-prompt is then self-contained.** A cleared worker has forgotten its spawn prompt.
+So the re-prompt re-carries four things. The routed skill, as a literal invocation. The
+worker's own harness, model, effort and role. Then the acceptance criteria and the scope
+edges. **That is the same list a fix prompt already carries** (step 3 of
+[Adversarial review](#adversarial-review-when-configs-reviewenabled)) — one contract
+reached from two directions, not two rules. A re-prompt is a worker prompt, so it goes
+through `prompt-improver` as an agentic-pipeline prompt like any other.
+
+**The checklist file is what makes the reset safe.** Progress lives on disk, so a reset
+loses the worker's reasoning and never its position. Rationale:
+[`docs/adr/0018-the-worker-watch-is-a-stateless-seam.md`](docs/adr/0018-the-worker-watch-is-a-stateless-seam.md).
+
 ## Adversarial review (when config's `review.enabled`)
 
-When a work item reaches the review state and review is enabled:
+When a work item reaches the review state and review is enabled. **The watch's `0` exit is
+what detects that** ([On the wake](#on-the-wake--one-response-per-exit-code)). So this flow
+now has an actor that starts it:
 
 1. **Spawn a review worker** on the impl branch (its own worktree, op 2 with
    `--base-branch <impl-branch>`), harness per config, model + effort =
@@ -541,7 +641,9 @@ When a work item reaches the review state and review is enabled:
    A review spawn needs this more than an impl spawn, not less. Its worktree is fresh,
    and its harness is usually the *other* vendor's — so it is the one this machine has
    launched least often. A lost review round is also silent: the impl worker waits, the
-   findings never arrive, and nothing reports an error.
+   findings never arrive, and nothing reports an error. **Then start its watch**, like any
+   other spawn ([Watch the worker until it wakes you](#watch-the-worker-until-it-wakes-you)),
+   with `--done-when verdict` because a reviewer ticks no checklist.
 2. **Prompt it to review** the diff/MR against the work item's acceptance
    criteria — drafted, then run through `prompt-improver` for the review model's
    profile, same as a spawn prompt. Say it's a **code-review prompt**:
@@ -551,6 +653,12 @@ When a work item reaches the review state and review is enabled:
    that literally and silently drops real bugs. The orchestrator ranks when it
    reads the verdict. The reviewer posts a verdict on the work item: **approve**
    or **request-changes + findings**.
+
+   **The verdict carries a `Verdict:` line, and the prompt asks for it verbatim.** Its
+   value is `approve` or `request-changes`. That literal is what a `--done-when verdict`
+   watch reads, so a review whose comment omits it never wakes this session. It is quoted
+   in the **Completion signal** entry of [`CONTEXT.md`](CONTEXT.md), so a writing pass
+   leaves it byte-identical.
 
    **Four substitutions this prompt needs, learned by running the flow.** Each closes a
    way a reviewer produces a plausible verdict that is not a review:
@@ -567,8 +675,10 @@ When a work item reaches the review state and review is enabled:
 
    These four are prompt *content*, so they go into the draft and through
    `prompt-improver` with the rest — they restate no rule of the two-axis contract.
-3. **On request-changes:** re-prompt the **original impl worker** with the
-   findings to fix, then re-review. Loop, bounded at `review.rounds` (default 3).
+3. **On request-changes:** reset the original impl worker's context
+   ([Reset the worker's context before every re-prompt](#reset-the-workers-context-before-every-re-prompt)).
+   Then re-prompt **that same worker** with the findings to fix, start a fresh watch, and
+   re-review. Loop, bounded at `review.rounds` (default 3).
    Each fix round steps the impl worker's effort up one rung — a finding the model
    missed at `high` is what `xhigh` is for. In a fix round, one finding is one slice,
    so the reviewer can map each fix to the finding it answers. **The fix prompt
@@ -582,7 +692,7 @@ When a work item reaches the review state and review is enabled:
    - **The routed skill, as a literal invocation.** `/implement`, not a sentence
      mentioning `/implement`. Same rule as a spawn prompt, for the same reason — a
      mention reads as a suggestion, and the worker then works freehand. **A fix prompt
-     is a fresh prompt to a worker whose context can be gone**, so it re-states the
+     goes to a worker whose context this session has cleared**, so it re-states the
      invocation instead of relying on the worker to remember entering it.
    - **The worker's own harness, model, effort and role.** Effort steps up each round,
      so the worker cannot infer its current setting from the last one it saw.
@@ -717,6 +827,13 @@ it. Shape output for acting on, not for completeness:
 - **Restate position every turn.** A worker's progress is `checklist 4/7`, a review
   loop is `round 2 of 3`. Read it off the checklist file and the round counter —
   don't ask the user to remember.
+- **A wake report names the outcome, and the stall count where there is one.** The
+  outcome is the watch's own word: `complete`, `stalled`, `max-wait` or `gone`. Then say
+  what you did about it. `#38 stalled at checklist 4/7 · stall 1 of 2. Context reset,
+  re-prompted with the unchecked boxes.` **The count lives here and nowhere else**, because
+  the watch holds no state between invocations
+  ([On the wake](#on-the-wake--one-response-per-exit-code)). At `stall 2 of 2` the next
+  step is a teardown, so name it as the pending human decision.
 - **One table or list, capped at 5 rows.** More than 5 ready items or 5 findings →
   rank and split (`start now` vs `blocked`, `must-fix` vs `noted`). Five ranked
   beats twelve flat, and the ready queue already promises "at least 5".
@@ -754,6 +871,9 @@ refusal reason are spelled out, never compressed.
   explicit "merge and close" **is** that confirmation, so a second ask is friction
   rather than safety (the table in [Close a task](#close-a-task)). The data-loss case
   is a dirty tree, and step 6 of the transaction refuses it rather than warning.
+- **A second stall is one of the ambiguous cases, so it asks.** The maintainer said
+  nothing about a teardown here. A watch cannot read intent in an uncommitted diff. The
+  re-prompt on the first stall stays unconfirmed, because it destroys nothing.
 - Keep the main checkout (config's `repo`) on the default branch — all
   tracker/git-state ops run there. This orchestrator's own worktree branch is
   separate and irrelevant.
