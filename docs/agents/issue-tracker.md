@@ -27,8 +27,9 @@ The orchestrator reads these from here; its own config never redefines them.
 | done | *(closed)* | PR merged and the issue closed. |
 
 Triage roles (`needs-triage`, `needs-info`, `ready-for-human`, `wontfix`) are a
-separate vocabulary — see `triage-labels.md`. The project board's `Status` field is
-derived from these labels — see [Project board](#project-board).
+separate vocabulary — see `triage-labels.md`. Phase labels are a third — see
+[Phase labels](#phase-labels). The project board's `Status` field is derived from the
+work-state labels above — see [Project board](#project-board).
 
 Labels beyond GitHub's defaults don't exist in this repo yet. Create on first use:
 
@@ -37,6 +38,38 @@ gh label create in-progress --color FBCA04 --description "An agent worker owns t
 gh label create to-review   --color 0E8A16 --description "Work done, PR open, awaiting human review"
 gh label create ready-for-agent --color 1D76DB --description "Fully specified, ready for an AFK agent"
 gh label create user-story  --color 5319E7 --description "A spec whose children are the implementable work"
+```
+
+## Phase labels
+
+Which part of an owned run a work item is in. A **second family, worn beside the
+work-state label** rather than instead of it. **Mutually exclusive inside the family —
+swap, never stack** (`gh issue edit <n> --add-label <new> --remove-label <old>`), the
+same rule the work-state family takes.
+
+| Phase | Label | Meaning |
+|-------|-------|---------|
+| implementation | `phase:impl` | A worker is implementing. Set at spawn, beside `in-progress`. |
+| review | `phase:review` | A reviewer is reading the diff. Fix rounds are inside this phase. |
+| proof | `phase:e2e` | A worker is proving the feature works through the browser surface. |
+| human review | *(no phase label)* | `to-review` alone. Removing the label is the transition. |
+
+**The two families stack.** An owned item wears `in-progress` and exactly one `phase:*`
+label together, because they answer different questions: who owns the item, and what
+that owner is doing. **Human review carries no phase label**, because `to-review`
+already records it.
+
+**The `Status` derivation table below is unchanged.** `Status` derives from the
+work-state labels alone, so a phase change writes no card. Rationale, and why this is a
+second family rather than more values in the first one:
+[`orchestrator/docs/adr/0021-phase-is-a-second-label-family.md`](../../orchestrator/docs/adr/0021-phase-is-a-second-label-family.md).
+
+Create on first use:
+
+```bash
+gh label create phase:impl   --color C5DEF5 --description "A worker is implementing this"
+gh label create phase:review --color C5DEF5 --description "A reviewer is reading the diff"
+gh label create phase:e2e    --color C5DEF5 --description "A worker is proving the feature works"
 ```
 
 ## Project board
