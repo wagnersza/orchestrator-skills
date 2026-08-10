@@ -147,9 +147,10 @@ observed.
 - **`worker_state watch` retires, and no caller revives it.** The seam gains `phase`,
   the predicate. `ready` is unchanged, and `phase` reuses its process check for the
   `dead` outcome.
-- **The exit code stays the contract, and it narrows to two values.** Zero means a
-  transition is due. The seven outcomes ride on the printed line, and the session
-  answers each with a lookup rather than an interpretation.
+- **The exit code stays the contract, and it narrows to a predicate.** Zero means a
+  transition is due, and every other code means nothing to do. The seven outcomes ride
+  on the printed line, and the session answers each with a lookup rather than an
+  interpretation.
 - **Configuration is resolved once, at spawn, into the precheck flags.** The session
   reads four values from `docs/agents/orchestrator.md` and writes them into the command
   string: the round bound, whether the proof phase applies, the harness process pattern,
