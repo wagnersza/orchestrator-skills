@@ -1,5 +1,10 @@
 # Fork each declared skill dependency and pin the fork's default branch
 
+> **Superseded by [ADR 0020](0020-skill-dependencies-track-upstream.md).** No fork
+> was ever created, and the dependencies now track upstream with no pin. The text
+> below is the decision as it was made. `/skill-fork-sync` and
+> `scripts/fork_state.py` no longer exist.
+
 Every skill this repo declares as a dependency — `mattpocock-skills`, `ponytail`,
 `prompt-improver` — was installed straight from someone else's default branch,
 and this repo does not merely coexist with them: `references/requirements.md`
@@ -80,5 +85,5 @@ leaving that file untouched keeps `mattpocock-skills@mattpocock` and
   installed (`caveman`, `skill-creator`) stay out until they are declared;
   skills that ship with a desktop app and have no public upstream are a vendoring
   problem, not a forking one.
-- Turning the dial is what `/skill-fork-sync` exists for —
-  [`skill-fork-sync/SKILL.md`](../../../skill-fork-sync/SKILL.md).
+- Turning the dial was what `/skill-fork-sync` existed for. That skill is removed
+  ([ADR 0020](0020-skill-dependencies-track-upstream.md)).

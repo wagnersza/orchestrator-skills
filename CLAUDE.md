@@ -6,17 +6,17 @@ implementing one work item in its own worktree. See [`README.md`](README.md) for
 the layout and [`orchestrator/CONTEXT.md`](orchestrator/CONTEXT.md) for the
 vocabulary.
 
-A third skill, **`skill-fork-sync`**, owns dependency versioning: it forks each
-declared skill dependency, pins the fork's default branch, and gates upstream
-deltas behind a diff-targeted evaluation before you promote. See
-[`skill-fork-sync/SKILL.md`](skill-fork-sync/SKILL.md),
-[ADR 0007](orchestrator/docs/adr/0007-fork-and-pin-skill-dependencies.md) and
-[ADR 0008](orchestrator/docs/adr/0008-diff-targeted-run-budget.md).
+Every declared skill dependency is installed from the upstream repo its author
+maintains. An upstream change therefore reaches the next session through no
+evaluation gate. That is a deliberate trade:
+[ADR 0020](orchestrator/docs/adr/0020-skill-dependencies-track-upstream.md)
+supersedes the fork-and-pin decision and removes the skill that implemented it.
 
 This repo is mostly markdown skills plus JSON manifests — nothing to build, boot,
-or migrate. The one exception is `scripts/fork_state.py` (the sync-plan seam) and
-its stdlib-only test suite: **run the tests when you touch a Python file**, per the
-`evidence` bar in [`docs/agents/orchestrator.md`](docs/agents/orchestrator.md).
+or migrate. The exceptions are `scripts/close_item.py` and
+`scripts/worker_state.py` with their stdlib-only test suites: **run the tests when
+you touch a Python file**, per the `evidence` bar in
+[`docs/agents/orchestrator.md`](docs/agents/orchestrator.md).
 
 ## Working here
 

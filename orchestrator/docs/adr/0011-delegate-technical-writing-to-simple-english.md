@@ -68,6 +68,12 @@ pattern. `prompt-improver` owns the prompt, `simple-english` owns the prose, and
 
 ## The fork set narrows to marketplace-installed dependencies
 
+> **This section is superseded by
+> [ADR 0020](0020-skill-dependencies-track-upstream.md).** There is no fork set
+> now: every dependency tracks upstream, so the accepted risk this section records
+> for `simple-english` applies to all of them. The rest of the ADR — the writing
+> standard, the mode, and what counts as a prose deliverable — still holds.
+
 ADR 0007 concludes that "the fork set is exactly what `requirements.md`
 declares". That sentence is now false, and this ADR narrows it: **the fork set is
 the declared dependencies installed through a Claude plugin marketplace.**

@@ -36,8 +36,8 @@ repo:     /Users/wagner.souza/git/wsza/orchestrator-skills   # main checkout; st
 tracker:  # read from docs/agents/issue-tracker.md (GitHub / gh); do NOT redefine labels here
 
 # --- project recipe (the completion contract's project-specific parts) ---
-setup_cmd:  "python3 --version"   # stdlib-only test suite; nothing to install. Once
-                                  # scripts/fork_state.py lands, its tests run under
+setup_cmd:  "python3 --version"   # stdlib-only test suite; nothing to install. The
+                                  # tests under scripts/ run with
                                   # `python3 -m pytest scripts/ -q` if pytest is present,
                                   # else `python3 -m unittest discover -s scripts -q`.
                                   # No third-party runtime dependency: fixtures are local
@@ -82,9 +82,9 @@ manifests. There is nothing to boot, no schema, and no port — so `run_recipe`,
 `ports`, and `db_gate` stay blank and the orchestrator drops their checklist steps
 before sending a prompt.
 
-**It is no longer markdown-only.** `/skill-fork-sync` puts the deterministic half
-of a sync behind one Python seam, `scripts/fork_state.py`, and that seam has a
-test suite (ADR 0008). So:
+**It is no longer markdown-only.** Two Python seams hold the deterministic halves
+of the close transaction and the worker watch: `scripts/close_item.py` (ADR 0015)
+and `scripts/worker_state.py` (ADR 0018). Each seam has a test suite. So:
 
 - `setup_cmd` is a Python availability check, not blank. The suite is
   **stdlib-only** — fixtures are local git repos built in a temp directory, with

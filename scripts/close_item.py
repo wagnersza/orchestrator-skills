@@ -141,7 +141,7 @@ class Tracker:
     """The tracker reads and writes this seam needs, or a fixture in their place.
 
     A fixture file (`--gh-fixture`) is how the tests close an item with no
-    network and no `gh` login, the same way `fork_state.py` plans a bootstrap.
+    network and no `gh` login.
     Each key holds what the matching `gh` read returns, keyed by number:
 
         {"pull_requests": {"48": {"state": "MERGED", "mergeCommit": {"oid": "a1"}}},

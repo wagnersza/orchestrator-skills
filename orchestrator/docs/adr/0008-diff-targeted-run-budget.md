@@ -1,5 +1,10 @@
 # A sync spends at most 5 worker runs, targeted by the diff
 
+> **Superseded by [ADR 0020](0020-skill-dependencies-track-upstream.md).** No sync
+> ever ran, and there is no evaluation gate now. The text below is the decision as
+> it was made. `/skill-fork-sync`, `scripts/fork_state.py` and `evals/` no longer
+> exist.
+
 Evaluating a **Sync candidate** costs real agent runs, and the useful question is
 narrow: *did upstream regress something this repo relies on?* So a sync is capped
 at **5 worker runs total, pinned-baseline runs included** — either two paired
@@ -72,5 +77,5 @@ sync with no registry to update.
   exercise a hook — so its assertions test whether the skill body still *says*
   what the completion contract assumes, not its runtime behaviour. Recorded here
   rather than papered over.
-- The budget rule is enforced in
-  [`skill-fork-sync/references/sync.md`](../../../skill-fork-sync/references/sync.md).
+- The budget rule was enforced in `skill-fork-sync/references/sync.md`, which is
+  removed ([ADR 0020](0020-skill-dependencies-track-upstream.md)).
