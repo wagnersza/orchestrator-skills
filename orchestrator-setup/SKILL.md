@@ -152,9 +152,12 @@ For option 1, skip the interview entirely. Do this instead:
    - **A missing `## Project board` section** in `docs/agents/issue-tracker.md` on a
      GitHub repo that now has a board — run step 2a and offer to add it. If the
      section is there, re-resolve its ids and report any mismatch.
-3. **Apply only what the user approves**, one edit at a time. An update must never
+3. **If the orchestrator terminal title is not set yet, set it** (step 5a). A repo
+   configured before the tick existed has no titled terminal, so this path is the only
+   place an existing user gets one.
+4. **Apply only what the user approves**, one edit at a time. An update must never
    drop a hand-edited recipe field or flip a review policy on its own.
-4. **Report** as a short table: what updated, what the config needs, what's fine.
+5. **Report** as a short table: what updated, what the config needs, what's fine.
    Then stop — don't continue into steps 1–3.
 
 ## 1. Explore
@@ -406,6 +409,30 @@ writing. Then:
 
 - Ensure `.orchestrator/` is gitignored (the worker checklist files live there):
   add `.orchestrator/` to the repo's `.gitignore` if absent.
+
+### 5a. Title the orchestrator terminal
+
+Each live work item gets an **Item automation**. Its tick wakes the orchestrator session
+with one line to that session's terminal, found **by title**. An auto-generated title
+changes, so the wake target must be a fixed literal: **`orchestrator`**. Set it once here
+and it survives a restart of the session
+([`../orchestrator/SKILL.md`](../orchestrator/SKILL.md), *Start the tick*;
+[ADR 0022](../orchestrator/docs/adr/0022-item-automation-replaces-the-blocking-watch.md)).
+
+Only for a tool whose reference file supports operation 11
+([`../orchestrator/references/tools/_operations.md`](../orchestrator/references/tools/_operations.md)).
+On `orca`:
+
+```bash
+orca terminal list --worktree active --json          # find this session's handle
+orca terminal rename --terminal <handle> --title "orchestrator"
+```
+
+More than one terminal can sit in the active worktree. So **confirm which handle is this
+session's** before you rename it. A title on the wrong terminal sends every wake to a shell
+nobody reads. Where the tool records operation 11 as unsupported, there is no tick at all.
+Skip this step and say so in one line. Where the title cannot be set, say that the wake
+falls back to a comment on the work item. That is a supported configuration and not a gap.
 
 ## 6. Done
 
