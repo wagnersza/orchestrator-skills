@@ -1,5 +1,10 @@
 # The Worker watch is a stateless seam, and every action stays in the session
 
+**Narrowed by [ADR 0022](0022-item-automation-replaces-the-blocking-watch.md).** The
+split below stands, and the seam and its exit-code contract stand. The blocking poll
+loop retires, because a watch owned by the session's own shell dies with that shell.
+Read this ADR for the split, and read 0022 for the trigger that replaces the loop.
+
 An orchestrator session spawns a worker, sends the prompt, and then pays it no more
 attention. Nothing in this skill watches a live worker. The monitor section of
 [`orchestrator/SKILL.md`](../../SKILL.md) is four bullets the maintainer runs by hand,
