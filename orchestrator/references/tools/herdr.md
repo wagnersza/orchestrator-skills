@@ -22,5 +22,7 @@ Implements the [operation contract](_operations.md).
 | 8 | worktree-list    | list worktrees → slug/id/path |
 | 9 | worker-list      | list terminals in the worktree; match the slug title |
 | 10| teardown         | remove worktree + kill terminals + delete branch (one call if supported, else the multi-step sequence) |
+| 11| automation-create | **unsupported** — no automation surface is declared for herdr. The spawn skips the tick and the report says so |
+| 12| automation-remove | **unsupported** — nothing is created, so nothing is removed. Teardown stays operation 10 alone |
 
 Record for each op: whether it emits JSON (parse a stable field) or plain text, whether `send` auto-submits, and whether `teardown` is one call. Fill this in the first time herdr is configured.

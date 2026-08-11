@@ -38,5 +38,7 @@ Implements the [operation contract](_operations.md).
 | 8 | worktree-list    | `cmux workspace list` → slug/path |
 | 9 | worker-list      | list terminals in the workspace; match the slug title |
 | 10| teardown         | close-workspace + `git worktree remove` + `git branch -d` — **multi-step** |
+| 11| automation-create | **unsupported** — no automation surface is declared for cmux. The spawn skips the tick and the report says so |
+| 12| automation-remove | **unsupported** — nothing is created, so nothing is removed. Teardown stays operation 10 alone |
 
 Fill this file in fully the first time cmux is configured, then the ambiguity is gone for every later run.
