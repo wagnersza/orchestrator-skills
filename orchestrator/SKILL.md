@@ -13,8 +13,8 @@ conflicts in the item's own worktree, on the maintainer's explicit instruction
 ([`docs/adr/0016-the-orchestrator-merges-when-asked.md`](docs/adr/0016-the-orchestrator-merges-when-asked.md)).
 
 The vocabulary (Tool, Harness, Model, Effort, Role, Vendor, Worker, Yolo mode,
-Adversarial review, Ready queue, Checklist, Project recipe) is defined in
-[`CONTEXT.md`](CONTEXT.md).
+Adversarial review, Ready queue, Checklist, Project recipe, Phase, Item automation) is
+defined in [`CONTEXT.md`](CONTEXT.md).
 
 ```
 one work item  ->  one worktree (branch + checkout + terminal)  ->  one worker (tool, harness, model)
@@ -287,17 +287,23 @@ When the user says **implement #N / implement X / start work on X**:
    prompt. Then **gate on readiness** before any prompt — see
    [Gate readiness before the first prompt](#gate-readiness-before-the-first-prompt).
 5. **Claim the item first** — swap `ready-for-agent` → `in-progress` on the
-   tracker (labels from `issue-tracker.md`), before prompting, so the board
-   reflects the worker and "what next?" won't hand it out twice. Then **move its
-   card to `In progress`** ([Board status](#board-status)) — same step, so the label
-   and the card never disagree. Apply any parent-promotion the tracker conventions
+   tracker (labels from `issue-tracker.md`) **and add `phase:impl` in the same
+   call**, before prompting, so the board reflects the worker and "what next?" won't
+   hand it out twice. One write for both families means the work state and the
+   **Phase** cannot disagree. Then **move its card to `In progress`**
+   ([Board status](#board-status)) — same step, so the label and the card never
+   disagree. The card derives from the work-state label alone, so the phase label
+   moves no card
+   ([`docs/adr/0021-phase-is-a-second-label-family.md`](docs/adr/0021-phase-is-a-second-label-family.md)).
+   Apply any parent-promotion the tracker conventions
    define (idempotent) — including the parent's own card, which sits in
    `In progress` while any child does.
 6. **Write the checklist + deliver the prompt** — see below.
 7. **Follow-along panel** (op 7, if the tool supports it) — open the work item as
    a tab inside the worker's worktree.
-8. **Start the watch** — mandatory, and the last step of every spawn. See
-   [Watch the worker until it wakes you](#watch-the-worker-until-it-wakes-you).
+8. **Create the Item automation** (op 11) — mandatory, and the last step of every
+   spawn. See
+   [Start the tick](#start-the-tick--one-item-automation-per-worker).
 
 ### Gate readiness before the first prompt
 
@@ -319,7 +325,7 @@ useless. The buffer comes back as box-drawing noise. Scraping it for a shell pro
 finds one under a healthy TUI, and misses one under a dead agent.
 
 **One seam answers the gate, for every tool and every harness.** It is
-`scripts/worker_state.py`, the same seam the **Worker watch** uses. Readiness and a stall
+`scripts/worker_state.py`, the same seam the tick's precheck asks. Readiness and a stall
 are one question asked at two moments. No tool file implements this, and the
 operation contract carries that as a prohibition
 ([`references/tools/_operations.md`](references/tools/_operations.md)). Rationale:
@@ -496,6 +502,12 @@ commands — the label swap and the `In review` write, with the real ids from
 `issue-tracker.md`'s `## Project board` section substituted in. A worker can't look
 up a field id it wasn't given. Omit the board command if that section is absent.
 
+**The `phase:*` label is not one of those commands.** This session owns the **Phase** axis
+at both ends: the spawn writes `phase:impl` (step 5), and the wake writes every transition
+after it. A worker that removes its own phase label leaves the tick with an item that reads as
+human review. That worker's finish then wakes nothing
+([On the wake](#on-the-wake--one-response-per-outcome)).
+
 **Harness shape:** a **claude** worker **does** enter the routed skill — the
 invocation is a literal slash command in the prompt (`/implement`), and its other
 slash skills (`/ponytail:ponytail`) stay available on top. See
@@ -515,40 +527,77 @@ plain-English rule as every other part of the contract, not a second mechanism.
 (e.g. `FE=3000+N`), so parallel workers never collide and the port reads back to
 the item. Check reuse before booting; tear down after evidence — per the recipe.
 
-### Watch the worker until it wakes you
+### Start the tick — one Item automation per worker
 
-**A spawn with no watch is incomplete.** The last step of every spawn launches a
-**Worker watch** in the background. One per worker, implementation and review alike. An
-opt-in watch is off exactly when you forget, which is the whole reason this step exists.
-A batch of five siblings gets five watches, one each.
+**A spawn with no tick is incomplete.** The last step of every spawn creates an **Item
+automation** (op 11). One per worker, implementation and review alike. The **Tool** owns
+the schedule, so it outlives this session, a restart of the harness and a reboot. It
+ticks once a minute. A batch of five siblings gets five automations, one each.
+Definitions: the **Item automation** and **Phase** entries in
+[`CONTEXT.md`](CONTEXT.md). Rationale:
+[`docs/adr/0022-item-automation-replaces-the-blocking-watch.md`](docs/adr/0022-item-automation-replaces-the-blocking-watch.md).
+
+**The precheck is the seam asked as a predicate.** Exit 0 means a **Phase** transition is
+due and the printed line names which of the seven it is. Any other code means nothing to
+do, so a quiet minute records as a skipped run, loads no model and costs no tokens. That
+command goes into op 11's `<precheck-command>` placeholder:
 
 ```bash
-python3 -m scripts.worker_state watch --item <N> \
-  --worktree <the path from op 2> --done-when checklist \
-  --stall-after <duration> --max-wait <duration> &
+python3 -m scripts.worker_state phase --item <N> \
+  --worktree <the path from op 2> \
+  --process '<the pattern from references/harnesses/<harness>.md>' \
+  --rounds <config's review.rounds> --stall-after <duration> \
+  --back-off <duration> --repo <owner>/<name>
 ```
 
-**`--done-when` names which Completion signal this worker's role writes.** An
-implementation worker takes `checklist`, because a ticked
-`.orchestrator/checklist-<item>.md` is the completion contract it already keeps. A review
-worker takes `verdict`, because it ticks no checklist — its finish is the `Verdict:`
-comment it posts. A `verdict` watch also takes `--repo <owner>/<name>`, the tracker
-repository as `OWNER/NAME`, read from `docs/agents/issue-tracker.md`. Definitions: the
-**Worker watch** and **Completion signal** entries in [`CONTEXT.md`](CONTEXT.md).
+**Resolve the four config values once, here.** The seam parses no configuration file and
+names no harness, so the spawn is the one place they are read:
 
-**Pick both durations per item.** `--stall-after` is longer than the item's slowest single
-step, so a worker thinking hard is never read as stalled. `--max-wait` bounds the watch, so
-it never outlives the work it observes. Both accept `45s`, `30m` or `4h`. `--poll-every` has
-a default and needs no value from you.
+| Value | Where you read it | What it decides |
+|---|---|---|
+| the round bound | config's `review.rounds` (default 3) | when `rounds-exhausted` fires instead of `verdict-request-changes` |
+| the proof-phase gate | a non-blank `run_recipe`, or an `evidence` bar that asks for UI proof | whether this item can ever reach `phase:e2e` — see [The proof phase](#the-proof-phase) |
+| the harness process pattern | `references/harnesses/<harness>.md` | what the `dead` outcome looks for |
+| the stall window | longer than the item's slowest single step, so a worker thinking hard is never read as stalled | when `stalled` fires |
 
-**The watch reports and never acts.** It composes no prompt, kills nothing, writes no
-label and spawns nothing. So every destructive act stays in this session, where a human
-can interrupt it. It also holds no state, which is what makes stopping one, re-prompting
-the worker, and starting a fresh watch free. Rationale:
-[`docs/adr/0018-the-worker-watch-is-a-stateless-seam.md`](docs/adr/0018-the-worker-watch-is-a-stateless-seam.md).
-The argument surface is `python3 -m scripts.worker_state watch --help`, and the module
-docstring is the signal table. **Never restate either here or in a report.** What this
-session does when a watch exits is [On the wake](#on-the-wake--one-response-per-exit-code).
+Three of the four are flags on the command above. **The proof-phase gate is not.** The
+item's own `phase:*` label is what gates that outcome. So the gate decides which label this
+session writes when the implementation finishes, and the seam reads that label.
+It is the same gate the Browser-surface preflight uses, so the two cannot disagree about
+when a proof phase applies.
+
+`--back-off` suppresses a repeat of one outcome for one item, so an unanswered wake does
+not queue sixty prompts in an hour. Pick a window at least as long as a fix round takes.
+`--repo` is the tracker repository as `OWNER/NAME`, read from
+`docs/agents/issue-tracker.md`.
+
+**The relay carries no judgement.** Op 11 also takes a `--prompt` and a `--provider`, so
+a tick that the precheck lets through runs a bounded agent. That agent relays and does
+nothing else, and two instructions are the whole prompt. Send the precheck's printed line
+to the orchestrator terminal titled `orchestrator`. **Where no terminal by that title
+resolves, post the same line as a comment on the work item.** So a transition is recorded
+late rather than lost, which is the accepted risk in ADR 0022. `/orchestrator-setup` sets
+that title (step 5a of [`../orchestrator-setup/SKILL.md`](../orchestrator-setup/SKILL.md)),
+which is what makes the target resolvable across a restart. The automation writes no
+label, composes no prompt, spawns nothing and merges nothing. The **Item automation**
+entry in [`CONTEXT.md`](CONTEXT.md) holds that prohibition. It is why every destructive
+act stays in this session, where a human can interrupt it.
+
+**A tool with no automation surface spawns exactly as it does today.** Operations 11 and
+12 are optional (`references/tools/_operations.md`), and `cmux` and `herdr` record them
+as unsupported. Skip the step and change nothing else about the spawn. **Then say in the
+report that the tick is unavailable on this tool.** The maintainer then knows to monitor by
+hand ([Monitor workers](#monitor-workers)).
+
+The argument surface is `python3 -m scripts.worker_state phase --help`, and the module
+docstring is the outcome table. **Never restate either here or in a report.** What this
+session does when a tick wakes it is
+[On the wake](#on-the-wake--one-response-per-outcome).
+
+**A tick against a worktree that is gone is silent.** The seam exits 3, which is
+non-zero, so the run records as skipped and nothing wakes. A live automation on a removed
+worktree is a leak from a teardown that skipped op 12. Remove it by name
+(`orchestrator-item-<N>`, op 12), because no wake can come for it.
 
 ## Monitor workers
 
@@ -566,39 +615,101 @@ session does when a watch exits is [On the wake](#on-the-wake--one-response-per-
   flails **twice** was mis-routed — tear it down and re-spawn a rung up
   (`light` → `heavy`, or `heavy` at `max`), and say that's what happened.
 
-The watch is what fires this rule without your asking
-([Watch the worker until it wakes you](#watch-the-worker-until-it-wakes-you)). The four
-bullets above stay the way to answer *what are the workers doing* between wakes.
+The tick is what fires this rule without your asking
+([Start the tick](#start-the-tick--one-item-automation-per-worker)). The four
+bullets above stay the way to answer *what are the workers doing* between wakes, and they
+are the whole of monitoring on a tool with no automation surface.
 
-## On the wake — one response per exit code
+## On the wake — one response per outcome
 
-A watch exits with one code per outcome, and prints one line naming it. **The response is
-a lookup, not an interpretation.** Read the code, run the row, and report per
-[Reporting to the user](#reporting-to-the-user).
+A tick wakes this session with the one line its precheck printed, and that line names one
+of seven outcomes. **The response is a lookup, not an interpretation.** Read the outcome,
+run its row, and report per [Reporting to the user](#reporting-to-the-user).
 
-**`0` complete.** Where config's `review.enabled` holds, run
-[Adversarial review](#adversarial-review-when-configs-reviewenabled) steps 1 and 2. This
-exit is the actor that detects "a work item reaches the review state". Where review is
-off, report the finish and offer the review in one line. The on-demand door
-(`review #N adversarially`) is unchanged either way.
+**Write the `phase:*` label as the first act of every transition.** That write is what
+acknowledges the wake. It also stops a repeat fire on the same fact a minute later. It is
+also the mitigation ADR 0021 names for its own accepted risk, that an owned
+item with no phase label reads as human review. So it goes first and never last. A phase
+label moves no card ([Board status](#board-status)).
 
-**`1` stalled.** The stall rule at [Monitor workers](#monitor-workers) fires, unchanged.
-Reset the worker's context, then re-prompt with the unchecked boxes. **The re-prompt is
-unconfirmed** — it is additive, and it costs the maintainer nothing to get wrong. On the
-**second** stall the same rule tears the worker down and re-spawns a rung up. **Teardown
-keeps its confirmation** ([Safety](#safety)), because a watch cannot read intent in an
-uncommitted diff. **The stall counter is yours to carry, in the report** — `stall 1 of 2`.
-The seam holds no state between invocations, so it cannot count. Start a fresh watch after
-each re-prompt, which costs nothing for the same reason. Do not diagnose *why* the worker
-stalled: that is judgement on a live terminal and nothing here asks for it.
+| Outcome | Write first | Then |
+|---|---|---|
+| `implementation-complete` | `phase:impl` → `phase:e2e` where the proof-phase gate holds; else → `phase:review` where review is on; else remove it | Proof: [The proof phase](#the-proof-phase). Review on: [Adversarial review](#adversarial-review-when-configs-reviewenabled) steps 1 and 2. Review off: the worker already flipped its own work state and card, so report the finish and offer the review in one line |
+| `proof-complete` | `phase:e2e` → `phase:review` where review is on; else remove it | The same two branches, with the proof already done |
+| `verdict-approve` | remove `phase:review` | [Adversarial review](#adversarial-review-when-configs-reviewenabled) step 4 — gather evidence and hand the item to human review |
+| `verdict-request-changes` | nothing, because a fix round is inside `phase:review` | [Adversarial review](#adversarial-review-when-configs-reviewenabled) step 3, at the round the line names |
+| `rounds-exhausted` | remove `phase:review` | Step 4 again — "after the last round regardless". The bound is spent, so offer no further round |
+| `dead` | nothing, because the item stays in the phase it is in | Report, and **never re-prompt** — below |
+| `stalled` | nothing, for the same reason | Reset the context and re-prompt — below |
 
-**`2` max-wait.** Neither a finish nor a proven stall. Report the worker's position off
-the checklist and offer the next step — start a longer watch, read the terminal, or leave
-it. This is also the outcome that carries a silent reviewer, per the accepted risk in
-[`docs/adr/0018-the-worker-watch-is-a-stateless-seam.md`](docs/adr/0018-the-worker-watch-is-a-stateless-seam.md).
+**The item's phase is what makes the response a lookup.** The seam reads that label to
+decide which outcomes a tick can reach. So `implementation-complete` and `verdict-approve`
+can never arrive for one item on the same minute. The on-demand door
+(`review #N adversarially`) is unchanged, and it writes `phase:review` itself.
 
-**`3` worktree gone.** The worker was torn down. Say so and stop watching. **Never treat
-this as a stall**, and never re-prompt a worker that no longer exists.
+**Three rows write no label, because they are not phase transitions.** ADR 0021 rejected a
+`phase:fix` value, so a fix round stays inside `phase:review`. And `dead` and `stalled` say
+something about the worker rather than about the phase. Nothing acknowledges those three
+wakes, so `--back-off` is what stops a repeat every minute. **A repeat that carries the same
+round number, or the same checklist position, is a wake you already answered.** Say so in
+one line and do nothing. That stays a lookup, because the line carries both facts.
+
+**`dead` — a re-prompt cannot work, so nothing re-prompts.** No live agent process has its
+working directory inside the worktree, so nothing listens. Report which phase the item is
+in and where the worker got to. Then name the one human decision: tear the worker down and
+re-spawn a rung up. **Teardown keeps its confirmation** ([Safety](#safety)), because a
+tick cannot read intent in an uncommitted diff. This outcome needs no stall window, so it
+arrives about a minute after the worker exits.
+
+**`stalled` — a live process with stale work product, so a re-prompt is the response that
+works.** Reset the worker's context
+([Reset the worker's context before every re-prompt](#reset-the-workers-context-before-every-re-prompt)).
+Then re-prompt with the unchecked boxes (op 4). **The re-prompt is unconfirmed** — it is
+additive, and it costs the maintainer nothing to get wrong. **Post the stall as a comment on
+the work item, in the same step.** That comment carries the literal `Stall:`, plus the
+worker's model and effort. The stall count is the number of those comments that name the
+current `(model, effort)` pair. That is the shape the **Review round** number already takes,
+as the count of `Verdict:` comments. So neither count is held in a session's context
+([`docs/adr/0023-the-stall-count-is-a-tracker-comment.md`](docs/adr/0023-the-stall-count-is-a-tracker-comment.md)).
+At the **second** such comment the item was mis-routed. Tear the worker down and re-spawn a
+rung up (`light` → `heavy`, or `heavy` at `max`), and say that is what happened. The pair
+changes with the rung, so the new worker's count starts again with nothing to reset.
+That teardown keeps its confirmation too. Do not diagnose *why* the worker stalled: that is
+judgement on a live terminal and nothing here asks for it.
+
+**Neither response touches the automation.** It outlives the re-prompt, the fix round and
+this session, so there is nothing to restart. The seam still holds no state that changes an
+answer, which is what keeps a re-prompt free. Rationale:
+[`docs/adr/0018-the-worker-watch-is-a-stateless-seam.md`](docs/adr/0018-the-worker-watch-is-a-stateless-seam.md)
+and
+[`docs/adr/0022-item-automation-replaces-the-blocking-watch.md`](docs/adr/0022-item-automation-replaces-the-blocking-watch.md).
+
+### The proof phase
+
+**An item enters `phase:e2e` only where the project recipe asks for a proof.** The gate is
+the one resolved at spawn: a non-blank `run_recipe`, or an `evidence` bar that asks for UI
+proof. Where neither holds, the phase is unreachable, and `implementation-complete` goes
+straight to review or to human review. **This repo is that case.** Its `run_recipe` is
+blank, and its `evidence` bar asks for a test run and resolved cross-references. So an item
+here goes `phase:impl`, then `phase:review` or human review, and it **never wears
+`phase:e2e`**
+([`docs/adr/0021-phase-is-a-second-label-family.md`](docs/adr/0021-phase-is-a-second-label-family.md)).
+
+Where the gate does hold:
+
+1. **Write `phase:e2e`**, as the first act, like every other transition.
+2. **Re-prompt the implementation worker in its own worktree.** Not a fresh worker: that
+   worktree already holds the branch, the checklist and the per-item `ports`. So the reset
+   and the self-contained re-prompt rules apply to it unchanged
+   ([Reset the worker's context before every re-prompt](#reset-the-workers-context-before-every-re-prompt)).
+3. **The proof drives the declared Browser surface**, `playwright-cli`. It boots the app
+   per `run_recipe`, on those ports. A browser MCP the worker's session happens to expose is
+   out of bounds, whichever one it is. That is the same scope edge every spawn prompt
+   already carries.
+   Reason, and why an MCP transcript is not durable evidence:
+   [`docs/adr/0012-playwright-cli-is-the-only-browser-surface.md`](docs/adr/0012-playwright-cli-is-the-only-browser-surface.md).
+4. **The finish is the same Completion signal**, a fully ticked checklist. The tick then
+   reports `proof-complete`, and the row above carries the item on.
 
 ### Reset the worker's context before every re-prompt
 
@@ -627,9 +738,16 @@ loses the worker's reasoning and never its position. Rationale:
 
 ## Adversarial review (when config's `review.enabled`)
 
-When a work item reaches the review state and review is enabled. **The watch's `0` exit is
-what detects that** ([On the wake](#on-the-wake--one-response-per-exit-code)). So this flow
-now has an actor that starts it:
+When a work item reaches `phase:review` and review is enabled. **The tick is the actor that
+starts it** — its `implementation-complete` outcome, or `proof-complete` where a proof phase
+ran ([On the wake](#on-the-wake--one-response-per-outcome)). The label this session writes
+in answer to that wake is what puts the item in this flow.
+
+**The round bound is the resolved `review.rounds`, and one value serves both halves.** It
+bounds the loop below, and it is the same number written into the tick's `--rounds` at spawn
+([Start the tick](#start-the-tick--one-item-automation-per-worker)). So the seam and the
+loop cannot disagree about which round is the last one. And `rounds-exhausted` is the
+outcome that reports the bound spent.
 
 1. **Spawn a review worker** on the impl branch (its own worktree, op 2 with
    `--base-branch <impl-branch>`), harness per config, model + effort =
@@ -641,9 +759,11 @@ now has an actor that starts it:
    A review spawn needs this more than an impl spawn, not less. Its worktree is fresh,
    and its harness is usually the *other* vendor's — so it is the one this machine has
    launched least often. A lost review round is also silent: the impl worker waits, the
-   findings never arrive, and nothing reports an error. **Then start its watch**, like any
-   other spawn ([Watch the worker until it wakes you](#watch-the-worker-until-it-wakes-you)),
-   with `--done-when verdict` because a reviewer ticks no checklist.
+   findings never arrive, and nothing reports an error. **Then create its Item automation**,
+   like any other spawn
+   ([Start the tick](#start-the-tick--one-item-automation-per-worker)). The precheck is the
+   same command. The item's `phase:review` label is what makes the tick read a verdict
+   rather than a checklist. A reviewer needs no flag of its own.
 2. **Prompt it to review** the diff/MR against the work item's acceptance
    criteria — drafted, then run through `prompt-improver` for the review model's
    profile, same as a spawn prompt. Say it's a **code-review prompt**:
@@ -655,8 +775,9 @@ now has an actor that starts it:
    or **request-changes + findings**.
 
    **The verdict carries a `Verdict:` line, and the prompt asks for it verbatim.** Its
-   value is `approve` or `request-changes`. That literal is what a `--done-when verdict`
-   watch reads, so a review whose comment omits it never wakes this session. It is quoted
+   value is `approve` or `request-changes`. That literal is what the tick reads in
+   `phase:review`, so a review whose comment omits it never wakes this session. Its count is
+   also the round number, so an omitted line loses the count with the wake. It is quoted
    in the **Completion signal** entry of [`CONTEXT.md`](CONTEXT.md), so a writing pass
    leaves it byte-identical.
 
@@ -677,8 +798,10 @@ now has an actor that starts it:
    `prompt-improver` with the rest — they restate no rule of the two-axis contract.
 3. **On request-changes:** reset the original impl worker's context
    ([Reset the worker's context before every re-prompt](#reset-the-workers-context-before-every-re-prompt)).
-   Then re-prompt **that same worker** with the findings to fix, start a fresh watch, and
-   re-review. Loop, bounded at `review.rounds` (default 3).
+   Then re-prompt **that same worker** with the findings to fix, and re-review. The
+   automation already runs and outlives the round, so nothing is restarted. Loop,
+   bounded at the resolved `review.rounds` (default 3), and the round the tick's line names
+   is the round you are on.
    Each fix round steps the impl worker's effort up one rung — a finding the model
    missed at `high` is what `xhigh` is for. In a fix round, one finding is one slice,
    so the reviewer can map each fix to the finding it answers. **The fix prompt
@@ -707,9 +830,11 @@ now has an actor that starts it:
    [The prompt: checklist + completion contract](#the-prompt-checklist--completion-contract)
    applies to it unchanged.
 4. **On approve, or after the last round regardless:** gather evidence and flip
-   the item to **human review**. The item stays `in-progress` through the loop (a
-   worker owns it); it flips only when the loop concludes. Merge is always a human
-   step.
+   the item to **human review**. **That transition is the removal of the `phase:review`
+   label**, and it is the first act (ADR 0021). The item stays `in-progress` and
+   `phase:review` right through the loop, because a worker owns it and a fix round is
+   inside the phase. So both labels change only when the loop concludes. Merge is always
+   a human step.
 
 On demand: **"review #N adversarially"** runs this flow directly even if review is
 off in config.
@@ -781,11 +906,21 @@ python3 -m scripts.close_item --issue <N> --pr <PR> \
 
 Three things the seam never learns, so you pass them in:
 
-- **The teardown command, as a string.** Read it from
-  [`references/tools/<tool>.md`](references/tools/_operations.md) (op 10) and
-  substitute the ids. Pass that whole line to `--teardown-command`. So the seam holds
-  no `orca` command, and a new tool stays a markdown change. The checklist file dies
-  with the worktree, so nothing cleans it up.
+- **The teardown command, as a string — and it removes the automation as well as the
+  worktree.** Read both halves from
+  [`references/tools/<tool>.md`](references/tools/_operations.md), op 12 then op 10, and
+  substitute the ids. Join them with `&&`, in that order, and pass the whole line to
+  `--teardown-command`. So the seam holds no `orca` command, and a new tool stays a
+  markdown change. **The automation goes first**, so nothing ticks against a worktree that
+  is half removed. Use `&&` and not `;`, so a failed op 12 leaves both in place. The plan
+  then reports the failure rather than a leaked schedule. A session that no longer holds the
+  automation id reads it back from the name, `orchestrator-item-<N>` — that is what op 12
+  is written to do. The checklist file dies with the worktree, so nothing cleans it up.
+  Where the tool records operations 11 and 12 as unsupported, no automation was created and
+  the string is op 10 alone. Rationale:
+  [`docs/adr/0022-item-automation-replaces-the-blocking-watch.md`](docs/adr/0022-item-automation-replaces-the-blocking-watch.md).
+  **The eight steps and their order are unchanged**, and `scripts/close_item.py` gains no
+  code. The whole change is the value of one argument it already takes.
 - **The board coordinates, as arguments.** Read the five values from
   `docs/agents/issue-tracker.md`'s
   [`## Project board`](../docs/agents/issue-tracker.md#project-board) section. Where
@@ -795,6 +930,11 @@ Three things the seam never learns, so you pass them in:
   precondition, prints the plan as JSON, and changes nothing. Read that plan. Then
   re-run it with `--execute`. Teardown needs `--execute --teardown` together, and
   only where the table above says yes.
+
+**A refused transaction leaves the automation in place.** Teardown is step 8, so a refusal
+at any earlier step never reaches the string above. The item is then still observed, and the
+next tick still wakes this session. That is deliberate: an item that did not close is
+exactly the one that must keep its observer.
 
 **Parent-close stays yours.** The seam closes one item. Where the tracker conventions
 define a parent close, apply it after the seam exits clean. That is the last child
@@ -824,16 +964,27 @@ it. Shape output for acting on, not for completeness:
   A batch-spawn reports the four fields **per child**, so a mixed batch shows two
   different skills. A spawn with no routed skill drops the field and keeps the other
   three.
-- **Restate position every turn.** A worker's progress is `checklist 4/7`, a review
-  loop is `round 2 of 3`. Read it off the checklist file and the round counter —
-  don't ask the user to remember.
-- **A wake report names the outcome, and the stall count where there is one.** The
-  outcome is the watch's own word: `complete`, `stalled`, `max-wait` or `gone`. Then say
-  what you did about it. `#38 stalled at checklist 4/7 · stall 1 of 2. Context reset,
-  re-prompted with the unchecked boxes.` **The count lives here and nowhere else**, because
-  the watch holds no state between invocations
-  ([On the wake](#on-the-wake--one-response-per-exit-code)). At `stall 2 of 2` the next
-  step is a teardown, so name it as the pending human decision.
+- **Restate position every turn, and carry the phase with it.** A worker's progress is
+  `phase:impl · checklist 4/7`, a review loop is `phase:review · round 2 of 3`. Every
+  report of an owned item says which phase it is in, because that is the fact a fresh
+  session cannot infer. Read the phase off the item's labels, the position off the
+  checklist file, and the round number off the count of `Verdict:` comments. Do not ask the
+  user to remember any of the three.
+- **A wake report names the outcome and the transition that ran.** The outcome is the
+  tick's own word: `implementation-complete`, `proof-complete`, `verdict-approve`,
+  `verdict-request-changes`, `rounds-exhausted`, `dead` or `stalled`. Then the phase
+  label you wrote, then what you did. `#38 implementation-complete · phase:impl →
+  phase:review. Reviewer spawned, gpt-5.6-terra @ high.`
+- **Both counts come from the tracker, so restate both.**
+  [On the wake](#on-the-wake--one-response-per-outcome) says how to read each one.
+  `#38 stalled at phase:impl ·
+  checklist 4/7 · stall 1 of 2. Context reset, re-prompted with the unchecked boxes.` At
+  `stall 2 of 2`, and on `dead`, the next step is a teardown — name it as the pending
+  human decision.
+- **Say when the tick is unavailable.** A tool that records operations 11 and 12 as
+  unsupported gets no automation, so nothing wakes this session for that item. Say so on
+  the spawn line, once, and point at the four monitor bullets
+  ([Monitor workers](#monitor-workers)).
 - **One table or list, capped at 5 rows.** More than 5 ready items or 5 findings →
   rank and split (`start now` vs `blocked`, `must-fix` vs `noted`). Five ranked
   beats twelve flat, and the ready queue already promises "at least 5".
@@ -871,9 +1022,10 @@ refusal reason are spelled out, never compressed.
   explicit "merge and close" **is** that confirmation, so a second ask is friction
   rather than safety (the table in [Close a task](#close-a-task)). The data-loss case
   is a dirty tree, and step 6 of the transaction refuses it rather than warning.
-- **A second stall is one of the ambiguous cases, so it asks.** The maintainer said
-  nothing about a teardown here. A watch cannot read intent in an uncommitted diff. The
-  re-prompt on the first stall stays unconfirmed, because it destroys nothing.
+- **A second stall is one of the ambiguous cases, so it asks. So is a `dead` worker.** The
+  maintainer said nothing about a teardown in either case, and a tick cannot read intent in
+  an uncommitted diff. The re-prompt on the first stall stays unconfirmed, because it
+  destroys nothing.
 - Keep the main checkout (config's `repo`) on the default branch — all
   tracker/git-state ops run there. This orchestrator's own worktree branch is
   separate and irrelevant.
