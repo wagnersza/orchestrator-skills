@@ -5,7 +5,7 @@ Every case runs `python3 -m scripts.worker_state` as a subprocess against a real
 worktree in a temp directory. Each one asserts on the exit code and the printed
 line, which are the two things a caller consumes. No mock of `subprocess`, no
 assertion about which internal function ran. No network and no agent run:
-`--gh-fixture` stands in for the comment read, so `gh` is never called.
+`--gh-fixture` stands in for the label and comment read, so `gh` is never called.
 `GIT_CONFIG_GLOBAL` and `GIT_CONFIG_SYSTEM` point at `os.devnull`, so the
 developer's git config cannot leak into a fixture.
 
@@ -49,6 +49,15 @@ EXIT_MAX_WAIT = 2
 EXIT_GONE = 3
 EXIT_NOT_READY = 1
 EXIT_USAGE = 64
+
+# `phase` is a predicate, so it has two codes plus the worktree that is gone.
+EXIT_DUE = 0
+EXIT_NOTHING = 1
+
+IMPL = ["in-progress", "phase:impl"]
+REVIEW = ["in-progress", "phase:review"]
+E2E = ["in-progress", "phase:e2e"]
+CHANGES = "Verdict: request-changes"
 
 # The pattern comes from the harness reference, never from the seam — so a test
 # fixture names no harness either. This one matches the interpreter running the
@@ -108,10 +117,17 @@ class WorkerStateTestCase(unittest.TestCase):
 
     # --- fixture helpers ----------------------------------------------------
 
-    def write_fixture(self, comments=()):
-        """Stand in for the comment read a verdict watch makes."""
+    def write_fixture(self, comments=(), labels=()):
+        """Stand in for the tracker read a verdict watch and a phase tick make."""
         self.fixture = self.root / "gh.json"
-        self.fixture.write_text(json.dumps({"comments": {str(ITEM): list(comments)}}))
+        self.fixture.write_text(
+            json.dumps(
+                {
+                    "comments": {str(ITEM): list(comments)},
+                    "labels": {str(ITEM): list(labels)},
+                }
+            )
+        )
 
     def backdate(self, seconds):
         """Age both freshness facts, so a stall needs no real waiting.
@@ -168,6 +184,30 @@ class WorkerStateTestCase(unittest.TestCase):
             *extra,
             expect=expect,
         )
+
+    def tick(self, *extra, rounds=3, stall="4h", pattern=PROCESS_PATTERN, expect=0):
+        """Ask the predicate once, the way an Item automation's precheck asks it."""
+        return self.run_seam(
+            "phase",
+            "--item",
+            str(ITEM),
+            "--worktree",
+            str(self.worktree),
+            "--process",
+            pattern,
+            "--rounds",
+            str(rounds),
+            "--stall-after",
+            stall,
+            "--gh-fixture",
+            str(self.fixture),
+            *extra,
+            expect=expect,
+        )
+
+    def marker(self, outcome):
+        """Where the back-off marker for one `(item, outcome)` pair lands."""
+        return self.worktree / ".orchestrator" / f"phase-{ITEM}-{outcome}.fired"
 
     def ready(self, *extra, worktree=None, pattern=PROCESS_PATTERN, expect=0):
         return self.run_seam(
@@ -471,6 +511,295 @@ class WorkerStateTestCase(unittest.TestCase):
         self.assertEqual(proc.returncode, EXIT_USAGE, proc.stderr)
         self.assertIn("is not a duration", proc.stderr)
 
+    # --- phase: the predicate an Item automation runs -----------------------
+
+    def test_a_ticked_checklist_in_the_impl_phase_is_a_due_transition(self):
+        """Nothing is running here, so this also proves the Completion signal is
+        read before liveness: a worker that finished and exited is not dead."""
+        write(self.checklist, TICKED)
+        self.write_fixture(labels=IMPL)
+
+        line = self.tick(expect=EXIT_DUE)
+
+        self.assertTrue(line.startswith("implementation-complete:"), line)
+        self.assertIn(str(self.checklist), line)
+        self.assertIn("3 of 3", line)
+
+    def test_a_ticked_checklist_in_the_proof_phase_is_proof_complete(self):
+        """The same fact, and the Phase is what names the outcome."""
+        write(self.checklist, TICKED)
+        self.write_fixture(labels=E2E)
+
+        self.assertTrue(self.tick(expect=EXIT_DUE).startswith("proof-complete:"))
+
+    def test_each_verdict_value_is_its_own_due_transition(self):
+        """Two verdicts, two responses, so the line must tell them apart."""
+        for value, outcome in (
+            ("approve", "verdict-approve"),
+            ("request-changes", "verdict-request-changes"),
+        ):
+            self.write_fixture(
+                comments=[f"## Findings\n\nnone of note\n\nVerdict: {value}\n"],
+                labels=REVIEW,
+            )
+            line = self.tick(expect=EXIT_DUE)
+
+            self.assertTrue(line.startswith(f"{outcome}:"), line)
+            self.assertIn(f"Verdict: {value}", line)
+            self.assertIn("round 1 of 3", line)
+            self.assertIn(f"#{ITEM}", line)
+
+    def test_rounds_exhausted_fires_at_the_passed_in_bound_and_never_at_three(self):
+        """The bound is the argument, so the same three rounds are exhausted under
+        3 and not under 5, and two rounds are exhausted under 2."""
+        self.write_fixture(comments=[CHANGES] * 3, labels=REVIEW)
+
+        line = self.tick(rounds=3, expect=EXIT_DUE)
+        self.assertTrue(line.startswith("rounds-exhausted:"), line)
+        self.assertIn("3 Verdict: comments", line)
+        self.assertIn("round bound of 3", line)
+
+        under_five = self.tick(rounds=5, expect=EXIT_DUE)
+        self.assertTrue(under_five.startswith("verdict-request-changes:"), under_five)
+        self.assertIn("round 3 of 5", under_five)
+
+        self.write_fixture(comments=[CHANGES] * 2, labels=REVIEW)
+        line = self.tick(rounds=2, expect=EXIT_DUE)
+        self.assertTrue(line.startswith("rounds-exhausted:"), line)
+        self.assertIn("round bound of 2", line)
+
+    def test_an_approve_at_the_bound_reads_as_approve_and_not_as_exhausted(self):
+        """Both hand the item to human review, and approve is the stronger fact:
+        the reviewer said yes, so no loop was cut short."""
+        self.write_fixture(comments=[CHANGES, CHANGES, "Verdict: approve"], labels=REVIEW)
+
+        line = self.tick(rounds=3, expect=EXIT_DUE)
+
+        self.assertTrue(line.startswith("verdict-approve:"), line)
+        self.assertIn("round 3 of 3", line)
+
+    def test_the_round_count_comes_from_the_tracker_and_nothing_stores_a_counter(self):
+        """A Review round number is the count of Verdict: comments, so two ticks
+        read round 1 twice and round 2 arrives with a second comment."""
+        self.write_fixture(comments=[CHANGES], labels=REVIEW)
+        before = self.disk_state()
+
+        self.assertIn("round 1 of 3", self.tick(expect=EXIT_DUE))
+        self.assertIn("round 1 of 3", self.tick(expect=EXIT_DUE))
+        self.assertEqual(before, self.disk_state())
+
+        self.write_fixture(comments=[CHANGES] * 2, labels=REVIEW)
+        self.assertIn("round 2 of 3", self.tick(expect=EXIT_DUE))
+
+    def test_a_dead_worker_fires_with_no_stall_window_elapsed(self):
+        """Nothing is listening, so a re-prompt cannot help. `dead` needs no stall
+        window, so it reports in about a minute rather than in an hour."""
+        self.write_fixture(labels=IMPL)
+
+        line = self.tick(stall="4h", expect=EXIT_DUE)
+
+        self.assertTrue(line.startswith("dead:"), line)
+        self.assertIn(str(self.worktree), line)
+        self.assertIn("phase:impl", line)
+
+    def test_a_stall_needs_a_live_process_and_stale_work_product(self):
+        """Both halves, because a re-prompt only helps where something listens."""
+        self.write_fixture(labels=IMPL)
+        self.backdate(3600)
+        child = self.child_in(self.worktree)
+
+        line = self.tick(stall="30m", expect=EXIT_DUE)
+        self.assertTrue(line.startswith("stalled:"), line)
+        self.assertIn(str(child.pid), line)
+        self.assertIn("30m", line)
+
+        # The same live worker with fresh work product is neither outcome.
+        self.checklist.write_text(UNTICKED + "- [ ] a step added just now\n")
+        self.assertTrue(self.tick(stall="30m", expect=EXIT_NOTHING).startswith("nothing:"))
+
+    def test_dead_and_stalled_never_both_fire(self):
+        """`dead` is the absence of the live process `stalled` needs, so stale work
+        product with nothing running is dead and never a stall."""
+        self.write_fixture(labels=IMPL)
+        self.backdate(3600)
+
+        line = self.tick(stall="30m", expect=EXIT_DUE)
+
+        self.assertTrue(line.startswith("dead:"), line)
+        self.assertNotIn("stalled", line)
+
+    def test_a_quiet_minute_is_nothing_to_do(self):
+        """The common case, and the one that must cost no tokens."""
+        self.write_fixture(labels=IMPL)
+        child = self.child_in(self.worktree)
+
+        line = self.tick(stall="4h", expect=EXIT_NOTHING)
+
+        self.assertTrue(line.startswith("nothing:"), line)
+        self.assertIn("0 of 3 boxes ticked", line)
+        self.assertIn(str(child.pid), line)
+        self.assertNotEqual(EXIT_NOTHING, EXIT_DUE)
+
+    def test_no_phase_label_is_human_review_and_nothing_is_due(self):
+        """A ticked checklist here, so the label is what gates the outcome."""
+        write(self.checklist, TICKED)
+        self.write_fixture(labels=["to-review"])
+
+        line = self.tick(expect=EXIT_NOTHING)
+
+        self.assertTrue(line.startswith("nothing:"), line)
+        self.assertIn("no phase:* label", line)
+
+    def test_the_back_off_marker_suppresses_a_second_fire_and_then_stops(self):
+        """An unanswered wake must not queue sixty prompts in an hour, and it must
+        not go silent for good either."""
+        write(self.checklist, TICKED)
+        self.write_fixture(labels=IMPL)
+
+        first = self.tick("--back-off", "1h", expect=EXIT_DUE)
+        self.assertTrue(first.startswith("implementation-complete:"), first)
+
+        line = self.tick("--back-off", "1h", expect=EXIT_NOTHING)
+        self.assertTrue(line.startswith("suppressed:"), line)
+        self.assertIn("implementation-complete", line)
+        self.assertIn("1h 0m", line)
+
+        # The window passes, and the same outcome fires again.
+        marker = self.marker("implementation-complete")
+        self.assertTrue(marker.is_file())
+        old = time.time() - 7200
+        os.utime(marker, (old, old))
+        again = self.tick("--back-off", "1h", expect=EXIT_DUE)
+        self.assertTrue(again.startswith("implementation-complete:"), again)
+
+        # It lives in the worktree, so it dies with the worktree.
+        self.assertIn(str(self.worktree), str(marker))
+        shutil.rmtree(self.worktree)
+        self.assertFalse(marker.exists())
+
+    def test_the_back_off_is_keyed_to_the_outcome_as_well_as_the_item(self):
+        """A dead tick must not be suppressed by another outcome's fire a moment
+        earlier, because the two ask for opposite responses."""
+        write(self.checklist, TICKED)
+        self.write_fixture(labels=IMPL)
+        self.tick("--back-off", "1h", expect=EXIT_DUE)
+
+        write(self.checklist, UNTICKED)  # no longer complete, and nothing is running
+        line = self.tick("--back-off", "1h", stall="4h", expect=EXIT_DUE)
+
+        self.assertTrue(line.startswith("dead:"), line)
+        self.assertTrue(self.marker("dead").is_file())
+
+    def test_a_removed_worktree_is_gone_for_the_predicate_too(self):
+        """The existing ordering guarantee, held for this subcommand: a torn-down
+        worker is reported as gone and never as a stall."""
+        self.write_fixture(labels=IMPL)
+        self.backdate(3600)  # old enough to look like a stall, if it were checked
+        shutil.rmtree(self.worktree)
+
+        line = self.tick(stall="30m", expect=EXIT_GONE)
+
+        self.assertTrue(line.startswith("gone:"), line)
+        self.assertNotIn("stalled", line)
+        self.assertNotEqual(EXIT_GONE, EXIT_DUE)
+
+    def test_the_seven_outcomes_exit_zero_and_every_quiet_one_does_not(self):
+        """The whole exit-code contract in one place. A due transition is 0 whichever
+        outcome fired, and the printed line names which one. No quiet outcome can
+        read as a transition."""
+        due = {}
+
+        write(self.checklist, TICKED)
+        self.write_fixture(labels=IMPL)
+        due["implementation-complete"] = self.tick(expect=EXIT_DUE)
+
+        self.write_fixture(labels=E2E)
+        due["proof-complete"] = self.tick(expect=EXIT_DUE)
+
+        self.write_fixture(comments=["Verdict: approve"], labels=REVIEW)
+        due["verdict-approve"] = self.tick(expect=EXIT_DUE)
+
+        self.write_fixture(comments=[CHANGES], labels=REVIEW)
+        due["verdict-request-changes"] = self.tick(expect=EXIT_DUE)
+
+        self.write_fixture(comments=[CHANGES] * 3, labels=REVIEW)
+        due["rounds-exhausted"] = self.tick(rounds=3, expect=EXIT_DUE)
+
+        write(self.checklist, UNTICKED)
+        self.write_fixture(labels=IMPL)
+        due["dead"] = self.tick(stall="4h", expect=EXIT_DUE)
+
+        self.child_in(self.worktree)
+        self.backdate(3600)
+        due["stalled"] = self.tick(stall="30m", expect=EXIT_DUE)
+
+        self.assertEqual(
+            sorted(due),
+            sorted(
+                [
+                    "implementation-complete",
+                    "proof-complete",
+                    "verdict-approve",
+                    "verdict-request-changes",
+                    "rounds-exhausted",
+                    "dead",
+                    "stalled",
+                ]
+            ),
+        )
+        for outcome, line in due.items():
+            self.assertEqual(line.split(":")[0], outcome, line)
+            self.assertEqual(len(line.splitlines()), 1, line)
+
+        # A quiet minute, a suppressed fire and a gone worktree are the three
+        # non-zero outcomes, and each one says which it is.
+        self.checklist.write_text(UNTICKED)
+        quiet = self.tick(stall="4h", expect=EXIT_NOTHING)
+
+        write(self.checklist, TICKED)
+        self.tick("--back-off", "1h", expect=EXIT_DUE)
+        held = self.tick("--back-off", "1h", expect=EXIT_NOTHING)
+
+        shutil.rmtree(self.worktree)
+        gone = self.tick(expect=EXIT_GONE)
+
+        self.assertEqual(
+            [line.split(":")[0] for line in (quiet, held, gone)],
+            ["nothing", "suppressed", "gone"],
+        )
+
+    def test_a_phase_usage_error_can_never_read_as_a_due_transition(self):
+        """A flag with a typo exits outside the contract, so it is never mistaken
+        for a transition the session must run."""
+        base = (
+            "phase",
+            "--item",
+            str(ITEM),
+            "--worktree",
+            str(self.worktree),
+            "--process",
+            PROCESS_PATTERN,
+        )
+        for argv in (
+            ("phase", "--item", str(ITEM)),
+            (*base, "--stall-after", "1s"),  # no --rounds, and there is no default
+            (*base, "--rounds", "3"),  # no --stall-after
+            (*base, "--rounds", "3", "--stall-after", "soon"),
+            (*base, "--rounds", "0", "--stall-after", "1s"),
+            (*base, "--rounds", "3", "--stall-after", "1s", "--back-off", "soonish"),
+            (*base, "--rounds", "3", "--stall-after", "1s", "--roundz", "3"),
+        ):
+            proc = subprocess.run(
+                [sys.executable, "-m", "scripts.worker_state", *argv],
+                cwd=REPO_ROOT,
+                capture_output=True,
+                text=True,
+                env=GIT_ENV,
+            )
+            self.assertEqual(proc.returncode, EXIT_USAGE, f"{argv}: {proc.stderr}")
+            self.assertEqual(proc.stdout, "", argv)
+            self.assertNotIn(proc.returncode, (EXIT_DUE, EXIT_NOTHING, EXIT_GONE))
+
     # --- what the seam refuses to do ---------------------------------------
 
     def test_the_seam_kills_nothing_and_writes_nothing(self):
@@ -525,6 +854,66 @@ class WorkerStateTestCase(unittest.TestCase):
         # A stall then a fix reads as a fix, with no memory of the earlier stall.
         write(self.checklist, TICKED)
         self.assertTrue(self.watch(stall="30m", expect=EXIT_COMPLETE).startswith("complete:"))
+
+    def test_the_phase_predicate_writes_nothing_but_its_back_off_marker(self):
+        """The refusal case for the predicate. A live child survives every outcome,
+        and the branch does not move. With no --back-off the tick leaves the disk
+        byte-identical. The marker is the one file it writes, and it opts in."""
+        child = self.child_in(self.worktree)
+        write(self.checklist, TICKED)
+        self.write_fixture(labels=IMPL)
+        head = self.rev("HEAD")
+        before = self.disk_state()
+
+        self.tick(expect=EXIT_DUE)  # implementation-complete
+        self.assertEqual(before, self.disk_state())
+
+        write(self.checklist, UNTICKED)
+        self.backdate(3600)
+        stalled_head = self.rev("HEAD")
+        stalled_state = self.disk_state()
+
+        self.tick(stall="30m", expect=EXIT_DUE)  # stalled
+        self.tick(stall="4h", expect=EXIT_NOTHING)  # nothing to do
+        self.assertEqual(stalled_state, self.disk_state())
+
+        self.write_fixture(comments=[CHANGES], labels=REVIEW)
+        with_verdict = self.disk_state()
+        self.tick(expect=EXIT_DUE)  # verdict-request-changes
+        self.assertEqual(with_verdict, self.disk_state())
+
+        # The one file it writes is the marker, and only where --back-off asks.
+        self.write_fixture(labels=IMPL)
+        write(self.checklist, TICKED)
+        paths = {path for path, _ in self.disk_state()}
+        self.tick("--back-off", "1h", expect=EXIT_DUE)
+        added = {path for path, _ in self.disk_state()} - paths
+        self.assertEqual(added, {str(self.marker("implementation-complete"))})
+
+        # The worker is still running: no outcome killed it. No tracker write was
+        # attempted, and the branch is where the worker left it with nothing staged.
+        self.assertIsNone(child.poll())
+        self.assertFalse((self.root / "gh.json.writes").exists())
+        self.assertEqual(self.rev("HEAD"), stalled_head)
+        self.assertNotEqual(stalled_head, head)  # the backdate moved it, not the seam
+        self.assertEqual(self.porcelain(), "")
+
+    def test_the_predicate_holds_no_state_that_changes_an_answer(self):
+        """Two identical ticks give the same line, so a restart of the session that
+        owns the schedule costs nothing."""
+        self.write_fixture(labels=IMPL)
+        self.backdate(3600)
+
+        first = self.tick(stall="30m", expect=EXIT_DUE)
+        second = self.tick(stall="30m", expect=EXIT_DUE)
+
+        self.assertEqual(first, second)
+        self.assertTrue(first.startswith("dead:"), first)
+        # And a fix reads as a fix, with no memory of the earlier answer.
+        write(self.checklist, TICKED)
+        self.assertTrue(
+            self.tick(stall="30m", expect=EXIT_DUE).startswith("implementation-complete:")
+        )
 
     def test_the_seam_names_no_harness(self):
         """The pattern comes from the harness reference, so the file holds none —
