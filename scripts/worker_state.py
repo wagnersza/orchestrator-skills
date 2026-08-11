@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
-"""Answer what the **Worker watch** asks about one worker, in three subcommands.
+"""Answer what the **Worker watch** asks about one worker, in two subcommands.
 
 Each one is the same question at a different moment. *Is a real agent at work in
 this worktree, and does that work need a decision now?* Readiness asks it before
-the first prompt. The watch asks it while the work runs. The phase predicate asks
-it once per **Item automation** tick. One seam answers all three, for every tool
-and every harness (ADR 0019).
+the first prompt. The phase predicate asks it once per **Item automation** tick.
+One seam answers both, for every tool and every harness (ADR 0019).
 
 **`ready`** — is a live agent process running with its working directory inside
 this worktree? Exit 0 ready, non-zero not:
@@ -13,28 +12,9 @@ this worktree? Exit 0 ready, non-zero not:
     python3 -m scripts.worker_state ready --worktree /path/to/worktree \\
         --process '<the pattern the harness reference gives>'
 
-**`watch`** — block, poll two facts on the file system, and exit with one code per
-outcome:
-
-    python3 -m scripts.worker_state watch --item 54 \\
-        --worktree /path/to/worktree --done-when checklist \\
-        --stall-after 30m --max-wait 4h
-
-| Code | Meaning |
-|---|---|
-| 0 | complete — the **Completion signal** fired |
-| 1 | stalled — no fresh work product inside the stall window |
-| 2 | max-wait reached — neither complete nor demonstrably stalled |
-| 3 | the worktree is gone — nothing left to watch |
-
-Each exit prints one line that names the outcome. That line and the code are the
-only things a caller consumes. A usage error is not one of the four outcomes. It
-exits 64 and prints nothing on stdout, so a bad flag can never read as max-wait
-reached.
-
-**`phase`** — read the same facts once, and answer one question: *is a **Phase**
-transition due for this work item?* This is the predicate an **Item automation**
-runs as its `--precheck`, so it blocks on nothing:
+**`phase`** — read two facts on disk and two on the tracker, and answer one
+question: *is a **Phase** transition due for this work item?* This is the predicate
+an **Item automation** runs as its `--precheck`, so it blocks on nothing:
 
     python3 -m scripts.worker_state phase --item 62 \\
         --worktree /path/to/worktree \\
@@ -77,11 +57,12 @@ through a marker file under `.orchestrator/` in the worktree. One marker per
 `--back-off` this subcommand writes nothing at all.
 
 The two signals are work product, so neither can report success for a dead worker
-(ADR 0018):
+(ADR 0018). The item's phase names which one a tick reads, so no flag carries the
+worker's role:
 
-- **complete** — `--done-when checklist`: every box in
-  `.orchestrator/checklist-<item>.md` is ticked. `--done-when verdict`: a comment
-  on the work item carries a `Verdict:` line whose value is `approve` or
+- **complete** — in `phase:impl` and `phase:e2e`, every box in
+  `.orchestrator/checklist-<item>.md` is ticked. In `phase:review`, a comment on
+  the work item carries a `Verdict:` line whose value is `approve` or
   `request-changes`.
 - **stalled** — the newer of the checklist file's write time and the branch's last
   commit time is older than `--stall-after`. This is the freshness of work
@@ -110,13 +91,12 @@ import time
 from pathlib import Path
 
 EXIT_COMPLETE = 0
-EXIT_STALLED = 1
-EXIT_MAX_WAIT = 2
 EXIT_GONE = 3
 
-# A usage error must not land on one of the four outcomes. `argparse` exits 2 by
-# default, which is max-wait, so a flag with a typo reads as a bounded wait that
-# expired. 64 is `EX_USAGE`, and it sits outside the contract above.
+# A usage error must not land on one of the outcomes. `argparse` exits 2 by
+# default, which is non-zero, so a flag with a typo reads as a quiet tick and
+# records as a skipped run that nobody sees. 64 is `EX_USAGE`, and it sits outside
+# the contract above (ADR 0022).
 EXIT_USAGE = 64
 
 # `ready` answers one bit, so every not-ready cause shares one code. A worktree
@@ -147,7 +127,7 @@ UNITS = {"s": 1, "m": 60, "h": 3600}
 # tracker — the same ceiling `scripts/close_item.py` names, and the same upgrade
 # path: swap the one command below for its `glab` equivalent, or put a
 # `--tracker-cli` argument in front of it. Nothing above it changes, because the
-# poll loop does not know which CLI ran.
+# tick does not know which CLI ran.
 GH = "gh"
 
 
@@ -318,11 +298,6 @@ def item_facts(item, repo, fixture=None):
     )
 
 
-def comment_bodies(item, repo, fixture=None):
-    """Every comment body on the work item — the half of `item_facts` a watch reads."""
-    return item_facts(item, repo, fixture)[1]
-
-
 class TrackerError(RuntimeError):
     """A tracker read failed — reported as no verdict yet, never raised past main."""
 
@@ -338,11 +313,6 @@ def verdicts_in(bodies):
         for body in bodies
         if (match := VERDICT.search(body or ""))
     ]
-
-
-def verdict_in(bodies):
-    """The first `approve` or `request-changes` a comment carries, or None."""
-    return next(iter(verdicts_in(bodies)), None)
 
 
 # --- the stall signal (ADR 0018) --------------------------------------------
@@ -365,8 +335,10 @@ def newest_work_product(worktree, item):
 
     Two facts, and the newer one wins: the checklist file's write time and the
     branch's last commit time. Where neither is readable there is nothing to
-    date, so a stall cannot be proven — which is the reviewer risk `--max-wait`
-    carries (ADR 0018).
+    date, so a stall cannot be proven. That is the reviewer risk ADR 0018
+    accepted and ADR 0022 narrows. A healthy reviewer that produces no work
+    product still does not read as stalled. A dead one is reported by its absent
+    process instead.
     """
     facts = []
     path = checklist_path(worktree, item)
@@ -380,90 +352,6 @@ def newest_work_product(worktree, item):
     if not facts:
         return None, ""
     return max(facts)
-
-
-# --- the watch --------------------------------------------------------------
-
-
-def complete(item, worktree, done_when, repo, fixture, warned):
-    """The `complete` line for whichever **Completion signal** was named, or None.
-
-    A tracker read that fails is reported once on stderr, and read as no verdict
-    yet. So a read that fails once costs a late report and never a wrong outcome.
-    """
-    if done_when == "checklist":
-        path = checklist_path(worktree, item)
-        ticked, total = boxes(path)
-        if total and ticked == total:
-            return (
-                f"complete: every box in {path} is ticked ({ticked} of {total})"
-            )
-        return None
-
-    try:
-        value = verdict_in(comment_bodies(item, repo, fixture))
-    except (TrackerError, OSError, json.JSONDecodeError) as exc:
-        if not warned:
-            warned.append(exc)
-            print(
-                f"warning: the comments on work item #{item} are unreadable. The "
-                f"watch polls on, and --max-wait carries it: {exc}",
-                file=sys.stderr,
-            )
-        return None
-    if value:
-        return f"complete: a comment on work item #{item} carries Verdict: {value}"
-    return None
-
-
-def watch(
-    item,
-    worktree,
-    done_when,
-    stall_after,
-    max_wait,
-    poll_every,
-    repo="",
-    fixture=None,
-):
-    """Block, poll, and return `(exit code, the one line to print)`.
-
-    The order of the four checks is the contract. A worktree that is gone is
-    answered first, so a torn-down worker is never reported as a stall. Complete
-    comes before stalled, so a worker that finished and then went quiet is
-    reported as finished. Max-wait comes last, so it reports only what the three
-    signals above cannot answer.
-    """
-    worktree = Path(os.path.realpath(worktree))
-    started = time.time()
-    warned = []
-    while True:
-        if not worktree.is_dir():
-            return EXIT_GONE, (
-                f"gone: there is no worktree at {worktree} — nothing left to watch"
-            )
-
-        line = complete(item, worktree, done_when, repo, fixture, warned)
-        if line:
-            return EXIT_COMPLETE, line
-
-        newest, source = newest_work_product(worktree, item)
-        if newest is not None:
-            age = time.time() - newest
-            if age > stall_after:
-                return EXIT_STALLED, (
-                    f"stalled: the newest work product in {worktree} is "
-                    f"{human(age)} old ({source}), and the stall window is "
-                    f"{human(stall_after)}"
-                )
-
-        waited = time.time() - started
-        if waited >= max_wait:
-            return EXIT_MAX_WAIT, (
-                f"max-wait: {human(max_wait)} reached, and worker #{item} is neither "
-                f"complete nor demonstrably stalled"
-            )
-        time.sleep(min(poll_every, max(max_wait - waited, 0)))
 
 
 # --- the phase predicate (ADR 0022) -----------------------------------------
@@ -662,9 +550,9 @@ def main(argv=None):
         prog="python3 -m scripts.worker_state",
         description=(
             "Answer what the Worker watch asks about one worker: is a live agent "
-            "process at work in this worktree, has that worker finished or stalled, "
-            "and is a Phase transition due. Reports and never acts — it composes no "
-            "prompt, kills no process, writes no label and spawns nothing."
+            "process at work in this worktree, and is a Phase transition due for its "
+            "work item. Reports and never acts — it composes no prompt, kills no "
+            "process, writes no label and spawns nothing."
         ),
     )
     subcommands = parser.add_subparsers(dest="command", required=True)
@@ -687,57 +575,6 @@ def main(argv=None):
         metavar="PATTERN",
         help="a regular expression for the agent's process name. The caller reads "
         "it from references/harnesses/<harness>.md, so this seam names no harness",
-    )
-
-    poll = subcommands.add_parser(
-        "watch",
-        help="block, poll the worker's own work product, and exit with one code "
-        "per outcome",
-        description=(
-            "Poll two facts on the file system until one of four outcomes holds: "
-            "0 complete, 1 stalled, 2 max-wait reached, 3 the worktree is gone. "
-            "Each exit prints one line naming the outcome. Nothing is held "
-            "between invocations, so a restart after a re-prompt is free."
-        ),
-    )
-    poll.add_argument("--item", required=True, type=int, help="the work item number")
-    poll.add_argument("--worktree", required=True, help="the worker's worktree")
-    poll.add_argument(
-        "--done-when",
-        required=True,
-        choices=("checklist", "verdict"),
-        help="which Completion signal this worker's role writes: `checklist` for an "
-        "implementation worker, `verdict` for a review worker, which ticks no boxes",
-    )
-    poll.add_argument(
-        "--repo",
-        default="",
-        help="the tracker repository the verdict comment sits on, as OWNER/NAME. "
-        "Only `--done-when verdict` reads it",
-    )
-    poll.add_argument(
-        "--stall-after",
-        required=True,
-        metavar="DURATION",
-        help="how old the newest work product must be to count as a stall "
-        "(`45s`, `30m`, `4h`, or a bare number of seconds)",
-    )
-    poll.add_argument(
-        "--max-wait",
-        required=True,
-        metavar="DURATION",
-        help="the bounded maximum wait, so no watch outlives the work it observes",
-    )
-    poll.add_argument(
-        "--poll-every",
-        default="30s",
-        metavar="DURATION",
-        help="how often the two facts are re-read (default: 30s)",
-    )
-    poll.add_argument(
-        "--gh-fixture",
-        help="JSON that stands in for the comment read, so a verdict needs no "
-        "network (used by the tests)",
     )
 
     tick = subcommands.add_parser(
@@ -809,45 +646,26 @@ def main(argv=None):
         print(line)
         return code
 
-    if args.command == "phase":
-        if args.rounds < 1:
-            parser.error(f"--rounds must be a bound of 1 or more, not {args.rounds}")
-        try:
-            stall_after = parse_duration(args.stall_after)
-            back_off = parse_duration(args.back_off) if args.back_off else None
-        except ValueError as exc:
-            parser.error(str(exc))
-        code, line = phase(
-            args.item,
-            args.worktree,
-            args.process,
-            args.rounds,
-            stall_after,
-            args.repo,
-            args.gh_fixture,
-            back_off,
-        )
-        print(line)
-        return code
-
+    # `phase` is the other subcommand, and `required=True` above leaves no third
+    # case. So this branch is unconditional rather than a second `if`, which is what
+    # keeps a fall-through out of the exit contract: an implicit `None` would exit 0
+    # and read as a due transition.
+    if args.rounds < 1:
+        parser.error(f"--rounds must be a bound of 1 or more, not {args.rounds}")
     try:
-        durations = [
-            parse_duration(value)
-            for value in (args.stall_after, args.max_wait, args.poll_every)
-        ]
+        stall_after = parse_duration(args.stall_after)
+        back_off = parse_duration(args.back_off) if args.back_off else None
     except ValueError as exc:
         parser.error(str(exc))
-    stall_after, max_wait, poll_every = durations
-
-    code, line = watch(
+    code, line = phase(
         args.item,
         args.worktree,
-        args.done_when,
+        args.process,
+        args.rounds,
         stall_after,
-        max_wait,
-        poll_every,
         args.repo,
         args.gh_fixture,
+        back_off,
     )
     print(line)
     return code

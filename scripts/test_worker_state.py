@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Behaviour tests for the watch seam: real fixtures in, an exit code and a line out.
+"""Behaviour tests for the worker-state seam: real fixtures in, an exit code and a
+line out.
 
 Every case runs `python3 -m scripts.worker_state` as a subprocess against a real
 worktree in a temp directory. Each one asserts on the exit code and the printed
@@ -44,8 +45,6 @@ GIT_ENV = {
 ITEM = 54
 
 EXIT_COMPLETE = 0
-EXIT_STALLED = 1
-EXIT_MAX_WAIT = 2
 EXIT_GONE = 3
 EXIT_NOT_READY = 1
 EXIT_USAGE = 64
@@ -92,8 +91,8 @@ def write(path, text):
 class WorkerStateTestCase(unittest.TestCase):
     """A worker's worktree: a real git repo on its own branch, plus a checklist.
 
-    This is the state a watch starts against. The worktree exists, the checklist
-    file has boxes in it, and the branch carries the worker's commits.
+    This is the state a tick reads. The worktree exists, the checklist file has
+    boxes in it, and the branch carries the worker's commits.
     """
 
     def setUp(self):
@@ -109,7 +108,7 @@ class WorkerStateTestCase(unittest.TestCase):
         write(self.worktree / ".gitignore", ".orchestrator/\n")
         git(self.worktree, "add", "-A")
         git(self.worktree, "commit", "-qm", "base")
-        git(self.worktree, "checkout", "-qb", f"{ITEM}-build-worker-watch-seam")
+        git(self.worktree, "checkout", "-qb", f"{ITEM}-worker-state-seam")
 
         self.checklist = self.worktree / ".orchestrator" / f"checklist-{ITEM}.md"
         write(self.checklist, UNTICKED)
@@ -118,7 +117,7 @@ class WorkerStateTestCase(unittest.TestCase):
     # --- fixture helpers ----------------------------------------------------
 
     def write_fixture(self, comments=(), labels=()):
-        """Stand in for the tracker read a verdict watch and a phase tick make."""
+        """Stand in for the tracker read a phase tick makes."""
         self.fixture = self.root / "gh.json"
         self.fixture.write_text(
             json.dumps(
@@ -133,8 +132,8 @@ class WorkerStateTestCase(unittest.TestCase):
         """Age both freshness facts, so a stall needs no real waiting.
 
         The commit is rewritten with an old date, and `os.utime` moves the
-        checklist's write time. The watch takes the newer of the two, so both
-        must move.
+        checklist's write time. The predicate takes the newer of the two, so
+        both must move.
         """
         old = time.time() - seconds
         stamp = time.strftime("%Y-%m-%dT%H:%M:%S+0000", time.gmtime(old))
@@ -163,27 +162,6 @@ class WorkerStateTestCase(unittest.TestCase):
             f"more than one line printed: {proc.stdout!r}",
         )
         return proc.stdout.strip()
-
-    def watch(self, *extra, done_when="checklist", stall="1h", max_wait="1s", expect=0):
-        return self.run_seam(
-            "watch",
-            "--item",
-            str(ITEM),
-            "--worktree",
-            str(self.worktree),
-            "--done-when",
-            done_when,
-            "--stall-after",
-            stall,
-            "--max-wait",
-            max_wait,
-            "--poll-every",
-            "1s",
-            "--gh-fixture",
-            str(self.fixture),
-            *extra,
-            expect=expect,
-        )
 
     def tick(self, *extra, rounds=3, stall="4h", pattern=PROCESS_PATTERN, expect=0):
         """Ask the predicate once, the way an Item automation's precheck asks it."""
@@ -320,165 +298,10 @@ class WorkerStateTestCase(unittest.TestCase):
         line = self.ready(expect=EXIT_GONE)
         self.assertTrue(line.startswith("gone:"), line)
 
-    # --- watch: complete ----------------------------------------------------
-
-    def test_a_fully_ticked_checklist_is_complete(self):
-        write(self.checklist, TICKED)
-
-        line = self.watch(expect=EXIT_COMPLETE)
-
-        self.assertTrue(line.startswith("complete:"), line)
-        self.assertIn(str(self.checklist), line)
-        self.assertIn("3 of 3", line)
-
-    def test_one_unticked_box_is_not_complete(self):
-        """Every box, not most of them — the checklist is the completion contract."""
-        write(self.checklist, TICKED.replace("- [x] push", "- [ ] push"))
-
-        line = self.watch(expect=EXIT_MAX_WAIT)
-        self.assertTrue(line.startswith("max-wait:"), line)
-
-    def test_an_absent_checklist_is_not_complete(self):
-        """Zero boxes is not "every box ticked" — that fires before a spawn."""
-        self.checklist.unlink()
-
-        self.assertTrue(self.watch(expect=EXIT_MAX_WAIT).startswith("max-wait:"))
-
-    # --- watch: the verdict signal ------------------------------------------
-
-    def test_a_verdict_comment_fires_the_verdict_watch(self):
-        """The reviewer's shape: a comment on the work item, not a checklist."""
-        for value in ("approve", "request-changes"):
-            self.write_fixture([f"## Findings\n\nnone of note\n\nVerdict: {value}\n"])
-            line = self.watch(done_when="verdict", expect=EXIT_COMPLETE)
-            self.assertTrue(line.startswith("complete:"), line)
-            self.assertIn(f"Verdict: {value}", line)
-            self.assertIn(f"#{ITEM}", line)
-
-    def test_a_ticked_checklist_does_not_fire_the_verdict_watch(self):
-        """A reviewer ticks no boxes, so the two signals must not stand in for
-        each other. This is the assertion that keeps them separate."""
-        write(self.checklist, TICKED)
-        self.write_fixture([])
-
-        line = self.watch(done_when="verdict", expect=EXIT_MAX_WAIT)
-        self.assertTrue(line.startswith("max-wait:"), line)
-
-        # And the mirror: a verdict comment does not finish a checklist watch.
-        self.write_fixture(["Verdict: approve"])
-        write(self.checklist, UNTICKED)
-        self.assertTrue(
-            self.watch(done_when="checklist", expect=EXIT_MAX_WAIT).startswith(
-                "max-wait:"
-            )
-        )
-
-    def test_a_comment_with_no_verdict_line_does_not_fire(self):
-        """The literal is the signal, so prose about a verdict is not one."""
-        self.write_fixture(
-            ["I would approve this, but the verdict comes after the fix round"]
-        )
-
-        self.assertTrue(
-            self.watch(done_when="verdict", expect=EXIT_MAX_WAIT).startswith("max-wait:")
-        )
-
-    # --- watch: stalled -----------------------------------------------------
-
-    def test_a_backdated_checklist_and_commit_are_a_stall(self):
-        """Freshness of work product: both facts are old, so the worker is stuck."""
-        self.backdate(3600)
-
-        line = self.watch(stall="30m", expect=EXIT_STALLED)
-
-        self.assertTrue(line.startswith("stalled:"), line)
-        self.assertIn("30m", line)
-        self.assertIn(str(self.worktree), line)
-
-    def test_a_fresh_checklist_is_not_a_stall_even_with_an_old_commit(self):
-        """The newer of the two facts wins, so a worker between commits is alive."""
-        self.backdate(3600)
-        self.checklist.write_text(UNTICKED + "- [ ] a step added just now\n")
-
-        line = self.watch(stall="30m", expect=EXIT_MAX_WAIT)
-        self.assertTrue(line.startswith("max-wait:"), line)
-
-    def test_a_completed_worker_that_went_quiet_reads_complete_not_stalled(self):
-        """Complete is checked before stalled, so a finish is never a stall."""
-        write(self.checklist, TICKED)
-        self.backdate(3600)
-
-        line = self.watch(stall="30m", expect=EXIT_COMPLETE)
-        self.assertTrue(line.startswith("complete:"), line)
-
-    # --- watch: max-wait ----------------------------------------------------
-
-    def test_a_max_wait_shorter_than_the_stall_window_reaches_max_wait(self):
-        """The bounded wait, so no watch outlives the work it observes."""
-        line = self.watch(stall="4h", max_wait="2s", expect=EXIT_MAX_WAIT)
-
-        self.assertTrue(line.startswith("max-wait:"), line)
-        self.assertIn("2s", line)
-        self.assertIn(f"#{ITEM}", line)
-        self.assertNotEqual(EXIT_MAX_WAIT, EXIT_STALLED)
-
-    def test_max_wait_is_what_carries_a_reviewer_with_no_work_product(self):
-        """A review worker writes no checklist and can reach its verdict with no
-        commit, so max-wait is the accepted risk ADR 0018 records."""
-        self.checklist.unlink()
-        shutil.rmtree(self.worktree / ".git")
-
-        line = self.watch(done_when="verdict", stall="1s", max_wait="2s", expect=EXIT_MAX_WAIT)
-        self.assertTrue(line.startswith("max-wait:"), line)
-
-    # --- watch: the worktree is gone ---------------------------------------
-
-    def test_a_removed_worktree_is_gone_and_never_a_stall(self):
-        """A torn-down worker must not be re-prompted, so it gets its own code."""
-        self.backdate(3600)  # old enough to look like a stall, if it were checked
-        shutil.rmtree(self.worktree)
-
-        line = self.watch(stall="30m", expect=EXIT_GONE)
-
-        self.assertTrue(line.startswith("gone:"), line)
-        self.assertNotIn("stalled", line)
-        self.assertNotEqual(EXIT_GONE, EXIT_STALLED)
-
-    # --- the four codes are four codes -------------------------------------
-
-    def test_each_outcome_has_its_own_code_and_one_printed_line(self):
-        """The exit code is the contract, so the caller looks up rather than reads."""
-        seen = {}
-
-        write(self.checklist, TICKED)
-        seen[EXIT_COMPLETE] = self.watch(expect=EXIT_COMPLETE)
-
-        write(self.checklist, UNTICKED)
-        self.backdate(3600)
-        seen[EXIT_STALLED] = self.watch(stall="30m", expect=EXIT_STALLED)
-        seen[EXIT_MAX_WAIT] = self.watch(stall="4h", max_wait="1s", expect=EXIT_MAX_WAIT)
-
-        shutil.rmtree(self.worktree)
-        seen[EXIT_GONE] = self.watch(expect=EXIT_GONE)
-
-        self.assertEqual(sorted(seen), [0, 1, 2, 3])
-        self.assertEqual(
-            [seen[code].split(":")[0] for code in sorted(seen)],
-            ["complete", "stalled", "max-wait", "gone"],
-        )
-        for line in seen.values():
-            self.assertEqual(len(line.splitlines()), 1, line)
-
-    def test_a_usage_error_lands_on_no_outcome_code(self):
-        """A typo'd flag must not read as max-wait reached, so it exits outside
-        the contract."""
-        for argv in (
-            ("watch", "--item", str(ITEM)),
-            ("watch", "--item", str(ITEM), "--worktree", str(self.worktree),
-             "--done-when", "terminal", "--stall-after", "1s", "--max-wait", "1s"),
-            ("ready",),
-            (),
-        ):
+    def test_a_usage_error_lands_outside_the_exit_contract(self):
+        """A missing flag and a missing subcommand both exit 64 and print nothing,
+        so neither can read as an outcome a caller acts on."""
+        for argv in (("ready",), ("ready", "--worktree", str(self.worktree)), ()):
             proc = subprocess.run(
                 [sys.executable, "-m", "scripts.worker_state", *argv],
                 cwd=REPO_ROOT,
@@ -488,28 +311,7 @@ class WorkerStateTestCase(unittest.TestCase):
             )
             self.assertEqual(proc.returncode, EXIT_USAGE, f"{argv}: {proc.stderr}")
             self.assertEqual(proc.stdout, "", argv)
-            self.assertNotIn(proc.returncode, (EXIT_COMPLETE, EXIT_STALLED, EXIT_MAX_WAIT, EXIT_GONE))
-
-    def test_durations_are_arguments_so_no_test_waits_for_a_real_window(self):
-        """Both units and a bare number of seconds, and a bad one is a usage error."""
-        self.backdate(120)
-        for stall in ("60s", "1m", "60"):
-            self.assertTrue(
-                self.watch(stall=stall, expect=EXIT_STALLED).startswith("stalled:")
-            )
-        # The same fixture is not a stall under a window that has not passed.
-        self.assertTrue(self.watch(stall="1h", expect=EXIT_MAX_WAIT).startswith("max-wait:"))
-
-        proc = subprocess.run(
-            [
-                sys.executable, "-m", "scripts.worker_state", "watch",
-                "--item", str(ITEM), "--worktree", str(self.worktree),
-                "--done-when", "checklist", "--stall-after", "soon", "--max-wait", "1s",
-            ],
-            cwd=REPO_ROOT, capture_output=True, text=True, env=GIT_ENV,
-        )
-        self.assertEqual(proc.returncode, EXIT_USAGE, proc.stderr)
-        self.assertIn("is not a duration", proc.stderr)
+            self.assertNotIn(proc.returncode, (EXIT_COMPLETE, EXIT_NOT_READY, EXIT_GONE))
 
     # --- phase: the predicate an Item automation runs -----------------------
 
@@ -531,6 +333,44 @@ class WorkerStateTestCase(unittest.TestCase):
         self.write_fixture(labels=E2E)
 
         self.assertTrue(self.tick(expect=EXIT_DUE).startswith("proof-complete:"))
+
+    def test_an_absent_checklist_is_not_a_completed_one(self):
+        """Zero boxes is not "every box ticked" — that state holds between the
+        worktree and the first prompt, and it must not read as a finish."""
+        self.checklist.unlink()
+        self.write_fixture(labels=IMPL)
+        self.child_in(self.worktree)
+
+        line = self.tick(expect=EXIT_NOTHING)
+
+        self.assertTrue(line.startswith("nothing:"), line)
+        self.assertIn("0 of 0 boxes ticked", line)
+
+    def test_the_phase_label_picks_the_signal_and_the_two_never_substitute(self):
+        """A reviewer ticks no boxes and an implementation worker posts no verdict,
+        so neither signal may stand in for the other. The label is what chooses."""
+        write(self.checklist, TICKED)
+        self.write_fixture(labels=REVIEW)
+        self.child_in(self.worktree)
+
+        line = self.tick(expect=EXIT_NOTHING)
+        self.assertTrue(line.startswith("nothing:"), line)
+        self.assertIn("no Verdict: comment yet", line)
+
+        # And the mirror: a verdict does not finish an item in the impl phase.
+        write(self.checklist, UNTICKED)
+        self.write_fixture(comments=["Verdict: approve"], labels=IMPL)
+        self.assertTrue(self.tick(expect=EXIT_NOTHING).startswith("nothing:"))
+
+    def test_a_comment_with_no_verdict_line_does_not_fire(self):
+        """The literal is the signal, so prose about a verdict is not one."""
+        self.write_fixture(
+            comments=["I would approve this, but the verdict comes after the fix round"],
+            labels=REVIEW,
+        )
+        self.child_in(self.worktree)
+
+        self.assertIn("no Verdict: comment yet", self.tick(expect=EXIT_NOTHING))
 
     def test_each_verdict_value_is_its_own_due_transition(self):
         """Two verdicts, two responses, so the line must tell them apart."""
@@ -690,6 +530,20 @@ class WorkerStateTestCase(unittest.TestCase):
         self.assertTrue(line.startswith("dead:"), line)
         self.assertTrue(self.marker("dead").is_file())
 
+    def test_durations_are_arguments_so_no_test_waits_for_a_real_window(self):
+        """Both units and a bare number of seconds mean the same window, and a bad
+        one is a usage error rather than a quiet tick."""
+        self.write_fixture(labels=IMPL)
+        self.backdate(120)
+        self.child_in(self.worktree)
+
+        for stall in ("60s", "1m", "60"):
+            self.assertTrue(
+                self.tick(stall=stall, expect=EXIT_DUE).startswith("stalled:"), stall
+            )
+        # The same fixture is not a stall under a window that has not passed.
+        self.assertTrue(self.tick(stall="1h", expect=EXIT_NOTHING).startswith("nothing:"))
+
     def test_a_removed_worktree_is_gone_for_the_predicate_too(self):
         """The existing ordering guarantee, held for this subcommand: a torn-down
         worker is reported as gone and never as a stall."""
@@ -801,59 +655,6 @@ class WorkerStateTestCase(unittest.TestCase):
             self.assertNotIn(proc.returncode, (EXIT_DUE, EXIT_NOTHING, EXIT_GONE))
 
     # --- what the seam refuses to do ---------------------------------------
-
-    def test_the_seam_kills_nothing_and_writes_nothing(self):
-        """The mirror of test_script_mutates_nothing, and the executable form of
-        this design's central claim: the watch reports and never acts.
-
-        A live child in the worktree survives every outcome, the stall included.
-        A watch with the authority to kill is what ends that child.
-        """
-        child = self.child_in(self.worktree)
-        write(self.checklist, TICKED)
-        head = self.rev("HEAD")
-        before = self.disk_state()
-
-        self.watch(expect=EXIT_COMPLETE)
-        self.ready()
-        self.assertEqual(before, self.disk_state())
-
-        # The same again, for the outcome that ends a worker with kill authority.
-        write(self.checklist, UNTICKED)
-        self.backdate(3600)
-        stalled_state = self.disk_state()
-        stalled_head = self.rev("HEAD")
-
-        self.watch(stall="30m", expect=EXIT_STALLED)
-        self.watch(stall="4h", max_wait="1s", expect=EXIT_MAX_WAIT)
-
-        # Nothing on disk moved, in the worktree or beside it.
-        self.assertEqual(stalled_state, self.disk_state())
-        # The worker is still running: no outcome killed it.
-        self.assertIsNone(child.poll())
-        # No tracker write was attempted. The fixture has a read half and no
-        # write half, so any write has to reach `gh`, and none did.
-        self.assertFalse((self.root / "gh.json.writes").exists())
-        # The branch is where the worker left it, with nothing committed or
-        # staged by the seam.
-        self.assertEqual(self.rev("HEAD"), stalled_head)
-        self.assertNotEqual(stalled_head, head)  # the backdate moved it, not the seam
-        self.assertEqual(self.porcelain(), "")
-
-    def test_the_seam_holds_no_state_between_invocations(self):
-        """Statelessness is what makes a restart after a re-prompt free, so two
-        identical runs give the same answer and leave nothing behind."""
-        self.backdate(3600)
-        before = self.disk_state()
-
-        first = self.watch(stall="30m", expect=EXIT_STALLED)
-        second = self.watch(stall="30m", expect=EXIT_STALLED)
-
-        self.assertEqual(first, second)
-        self.assertEqual(before, self.disk_state())
-        # A stall then a fix reads as a fix, with no memory of the earlier stall.
-        write(self.checklist, TICKED)
-        self.assertTrue(self.watch(stall="30m", expect=EXIT_COMPLETE).startswith("complete:"))
 
     def test_the_phase_predicate_writes_nothing_but_its_back_off_marker(self):
         """The refusal case for the predicate. A live child survives every outcome,
