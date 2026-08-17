@@ -29,7 +29,7 @@ an **Item automation** runs as its `--precheck`, so it blocks on nothing:
 
 **The code is the predicate and the line is the diagnosis.** Zero means a
 transition is due, whichever one it is, so a caller reads one bit. The line names
-one of seven outcomes, and the item's own `phase:*` label decides which of them a
+one of eight outcomes, and the item's own `phase:*` label decides which of them a
 tick can reach:
 
 | Outcome | Reachable in | The fact that fires it |
@@ -41,10 +41,16 @@ tick can reach:
 | `rounds-exhausted` | `phase:review` | `--rounds` `Verdict:` comments, and the newest one asks for changes |
 | `dead` | every phase | no live agent process with its working directory inside the worktree |
 | `stalled` | every phase | a live process, and work product older than `--stall-after` |
+| `unreadable` | before the phase is read | the tracker read failed, so no fact is available |
 
 A **Review round** count is the number of `Verdict:` comments on the work item. So
 nothing stores a counter, and `--rounds` is the whole bound. A work item with no
 `phase:*` label is in human review, where nothing is due.
+
+`unreadable` is the one outcome no `phase:*` label gates, because a read that
+failed cannot say which phase the item is in. It is an outcome and not a silence:
+a broken read for 21 ticks must not look like 21 quiet minutes. It goes through
+the same back-off as every other outcome, so it reports once per window.
 
 `dead` and `stalled` can never both fire, because `dead` is the absence of the live
 process `stalled` needs. `dead` needs no stall window, so it reports in about a
@@ -113,7 +119,7 @@ EXIT_USAGE = 64
 EXIT_NOT_READY = 1
 
 # `phase` answers one bit too, because a `--precheck` reads one bit (ADR 0022).
-# Zero means a transition is due, whichever of the seven outcomes fired, and the
+# Zero means a transition is due, whichever of the eight outcomes fired, and the
 # printed line is what names it. Every quiet outcome shares code 1, so a tick that
 # has nothing to do records as a skipped automation run. A worktree that is gone
 # keeps code 3 here as well.
@@ -312,7 +318,8 @@ def item_facts(item, repo, fixture=None):
 
 
 class TrackerError(RuntimeError):
-    """A tracker read failed — reported as no verdict yet, never raised past main."""
+    """A tracker read failed — reported as the `unreadable` outcome, never raised
+    past `phase`."""
 
 
 def verdicts_in(bodies):
@@ -502,9 +509,10 @@ def phase(
     """The `phase` answer: `(exit code, the one line to print)`.
 
     A worktree that is gone is answered first, so a torn-down worker is never
-    reported as a stall. The **Phase** label comes next, because it decides which
-    outcomes this tick can reach. A tracker read that fails reports nothing to do. So
-    a read that fails once costs a late report and never a wrong transition.
+    reported as a stall. A tracker read that fails comes next, and it is the
+    `unreadable` outcome. No phase label gates that outcome, because a read that
+    failed cannot say which phase the item is in. The **Phase** label follows,
+    because it decides which of the other outcomes this tick can reach.
     """
     worktree = Path(os.path.realpath(worktree))
     if not worktree.is_dir():
@@ -514,17 +522,23 @@ def phase(
 
     markers = Path(marker_dir) if marker_dir else worktree / ORCHESTRATOR_DIR
 
+    def fire(outcome, detail):
+        """One fire, through the back-off window every outcome shares."""
+        line = held_back(markers, item, outcome, back_off)
+        if line:
+            return EXIT_NOTHING, line
+        return EXIT_DUE, f"{outcome}: {detail}"
+
     try:
         labels, bodies = item_facts(item, repo, fixture)
     except (TrackerError, OSError, json.JSONDecodeError) as exc:
-        print(
-            f"warning: the labels and comments on work item #{item} are unreadable, "
-            f"so this tick reports nothing to do: {exc}",
-            file=sys.stderr,
-        )
-        return EXIT_NOTHING, (
-            f"nothing: the labels and comments on work item #{item} are unreadable, "
-            f"so no transition can be read"
+        # A tick prints one line. The standard error of a failed command can hold
+        # many, so the cause collapses to one.
+        cause = " ".join(str(exc).split())
+        return fire(
+            "unreadable",
+            f"the labels and comments on work item #{item} are unreadable, so this "
+            f"tick can read no transition and the item is unobserved: {cause}",
         )
 
     current = phase_of(labels)
@@ -539,11 +553,7 @@ def phase(
     )
     if not outcome:
         return EXIT_NOTHING, f"nothing: {detail}"
-
-    line = held_back(markers, item, outcome, back_off)
-    if line:
-        return EXIT_NOTHING, line
-    return EXIT_DUE, f"{outcome}: {detail}"
+    return fire(outcome, detail)
 
 
 # --- CLI --------------------------------------------------------------------
@@ -601,12 +611,14 @@ def main(argv=None):
         description=(
             "The predicate an Item automation runs as its --precheck. Exit 0 means a "
             "transition is due, and the printed line names which one. There are "
-            "seven: implementation-complete, proof-complete, verdict-approve, "
-            "verdict-request-changes, rounds-exhausted, dead, stalled. Exit 1 means "
-            "nothing to do, so the run records as skipped at no token cost. Exit 3 "
-            "means the worktree is gone. The item's own phase:* label decides which "
-            "outcomes a tick can reach. An item with no phase:* label is in human "
-            "review, where nothing is due."
+            "eight: implementation-complete, proof-complete, verdict-approve, "
+            "verdict-request-changes, rounds-exhausted, dead, stalled, unreadable. "
+            "Exit 1 means nothing to do, so the run records as skipped at no token "
+            "cost. Exit 3 means the worktree is gone. The item's own phase:* label "
+            "decides which outcomes a tick can reach. An item with no phase:* label "
+            "is in human review, where nothing is due. The one outcome no label "
+            "gates is unreadable, because a read that failed cannot say which phase "
+            "the item is in."
         ),
     )
     tick.add_argument("--item", required=True, type=int, help="the work item number")
