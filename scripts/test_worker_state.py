@@ -522,6 +522,33 @@ class WorkerStateTestCase(unittest.TestCase):
         self.assertTrue(line.startswith("dead:"), line)
         self.assertNotIn("stalled", line)
 
+    def test_a_reviewer_is_never_stalled_by_the_commit_it_inherited(self):
+        """A reviewer's worktree holds the implementation's commit and checklist, so
+        both are already stale on its first minute. In `phase:review` the seam reads
+        neither one, and the freshness fact is the newest `Verdict:` comment. With no
+        verdict, no stall can be proven, so a long first read is a quiet tick."""
+        self.write_fixture(labels=REVIEW)
+        self.backdate(3600)
+        child = self.child_in(self.worktree)
+
+        line = self.tick(stall="30m", expect=EXIT_NOTHING)
+
+        self.assertTrue(line.startswith("nothing:"), line)
+        self.assertNotIn("stalled", line)
+        self.assertIn("no Verdict: comment yet", line)
+        # The same stale state in the implementation phase is a stall, which is what
+        # makes this the phase's rule and not a dropped signal.
+        self.write_fixture(labels=IMPL)
+        self.assertTrue(self.tick(stall="30m", expect=EXIT_DUE).startswith("stalled:"))
+
+        # And dropping the stall clock costs no coverage of the failure that
+        # matters: a reviewer with no live process is dead, with no window elapsed.
+        self.write_fixture(labels=REVIEW)
+        self.stop(child)
+        dead = self.tick(stall="4h", expect=EXIT_DUE)
+        self.assertTrue(dead.startswith("dead:"), dead)
+        self.assertIn("phase:review", dead)
+
     def test_a_quiet_minute_is_nothing_to_do(self):
         """The common case, and the one that must cost no tokens."""
         self.write_fixture(labels=IMPL)

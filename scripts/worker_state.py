@@ -40,7 +40,7 @@ tick can reach:
 | `verdict-request-changes` | `phase:review` | the newest one reads `request-changes`, inside the round bound |
 | `rounds-exhausted` | `phase:review` | `--rounds` `Verdict:` comments, and the newest one asks for changes |
 | `dead` | every phase | no live agent process with its working directory inside the worktree |
-| `stalled` | every phase | a live process, and work product older than `--stall-after` |
+| `stalled` | `phase:impl`, `phase:e2e` | a live process, and work product older than `--stall-after` |
 | `unreadable` | before the phase is read | the tracker read failed, so no fact is available |
 
 A **Review round** count is the number of `Verdict:` comments on the work item. So
@@ -78,9 +78,15 @@ worker's role:
   `.orchestrator/checklist-<item>.md` is ticked. In `phase:review`, a comment on
   the work item carries a `Verdict:` line whose value is `approve` or
   `request-changes`.
-- **stalled** — the newer of the checklist file's write time and the branch's last
-  commit time is older than `--stall-after`. This is the freshness of work
-  product, not the liveness of a shell.
+- **stalled** — in `phase:impl` and `phase:e2e`, the newer of the checklist file's
+  write time and the branch's last commit time is older than `--stall-after`. This
+  is the freshness of work product, not the liveness of a shell. In `phase:review`
+  the freshness fact is the newest `Verdict:` comment, and this seam reads no commit
+  at all. A reviewer inherits the implementation's commit, so its fresh worktree
+  starts life with work product that is already stale. A verdict that exists fires
+  its own outcome above. So a review tick that reaches the stall check has no
+  verdict, and no stall can be proven. `dead` is the reviewer's signal instead, and
+  it needs no window.
 
 **What this seam refuses to do.** It composes no prompt, kills no process, writes
 no label, moves no card and spawns nothing. Every destructive act stays in a
@@ -350,7 +356,7 @@ def last_commit_time(worktree):
     return int(proc.stdout.strip())
 
 
-def newest_work_product(worktree, item):
+def newest_work_product(worktree, item, current):
     """`(timestamp, what it was)` for the freshest work product, or `(None, "")`.
 
     Two facts, and the newer one wins: the checklist file's write time and the
@@ -359,7 +365,16 @@ def newest_work_product(worktree, item):
     accepted and ADR 0022 narrows. A healthy reviewer that produces no work
     product still does not read as stalled. A dead one is reported by its absent
     process instead.
+
+    **In `phase:review` this function reads neither fact.** A reviewer's own verdict
+    is its work product, and its fresh worktree holds the implementation's commit and
+    the implementation's checklist. Both are stale on the reviewer's first minute, so
+    a long first read reported as a stall in about three minutes. A verdict that
+    exists fires its own outcome before this function runs. So a review tick that
+    gets here has no verdict, and no stall to prove.
     """
+    if current == PHASE_REVIEW:
+        return None, ""
     facts = []
     path = checklist_path(worktree, item)
     try:
@@ -476,7 +491,7 @@ def transition(item, worktree, current, bodies, rounds, pattern, stall_after):
         )
     pid, name, _ = found
 
-    newest, source = newest_work_product(worktree, item)
+    newest, source = newest_work_product(worktree, item, current)
     if newest is not None:
         age = time.time() - newest
         if age > stall_after:
@@ -486,6 +501,8 @@ def transition(item, worktree, current, bodies, rounds, pattern, stall_after):
                 f"of {human(stall_after)}"
             )
         freshness = f"its work product is {human(age)} old"
+    elif current == PHASE_REVIEW:
+        freshness = "no Verdict: comment dates its work yet, so no stall can be proven"
     else:
         freshness = "it has no work product yet"
 
