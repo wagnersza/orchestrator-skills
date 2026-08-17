@@ -668,6 +668,65 @@ class WorkerStateTestCase(unittest.TestCase):
         self.assertTrue(default.startswith("proof-complete:"), default)
         self.assertTrue(self.marker("proof-complete").is_file())
 
+    def test_the_glab_reads_carry_the_host_where_each_one_needs_it(self):
+        """Two reads, two places for the host. A bare owner/name in the API path
+        resolves against the CLI's default server, which is the fault this closes.
+        The stub CLI records the argv, so neither CLI has to be installed."""
+        log = self.fake_cli(
+            "glab",
+            issue={"labels": ["in-progress", "phase:review"]},
+            api=[{"body": "Verdict: approve"}],
+        )
+
+        line = self.tick(
+            "--tracker-cli",
+            "glab",
+            "--tracker-host",
+            "gitlab.example.com",
+            "--repo",
+            "team/thing",
+            fixture=False,
+            expect=EXIT_DUE,
+        )
+
+        self.assertTrue(line.startswith("verdict-approve:"), line)
+        self.assertEqual(
+            log.read_text().splitlines(),
+            [
+                f"issue view {ITEM} -F json -R gitlab.example.com/team/thing",
+                f"api projects/team%2Fthing/issues/{ITEM}/notes "
+                "--hostname gitlab.example.com",
+            ],
+        )
+
+    def test_the_gh_argv_is_unchanged_and_grows_no_host_flag(self):
+        """The default tracker reads exactly what it read before these arguments
+        existed, host or no host. So a caller that passes neither one cannot notice
+        that the other builder exists."""
+        log = self.fake_cli(
+            "gh",
+            issue={
+                "labels": [{"name": "phase:review"}],
+                "comments": [{"body": "Verdict: approve"}],
+            },
+        )
+        expected = f"issue view {ITEM} --json comments,labels --repo owner/name"
+
+        line = self.tick("--repo", "owner/name", fixture=False, expect=EXIT_DUE)
+        self.assertTrue(line.startswith("verdict-approve:"), line)
+
+        self.tick(
+            "--repo",
+            "owner/name",
+            "--tracker-cli",
+            "gh",
+            "--tracker-host",
+            "github.example.com",
+            fixture=False,
+            expect=EXIT_DUE,
+        )
+        self.assertEqual(log.read_text().splitlines(), [expected, expected])
+
     def test_durations_are_arguments_so_no_test_waits_for_a_real_window(self):
         """Both units and a bare number of seconds mean the same window, and a bad
         one is a usage error rather than a quiet tick."""

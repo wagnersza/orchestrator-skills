@@ -88,6 +88,13 @@ worker's role:
   verdict, and no stall can be proven. `dead` is the reviewer's signal instead, and
   it needs no window.
 
+**The tracker CLI is an argument.** `--tracker-cli` picks which command reads the
+labels and the comments. `--tracker-host` names the server where the tracker is
+self-hosted. The caller resolves both from `docs/agents/issue-tracker.md`, the same
+way it resolves every other configuration value. So this seam names a tracker in its
+two argv builders and nowhere else. A project on the other tracker then needs no
+wrapper script outside this repo.
+
 **What this seam refuses to do.** It composes no prompt, kills no process, writes
 no label, moves no card and spawns nothing. Every destructive act stays in a
 session a human can interrupt. It holds no state that changes an answer, which is
@@ -148,12 +155,11 @@ UNITS = {"s": 1, "m": 60, "h": 3600}
 # the default for `--marker-dir`.
 ORCHESTRATOR_DIR = ".orchestrator"
 
-# ponytail: `gh` is hardcoded, so a verdict is read from GitHub and from no other
-# tracker — the same ceiling `scripts/close_item.py` names, and the same upgrade
-# path: swap the one command below for its `glab` equivalent, or put a
-# `--tracker-cli` argument in front of it. Nothing above it changes, because the
-# tick does not know which CLI ran.
+# The two tracker CLIs a caller can pass to `--tracker-cli`. Each one has its own
+# argv builder below, and those two functions are the only place in this file that
+# knows one tracker from the other. Everything above them reads two lists.
 GH = "gh"
+GLAB = "glab"
 
 
 def parse_duration(text):
@@ -290,11 +296,16 @@ def boxes(path):
     return sum(1 for mark in marks if mark != " "), len(marks)
 
 
-def item_facts(item, repo, fixture=None):
+def item_facts(item, repo, fixture=None, cli=GH, host=""):
     """The two tracker facts about a work item: `(labels, comment bodies)`.
 
-    One read, because a **Phase** tick needs both. A fixture file (`--gh-fixture`)
-    is how the tests fire a verdict and a phase with no network and no `gh` login.
+    One call, because a **Phase** tick needs both. `--tracker-cli` picks which
+    builder below runs, and a read that fails raises `TrackerError` for the
+    `unreadable` outcome to report.
+
+    A fixture file (`--gh-fixture`) stands in for the read itself, so the tests
+    fire a verdict and a phase with no network and no login. It stands in for
+    either tracker, because both builders answer with the same two lists.
     `scripts/close_item.py` takes the same kind of file. It holds both facts keyed
     by item number:
 
@@ -310,22 +321,82 @@ def item_facts(item, repo, fixture=None):
             list((data.get("labels") or {}).get(str(item)) or []),
             list((data.get("comments") or {}).get(str(item)) or []),
         )
-    argv = [GH, "issue", "view", str(item), "--json", "comments,labels"]
-    if repo:
-        argv += ["--repo", repo]
+    if cli == GLAB:
+        return glab_facts(item, repo, host)
+    return gh_facts(item, repo)
+
+
+class TrackerError(RuntimeError):
+    """A tracker read failed — reported as the `unreadable` outcome, never raised
+    past `phase`."""
+
+
+def tracker_read(argv):
+    """The standard output of one tracker command, or `TrackerError`.
+
+    The part both builders share, so neither one repeats how a failure is
+    reported. The command is in the message, because the line a tick prints is
+    what a maintainer reads to fix a broken read.
+    """
     proc = subprocess.run(argv, capture_output=True, text=True)
     if proc.returncode != 0:
         raise TrackerError(f"{' '.join(argv)} failed: {proc.stderr.strip()}")
-    data = json.loads(proc.stdout or "{}")
+    return proc.stdout
+
+
+def gh_facts(item, repo):
+    """The two facts from `gh`, which reads both of them in one command."""
+    argv = [GH, "issue", "view", str(item), "--json", "comments,labels"]
+    if repo:
+        argv += ["--repo", repo]
+    data = json.loads(tracker_read(argv) or "{}")
     return (
         [entry.get("name") or "" for entry in data.get("labels") or []],
         [entry.get("body") or "" for entry in data.get("comments") or []],
     )
 
 
-class TrackerError(RuntimeError):
-    """A tracker read failed — reported as the `unreadable` outcome, never raised
-    past `phase`."""
+def glab_facts(item, repo, host):
+    """The two facts from `glab`, which reads them in two commands.
+
+    The host goes in a different place in each command. That difference is why this
+    builder exists, and not one command with a flag:
+
+    - the labels come from `glab issue view <n> -F json -R <host>/<owner>/<name>`,
+      where the host is part of the repository argument.
+    - the comments come from
+      `glab api projects/<owner>%2F<name>/issues/<n>/notes --hostname <host>`,
+      where the host is a flag and the project path carries no host at all. A bare
+      `owner/name` in that path resolves against the CLI's default server, which
+      answers 404 or `Unauthenticated` for a project it does not hold.
+
+    With no `--tracker-host` neither command names a host, so both reads go to the
+    CLI's own default server.
+    """
+    if not repo:
+        raise TrackerError(
+            "a glab read needs --repo as OWNER/NAME, because the project path is "
+            "part of both commands"
+        )
+    labels_argv = [GLAB, "issue", "view", str(item), "-F", "json"]
+    labels_argv += ["-R", f"{host}/{repo}" if host else repo]
+    notes_argv = [
+        GLAB,
+        "api",
+        f"projects/{repo.replace('/', '%2F')}/issues/{item}/notes",
+    ]
+    if host:
+        notes_argv += ["--hostname", host]
+    issue = json.loads(tracker_read(labels_argv) or "{}")
+    notes = json.loads(tracker_read(notes_argv) or "[]")
+    return (
+        # A label is a plain string on this tracker, and an object on the other one.
+        [
+            entry if isinstance(entry, str) else entry.get("name") or ""
+            for entry in issue.get("labels") or []
+        ],
+        [entry.get("body") or "" for entry in notes or []],
+    )
 
 
 def verdicts_in(bodies):
@@ -522,6 +593,8 @@ def phase(
     fixture=None,
     back_off=None,
     marker_dir=None,
+    tracker_cli=GH,
+    tracker_host="",
 ):
     """The `phase` answer: `(exit code, the one line to print)`.
 
@@ -547,7 +620,7 @@ def phase(
         return EXIT_DUE, f"{outcome}: {detail}"
 
     try:
-        labels, bodies = item_facts(item, repo, fixture)
+        labels, bodies = item_facts(item, repo, fixture, tracker_cli, tracker_host)
     except (TrackerError, OSError, json.JSONDecodeError) as exc:
         # A tick prints one line. The standard error of a failed command can hold
         # many, so the cause collapses to one.
@@ -672,6 +745,22 @@ def main(argv=None):
         "OWNER/NAME",
     )
     tick.add_argument(
+        "--tracker-cli",
+        default=GH,
+        choices=(GH, GLAB),
+        help="which CLI reads the labels and the comments. The caller resolves it "
+        "from docs/agents/issue-tracker.md. So this seam names a tracker in its two "
+        "argv builders and nowhere else",
+    )
+    tick.add_argument(
+        "--tracker-host",
+        default="",
+        metavar="HOST",
+        help="the tracker host, for a server the CLI does not reach by default. Each "
+        "read carries it in the place that read needs. With no host, every read goes "
+        "to the CLI's own default server",
+    )
+    tick.add_argument(
         "--back-off",
         metavar="DURATION",
         help="how long one outcome stays suppressed after it fires, so an "
@@ -690,8 +779,9 @@ def main(argv=None):
     )
     tick.add_argument(
         "--gh-fixture",
-        help="JSON that stands in for the label and comment read, so a verdict and a "
-        "phase need no network (used by the tests)",
+        help="JSON that stands in for any tracker read, so a verdict and a phase "
+        "need no network and no login (used by the tests). It keeps this name "
+        "because scripts/close_item.py takes the same kind of file",
     )
 
     args = parser.parse_args(argv)
@@ -722,6 +812,8 @@ def main(argv=None):
         args.gh_fixture,
         back_off,
         args.marker_dir,
+        args.tracker_cli,
+        args.tracker_host,
     )
     print(line)
     return code
