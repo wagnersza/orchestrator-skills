@@ -163,14 +163,22 @@ class WorkerStateTestCase(unittest.TestCase):
         )
         return proc.stdout.strip()
 
-    def tick(self, *extra, rounds=3, stall="4h", pattern=PROCESS_PATTERN, expect=0):
+    def tick(
+        self,
+        *extra,
+        rounds=3,
+        stall="4h",
+        pattern=PROCESS_PATTERN,
+        worktree=None,
+        expect=0,
+    ):
         """Ask the predicate once, the way an Item automation's precheck asks it."""
         return self.run_seam(
             "phase",
             "--item",
             str(ITEM),
             "--worktree",
-            str(self.worktree),
+            str(worktree or self.worktree),
             "--process",
             pattern,
             "--rounds",
@@ -183,9 +191,10 @@ class WorkerStateTestCase(unittest.TestCase):
             expect=expect,
         )
 
-    def marker(self, outcome):
+    def marker(self, outcome, directory=None):
         """Where the back-off marker for one `(item, outcome)` pair lands."""
-        return self.worktree / ".orchestrator" / f"phase-{ITEM}-{outcome}.fired"
+        base = Path(directory) if directory else self.worktree / ".orchestrator"
+        return base / f"phase-{ITEM}-{outcome}.fired"
 
     def ready(self, *extra, worktree=None, pattern=PROCESS_PATTERN, expect=0):
         return self.run_seam(
@@ -529,6 +538,40 @@ class WorkerStateTestCase(unittest.TestCase):
 
         self.assertTrue(line.startswith("dead:"), line)
         self.assertTrue(self.marker("dead").is_file())
+
+    def test_the_marker_dir_argument_holds_the_marker_outside_the_worktree(self):
+        """The watched worktree moves when a schedule follows the work item to a
+        reviewer. A marker inside that worktree moves too, so an answered wake fires
+        again from a fresh directory. One directory named by an argument fixes that."""
+        shared = self.root / "markers"
+        write(self.checklist, TICKED)
+        self.write_fixture(labels=IMPL)
+
+        first = self.tick("--back-off", "1h", "--marker-dir", str(shared), expect=EXIT_DUE)
+
+        self.assertTrue(first.startswith("implementation-complete:"), first)
+        self.assertTrue(self.marker("implementation-complete", shared).is_file())
+        self.assertFalse(self.marker("implementation-complete").exists())
+
+        # The watched worktree changes and the marker directory does not, so the
+        # answered wake stays answered.
+        other = self.root / "second-worktree"
+        shutil.copytree(self.worktree, other)
+        line = self.tick(
+            "--back-off",
+            "1h",
+            "--marker-dir",
+            str(shared),
+            worktree=other,
+            expect=EXIT_NOTHING,
+        )
+        self.assertTrue(line.startswith("suppressed:"), line)
+
+        # And with no --marker-dir the marker lands where it always did.
+        self.write_fixture(labels=E2E)
+        default = self.tick("--back-off", "1h", expect=EXIT_DUE)
+        self.assertTrue(default.startswith("proof-complete:"), default)
+        self.assertTrue(self.marker("proof-complete").is_file())
 
     def test_durations_are_arguments_so_no_test_waits_for_a_real_window(self):
         """Both units and a bare number of seconds mean the same window, and a bad

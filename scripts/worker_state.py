@@ -50,11 +50,19 @@ nothing stores a counter, and `--rounds` is the whole bound. A work item with no
 process `stalled` needs. `dead` needs no stall window, so it reports in about a
 minute (ADR 0022).
 
-`--back-off` suppresses a repeat fire of the same outcome for the same work item
-through a marker file under `.orchestrator/` in the worktree. One marker per
-`(item, outcome)` pair, so a `dead` tick is never suppressed by a
-`request-changes` fire a moment earlier. The file dies with the worktree. With no
-`--back-off` this subcommand writes nothing at all.
+`--back-off` suppresses a repeat fire of the same outcome for the same work item.
+A marker file in the directory `--marker-dir` names holds that window. One marker
+per `(item, outcome)` pair, so a `dead` tick is never suppressed by a
+`request-changes` fire a moment earlier. The default directory is
+`.orchestrator/` in the watched worktree, so a caller that passes nothing behaves
+as it did before the argument existed. With no `--back-off` this subcommand writes
+nothing at all.
+
+**The directory is an argument because the watched worktree moves.** A schedule can
+follow a work item from the implementation worktree to the reviewer's own worktree.
+The markers move with it, and an answered wake then fires again from a fresh
+directory. So the caller passes one directory that outlives every such move, and
+the markers still die with the work item.
 
 The two signals are work product, so neither can report success for a dead worker
 (ADR 0018). The item's phase names which one a tick reads, so no flag carries the
@@ -122,6 +130,11 @@ VERDICT = re.compile(
 BOX = re.compile(r"^\s*[-*+]\s*\[([ xX])\]")
 
 UNITS = {"s": 1, "m": 60, "h": 3600}
+
+# The directory a worker's own files live in, inside its worktree: the
+# **Checklist** a tick reads, and the back-off markers a fire writes. It is also
+# the default for `--marker-dir`.
+ORCHESTRATOR_DIR = ".orchestrator"
 
 # ponytail: `gh` is hardcoded, so a verdict is read from GitHub and from no other
 # tracker — the same ceiling `scripts/close_item.py` names, and the same upgrade
@@ -252,7 +265,7 @@ def ready(worktree, pattern):
 
 def checklist_path(worktree, item):
     """Where a worker's **Checklist** lives, which is its completion contract."""
-    return Path(worktree) / ".orchestrator" / f"checklist-{item}.md"
+    return Path(worktree) / ORCHESTRATOR_DIR / f"checklist-{item}.md"
 
 
 def boxes(path):
@@ -378,18 +391,19 @@ def phase_of(labels):
     return ""
 
 
-def marker_path(worktree, item, outcome):
+def marker_path(marker_dir, item, outcome):
     """Where the back-off marker for one `(item, outcome)` pair lives.
 
-    It lives inside the worktree and beside the **Checklist**, so it dies with the
-    worktree and no tool-specific run history enters the answer. One file per pair,
-    so a `dead` tick is never suppressed by a `request-changes` fire a moment
-    earlier.
+    The directory is an argument (`--marker-dir`), and its default is
+    `.orchestrator/` in the watched worktree. So the marker still dies with the
+    directory that holds it, and no tool-specific run history enters the answer. One
+    file per pair, so a `dead` tick is never suppressed by a `request-changes` fire a
+    moment earlier.
     """
-    return Path(worktree) / ".orchestrator" / f"phase-{item}-{outcome}.fired"
+    return Path(marker_dir) / f"phase-{item}-{outcome}.fired"
 
 
-def held_back(worktree, item, outcome, back_off):
+def held_back(marker_dir, item, outcome, back_off):
     """The `suppressed` line where this pair already fired inside the window, or None.
 
     A fire that is not suppressed refreshes the marker, so the window always runs
@@ -397,7 +411,7 @@ def held_back(worktree, item, outcome, back_off):
     """
     if not back_off:
         return None
-    path = marker_path(worktree, item, outcome)
+    path = marker_path(marker_dir, item, outcome)
     try:
         age = time.time() - path.stat().st_mtime
     except OSError:
@@ -483,6 +497,7 @@ def phase(
     repo="",
     fixture=None,
     back_off=None,
+    marker_dir=None,
 ):
     """The `phase` answer: `(exit code, the one line to print)`.
 
@@ -496,6 +511,8 @@ def phase(
         return EXIT_GONE, (
             f"gone: there is no worktree at {worktree} — nothing left to watch"
         )
+
+    markers = Path(marker_dir) if marker_dir else worktree / ORCHESTRATOR_DIR
 
     try:
         labels, bodies = item_facts(item, repo, fixture)
@@ -523,7 +540,7 @@ def phase(
     if not outcome:
         return EXIT_NOTHING, f"nothing: {detail}"
 
-    line = held_back(worktree, item, outcome, back_off)
+    line = held_back(markers, item, outcome, back_off)
     if line:
         return EXIT_NOTHING, line
     return EXIT_DUE, f"{outcome}: {detail}"
@@ -630,8 +647,17 @@ def main(argv=None):
         metavar="DURATION",
         help="how long one outcome stays suppressed after it fires, so an "
         "unanswered wake does not repeat every minute. A marker file per "
-        "(item, outcome) pair inside the worktree holds it. With no --back-off this "
-        "subcommand writes nothing",
+        "(item, outcome) pair holds it. With no --back-off this subcommand writes "
+        "nothing",
+    )
+    tick.add_argument(
+        "--marker-dir",
+        default=None,
+        metavar="DIR",
+        help="where the --back-off marker files live. The default is .orchestrator/ "
+        "inside --worktree, so a caller that passes nothing behaves as it did before "
+        "this argument existed. Pass a directory that outlives a move of the watched "
+        "worktree. Otherwise an answered wake fires again from a fresh directory",
     )
     tick.add_argument(
         "--gh-fixture",
@@ -666,6 +692,7 @@ def main(argv=None):
         args.repo,
         args.gh_fixture,
         back_off,
+        args.marker_dir,
     )
     print(line)
     return code
