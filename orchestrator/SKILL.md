@@ -538,7 +538,7 @@ Definitions: the **Item automation** and **Phase** entries in
 [`docs/adr/0022-item-automation-replaces-the-blocking-watch.md`](docs/adr/0022-item-automation-replaces-the-blocking-watch.md).
 
 **The precheck is the seam asked as a predicate.** Exit 0 means a **Phase** transition is
-due and the printed line names which of the seven it is. Any other code means nothing to
+due and the printed line names which of the eight it is. Any other code means nothing to
 do, so a quiet minute records as a skipped run, loads no model and costs no tokens. That
 command goes into op 11's `<precheck-command>` placeholder:
 
@@ -547,11 +547,13 @@ python3 -m scripts.worker_state phase --item <N> \
   --worktree <the path from op 2> \
   --process '<the pattern from references/harnesses/<harness>.md>' \
   --rounds <config's review.rounds> --stall-after <duration> \
-  --back-off <duration> --repo <owner>/<name>
+  --back-off <duration> --repo <owner>/<name> \
+  --marker-dir <the implementation worktree from op 2>/.orchestrator \
+  --tracker-cli <gh or glab> --tracker-host <host>
 ```
 
-**Resolve the four config values once, here.** The seam parses no configuration file and
-names no harness, so the spawn is the one place they are read:
+**Resolve the seven config values once, here.** The seam parses no configuration file, and
+it names no harness and no tracker. So the spawn is the one place they are read:
 
 | Value | Where you read it | What it decides |
 |---|---|---|
@@ -559,8 +561,11 @@ names no harness, so the spawn is the one place they are read:
 | the proof-phase gate | a non-blank `run_recipe`, or an `evidence` bar that asks for UI proof | whether this item can ever reach `phase:e2e` — see [The proof phase](#the-proof-phase) |
 | the harness process pattern | `references/harnesses/<harness>.md` | what the `dead` outcome looks for |
 | the stall window | longer than the item's slowest single step, so a worker thinking hard is never read as stalled | when `stalled` fires |
+| the marker directory | the item's implementation worktree (op 2), plus `/.orchestrator` | where a back-off marker lives, and what it outlives |
+| the tracker CLI | `docs/agents/issue-tracker.md` | which command reads the labels and the comments |
+| the tracker host | `docs/agents/issue-tracker.md`, where the tracker is self-hosted | which server those reads go to |
 
-Three of the four are flags on the command above. **The proof-phase gate is not.** The
+Six of the seven are flags on the command above. **The proof-phase gate is not.** The
 item's own `phase:*` label is what gates that outcome. So the gate decides which label this
 session writes when the implementation finishes, and the seam reads that label.
 It is the same gate the Browser-surface preflight uses, so the two cannot disagree about
@@ -570,6 +575,17 @@ when a proof phase applies.
 not queue sixty prompts in an hour. Pick a window at least as long as a fix round takes.
 `--repo` is the tracker repository as `OWNER/NAME`, read from
 `docs/agents/issue-tracker.md`.
+
+**`--marker-dir` is where those back-off markers live, and it is an argument because the
+watched worktree can change.** A reviewer reads the diff in its own worktree. A schedule
+that follows the live worker takes the default directory with it, and an answered wake then
+fires again from a fresh directory. Pass the item's implementation worktree instead. It
+lives until step 8 of the **Close transaction** removes it, so the markers still die with
+the work item.
+
+**`--tracker-cli` and `--tracker-host` are the tracker read.** `gh` on github.com is the
+default and needs no host, so this repo passes neither flag. A self-hosted GitLab needs
+both, and it then needs no wrapper script outside this repo.
 
 **The relay carries no judgement.** Op 11 also takes a `--prompt` and a `--provider`, so
 a tick that the precheck lets through runs a bounded agent. That agent relays and does
@@ -623,7 +639,7 @@ are the whole of monitoring on a tool with no automation surface.
 ## On the wake — one response per outcome
 
 A tick wakes this session with the one line its precheck printed, and that line names one
-of seven outcomes. **The response is a lookup, not an interpretation.** Read the outcome,
+of eight outcomes. **The response is a lookup, not an interpretation.** Read the outcome,
 run its row, and report per [Reporting to the user](#reporting-to-the-user).
 
 **Write the `phase:*` label as the first act of every transition.** That write is what
@@ -641,17 +657,22 @@ label moves no card ([Board status](#board-status)).
 | `rounds-exhausted` | remove `phase:review` | Step 4 again — "after the last round regardless". The bound is spent, so offer no further round |
 | `dead` | nothing, because the item stays in the phase it is in | Report, and **never re-prompt** — below |
 | `stalled` | nothing, for the same reason | Reset the context and re-prompt — below |
+| `unreadable` | nothing, because a read that failed cannot say which phase the item is in | Report in one line: the tracker read is broken, and the item is unobserved until that read works again |
 
 **The item's phase is what makes the response a lookup.** The seam reads that label to
-decide which outcomes a tick can reach. So `implementation-complete` and `verdict-approve`
-can never arrive for one item on the same minute. The on-demand door
-(`review #N adversarially`) is unchanged, and it writes `phase:review` itself.
+decide which of the seven gated outcomes a tick can reach. So `implementation-complete` and
+`verdict-approve` can never arrive for one item on the same minute. `unreadable` is the
+eighth, and no label gates it: the read that failed is the read that carries the label.
+The on-demand door (`review #N adversarially`) is unchanged, and it writes `phase:review`
+itself.
 
-**Three rows write no label, because they are not phase transitions.** ADR 0021 rejected a
+**Four rows write no label, because they are not phase transitions.** ADR 0021 rejected a
 `phase:fix` value, so a fix round stays inside `phase:review`. And `dead` and `stalled` say
-something about the worker rather than about the phase. Nothing acknowledges those three
-wakes, so `--back-off` is what stops a repeat every minute. **A repeat that carries the same
-round number, or the same checklist position, is a wake you already answered.** Say so in
+something about the worker rather than about the phase. `unreadable` says something about
+the tracker read, and a fact the tick never read cannot decide a label. Nothing
+acknowledges those four wakes, so `--back-off` is what stops a repeat every minute.
+**A repeat that carries the same round
+number, or the same checklist position, is a wake you already answered.** Say so in
 one line and do nothing. That stays a lookup, because the line carries both facts.
 
 **`dead` — a re-prompt cannot work, so nothing re-prompts.** No live agent process has its
@@ -972,8 +993,8 @@ it. Shape output for acting on, not for completeness:
   user to remember any of the three.
 - **A wake report names the outcome and the transition that ran.** The outcome is the
   tick's own word: `implementation-complete`, `proof-complete`, `verdict-approve`,
-  `verdict-request-changes`, `rounds-exhausted`, `dead` or `stalled`. Then the phase
-  label you wrote, then what you did. `#38 implementation-complete · phase:impl →
+  `verdict-request-changes`, `rounds-exhausted`, `dead`, `stalled` or `unreadable`. Then
+  the phase label you wrote, then what you did. `#38 implementation-complete · phase:impl →
   phase:review. Reviewer spawned, gpt-5.6-terra @ high.`
 - **Both counts come from the tracker, so restate both.**
   [On the wake](#on-the-wake--one-response-per-outcome) says how to read each one.
