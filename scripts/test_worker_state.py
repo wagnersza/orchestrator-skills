@@ -6,9 +6,16 @@ Every case runs `python3 -m scripts.worker_state` as a subprocess against a real
 worktree in a temp directory. Each one asserts on the exit code and the printed
 line, which are the two things a caller consumes. No mock of `subprocess`, no
 assertion about which internal function ran. No network and no agent run:
-`--gh-fixture` stands in for the label and comment read, so `gh` is never called.
-`GIT_CONFIG_GLOBAL` and `GIT_CONFIG_SYSTEM` point at `os.devnull`, so the
+`--gh-fixture` stands in for the label and comment read, so no tracker CLI is
+called. `GIT_CONFIG_GLOBAL` and `GIT_CONFIG_SYSTEM` point at `os.devnull`, so the
 developer's git config cannot leak into a fixture.
+
+The cases that assert the argv of a tracker read need a real command. Each one puts
+a fake CLI of that name on `PATH` (`fake_cli`). It records the argv it received and
+prints canned JSON. That keeps the black-box shape of every other case: the seam
+runs the command it built, and the assertion is on what the command received.
+Neither CLI has to be installed. `PATH` starts with that directory for every case,
+so no case here can reach a real `gh` or `glab` by accident.
 
 `ready` is tested with a real process: a short-lived `python3` child whose working
 directory is the temp worktree. That is what makes the process check credible
@@ -114,6 +121,12 @@ class WorkerStateTestCase(unittest.TestCase):
         write(self.checklist, UNTICKED)
         self.write_fixture()
 
+        # A stub CLI written here wins over an installed one, so no case can reach
+        # a real tracker.
+        self.bin = self.root / "bin"
+        self.bin.mkdir()
+        self.env = {**GIT_ENV, "PATH": f"{self.bin}{os.pathsep}{os.environ['PATH']}"}
+
     # --- fixture helpers ----------------------------------------------------
 
     def write_fixture(self, comments=(), labels=()):
@@ -127,6 +140,34 @@ class WorkerStateTestCase(unittest.TestCase):
                 }
             )
         )
+
+    def break_fixture(self):
+        """Make the tracker read fail, the way a lost login or a broken CLI does."""
+        self.fixture = self.root / "no-such-fixture.json"
+
+    def fake_cli(self, name, **payloads):
+        """A tracker CLI of `name` on `PATH`, and the file it logs its argv to.
+
+        Each keyword is a first argument the seam can send (`issue`, `api`), and
+        its value is the JSON that command prints. A command with no payload exits
+        non-zero, which is how a case fires a failed read.
+        """
+        log = self.root / f"{name}.argv"
+        cases = "\n".join(
+            f"  {first}) printf '%s' '{json.dumps(payload)}' ;;"
+            for first, payload in payloads.items()
+        )
+        script = self.bin / name
+        script.write_text(
+            "#!/bin/sh\n"
+            f"printf '%s\\n' \"$*\" >> '{log}'\n"
+            'case "$1" in\n'
+            f"{cases}\n"
+            "  *) echo 'stub: no payload for this command' >&2; exit 9 ;;\n"
+            "esac\n"
+        )
+        script.chmod(0o755)
+        return log
 
     def backdate(self, seconds):
         """Age both freshness facts, so a stall needs no real waiting.
@@ -153,7 +194,7 @@ class WorkerStateTestCase(unittest.TestCase):
             cwd=REPO_ROOT,
             capture_output=True,
             text=True,
-            env=GIT_ENV,
+            env=self.env,
         )
         self.assertEqual(proc.returncode, expect, f"stdout: {proc.stdout}")
         self.assertLessEqual(
@@ -163,29 +204,42 @@ class WorkerStateTestCase(unittest.TestCase):
         )
         return proc.stdout.strip()
 
-    def tick(self, *extra, rounds=3, stall="4h", pattern=PROCESS_PATTERN, expect=0):
-        """Ask the predicate once, the way an Item automation's precheck asks it."""
+    def tick(
+        self,
+        *extra,
+        rounds=3,
+        stall="4h",
+        pattern=PROCESS_PATTERN,
+        worktree=None,
+        fixture=True,
+        expect=0,
+    ):
+        """Ask the predicate once, the way an Item automation's precheck asks it.
+
+        `fixture=False` drops `--gh-fixture`, so the tick makes a real tracker read
+        against whichever stub CLI the case put on `PATH`.
+        """
         return self.run_seam(
             "phase",
             "--item",
             str(ITEM),
             "--worktree",
-            str(self.worktree),
+            str(worktree or self.worktree),
             "--process",
             pattern,
             "--rounds",
             str(rounds),
             "--stall-after",
             stall,
-            "--gh-fixture",
-            str(self.fixture),
+            *(("--gh-fixture", str(self.fixture)) if fixture else ()),
             *extra,
             expect=expect,
         )
 
-    def marker(self, outcome):
+    def marker(self, outcome, directory=None):
         """Where the back-off marker for one `(item, outcome)` pair lands."""
-        return self.worktree / ".orchestrator" / f"phase-{ITEM}-{outcome}.fired"
+        base = Path(directory) if directory else self.worktree / ".orchestrator"
+        return base / f"phase-{ITEM}-{outcome}.fired"
 
     def ready(self, *extra, worktree=None, pattern=PROCESS_PATTERN, expect=0):
         return self.run_seam(
@@ -468,6 +522,33 @@ class WorkerStateTestCase(unittest.TestCase):
         self.assertTrue(line.startswith("dead:"), line)
         self.assertNotIn("stalled", line)
 
+    def test_a_reviewer_is_never_stalled_by_the_commit_it_inherited(self):
+        """A reviewer's worktree holds the implementation's commit and checklist, so
+        both are already stale on its first minute. In `phase:review` the seam reads
+        neither one, and the freshness fact is the newest `Verdict:` comment. With no
+        verdict, no stall can be proven, so a long first read is a quiet tick."""
+        self.write_fixture(labels=REVIEW)
+        self.backdate(3600)
+        child = self.child_in(self.worktree)
+
+        line = self.tick(stall="30m", expect=EXIT_NOTHING)
+
+        self.assertTrue(line.startswith("nothing:"), line)
+        self.assertNotIn("stalled", line)
+        self.assertIn("no Verdict: comment yet", line)
+        # The same stale state in the implementation phase is a stall, which is what
+        # makes this the phase's rule and not a dropped signal.
+        self.write_fixture(labels=IMPL)
+        self.assertTrue(self.tick(stall="30m", expect=EXIT_DUE).startswith("stalled:"))
+
+        # And dropping the stall clock costs no coverage of the failure that
+        # matters: a reviewer with no live process is dead, with no window elapsed.
+        self.write_fixture(labels=REVIEW)
+        self.stop(child)
+        dead = self.tick(stall="4h", expect=EXIT_DUE)
+        self.assertTrue(dead.startswith("dead:"), dead)
+        self.assertIn("phase:review", dead)
+
     def test_a_quiet_minute_is_nothing_to_do(self):
         """The common case, and the one that must cost no tokens."""
         self.write_fixture(labels=IMPL)
@@ -530,6 +611,122 @@ class WorkerStateTestCase(unittest.TestCase):
         self.assertTrue(line.startswith("dead:"), line)
         self.assertTrue(self.marker("dead").is_file())
 
+    def test_an_unreadable_tracker_read_is_an_outcome_and_not_a_silence(self):
+        """21 failed reads looked like 21 quiet minutes, because a failed read exited
+        1. It is an outcome now, and no phase label gates it: a read that failed
+        cannot say which phase the item is in. The back-off holds it like any
+        other, so one broken read costs one report per window."""
+        self.break_fixture()
+
+        line = self.tick("--back-off", "1h", expect=EXIT_DUE)
+
+        self.assertTrue(line.startswith("unreadable:"), line)
+        self.assertIn(f"#{ITEM}", line)
+        held = self.tick("--back-off", "1h", expect=EXIT_NOTHING)
+        self.assertTrue(held.startswith("suppressed:"), held)
+        self.assertIn("unreadable", held)
+
+        # The same outcome for the fault that fired it live: the tracker CLI itself
+        # failed, so the line carries the command that failed.
+        self.fake_cli("gh")
+        broken = self.tick("--repo", "owner/name", fixture=False, expect=EXIT_DUE)
+        self.assertTrue(broken.startswith("unreadable:"), broken)
+        self.assertIn("gh issue view", broken)
+        self.assertEqual(len(broken.splitlines()), 1, broken)
+
+    def test_the_marker_dir_argument_holds_the_marker_outside_the_worktree(self):
+        """The watched worktree moves when a schedule follows the work item to a
+        reviewer. A marker inside that worktree moves too, so an answered wake fires
+        again from a fresh directory. One directory named by an argument fixes that."""
+        shared = self.root / "markers"
+        write(self.checklist, TICKED)
+        self.write_fixture(labels=IMPL)
+
+        first = self.tick("--back-off", "1h", "--marker-dir", str(shared), expect=EXIT_DUE)
+
+        self.assertTrue(first.startswith("implementation-complete:"), first)
+        self.assertTrue(self.marker("implementation-complete", shared).is_file())
+        self.assertFalse(self.marker("implementation-complete").exists())
+
+        # The watched worktree changes and the marker directory does not, so the
+        # answered wake stays answered.
+        other = self.root / "second-worktree"
+        shutil.copytree(self.worktree, other)
+        line = self.tick(
+            "--back-off",
+            "1h",
+            "--marker-dir",
+            str(shared),
+            worktree=other,
+            expect=EXIT_NOTHING,
+        )
+        self.assertTrue(line.startswith("suppressed:"), line)
+
+        # And with no --marker-dir the marker lands where it always did.
+        self.write_fixture(labels=E2E)
+        default = self.tick("--back-off", "1h", expect=EXIT_DUE)
+        self.assertTrue(default.startswith("proof-complete:"), default)
+        self.assertTrue(self.marker("proof-complete").is_file())
+
+    def test_the_glab_reads_carry_the_host_where_each_one_needs_it(self):
+        """Two reads, two places for the host. A bare owner/name in the API path
+        resolves against the CLI's default server, which is the fault this closes.
+        The stub CLI records the argv, so neither CLI has to be installed."""
+        log = self.fake_cli(
+            "glab",
+            issue={"labels": ["in-progress", "phase:review"]},
+            api=[{"body": "Verdict: approve"}],
+        )
+
+        line = self.tick(
+            "--tracker-cli",
+            "glab",
+            "--tracker-host",
+            "gitlab.example.com",
+            "--repo",
+            "team/thing",
+            fixture=False,
+            expect=EXIT_DUE,
+        )
+
+        self.assertTrue(line.startswith("verdict-approve:"), line)
+        self.assertEqual(
+            log.read_text().splitlines(),
+            [
+                f"issue view {ITEM} -F json -R gitlab.example.com/team/thing",
+                f"api projects/team%2Fthing/issues/{ITEM}/notes "
+                "--hostname gitlab.example.com",
+            ],
+        )
+
+    def test_the_gh_argv_is_unchanged_and_grows_no_host_flag(self):
+        """The default tracker reads exactly what it read before these arguments
+        existed, host or no host. So a caller that passes neither one cannot notice
+        that the other builder exists."""
+        log = self.fake_cli(
+            "gh",
+            issue={
+                "labels": [{"name": "phase:review"}],
+                "comments": [{"body": "Verdict: approve"}],
+            },
+        )
+        expected = f"issue view {ITEM} --json comments,labels --repo owner/name"
+
+        line = self.tick("--repo", "owner/name", fixture=False, expect=EXIT_DUE)
+        self.assertTrue(line.startswith("verdict-approve:"), line)
+
+        self.tick(
+            "--repo",
+            "owner/name",
+            "--tracker-cli",
+            "gh",
+            "--tracker-host",
+            "github.example.com",
+            fixture=False,
+            expect=EXIT_DUE,
+        )
+        self.assertEqual(log.read_text().splitlines(), [expected, expected])
+
     def test_durations_are_arguments_so_no_test_waits_for_a_real_window(self):
         """Both units and a bare number of seconds mean the same window, and a bad
         one is a usage error rather than a quiet tick."""
@@ -557,7 +754,7 @@ class WorkerStateTestCase(unittest.TestCase):
         self.assertNotIn("stalled", line)
         self.assertNotEqual(EXIT_GONE, EXIT_DUE)
 
-    def test_the_seven_outcomes_exit_zero_and_every_quiet_one_does_not(self):
+    def test_the_eight_outcomes_exit_zero_and_every_quiet_one_does_not(self):
         """The whole exit-code contract in one place. A due transition is 0 whichever
         outcome fired, and the printed line names which one. No quiet outcome can
         read as a transition."""
@@ -587,6 +784,10 @@ class WorkerStateTestCase(unittest.TestCase):
         self.backdate(3600)
         due["stalled"] = self.tick(stall="30m", expect=EXIT_DUE)
 
+        self.break_fixture()
+        due["unreadable"] = self.tick(expect=EXIT_DUE)
+        self.write_fixture(labels=IMPL)
+
         self.assertEqual(
             sorted(due),
             sorted(
@@ -598,6 +799,7 @@ class WorkerStateTestCase(unittest.TestCase):
                     "rounds-exhausted",
                     "dead",
                     "stalled",
+                    "unreadable",
                 ]
             ),
         )

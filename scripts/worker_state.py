@@ -29,7 +29,7 @@ an **Item automation** runs as its `--precheck`, so it blocks on nothing:
 
 **The code is the predicate and the line is the diagnosis.** Zero means a
 transition is due, whichever one it is, so a caller reads one bit. The line names
-one of seven outcomes, and the item's own `phase:*` label decides which of them a
+one of eight outcomes, and the item's own `phase:*` label decides which of them a
 tick can reach:
 
 | Outcome | Reachable in | The fact that fires it |
@@ -40,21 +40,35 @@ tick can reach:
 | `verdict-request-changes` | `phase:review` | the newest one reads `request-changes`, inside the round bound |
 | `rounds-exhausted` | `phase:review` | `--rounds` `Verdict:` comments, and the newest one asks for changes |
 | `dead` | every phase | no live agent process with its working directory inside the worktree |
-| `stalled` | every phase | a live process, and work product older than `--stall-after` |
+| `stalled` | `phase:impl`, `phase:e2e` | a live process, and work product older than `--stall-after` |
+| `unreadable` | before the phase is read | the tracker read failed, so no fact is available |
 
 A **Review round** count is the number of `Verdict:` comments on the work item. So
 nothing stores a counter, and `--rounds` is the whole bound. A work item with no
 `phase:*` label is in human review, where nothing is due.
 
+`unreadable` is the one outcome no `phase:*` label gates, because a read that
+failed cannot say which phase the item is in. It is an outcome and not a silence:
+a broken read for 21 ticks must not look like 21 quiet minutes. It goes through
+the same back-off as every other outcome, so it reports once per window.
+
 `dead` and `stalled` can never both fire, because `dead` is the absence of the live
 process `stalled` needs. `dead` needs no stall window, so it reports in about a
 minute (ADR 0022).
 
-`--back-off` suppresses a repeat fire of the same outcome for the same work item
-through a marker file under `.orchestrator/` in the worktree. One marker per
-`(item, outcome)` pair, so a `dead` tick is never suppressed by a
-`request-changes` fire a moment earlier. The file dies with the worktree. With no
-`--back-off` this subcommand writes nothing at all.
+`--back-off` suppresses a repeat fire of the same outcome for the same work item.
+A marker file in the directory `--marker-dir` names holds that window. One marker
+per `(item, outcome)` pair, so a `dead` tick is never suppressed by a
+`request-changes` fire a moment earlier. The default directory is
+`.orchestrator/` in the watched worktree, so a caller that passes nothing behaves
+as it did before the argument existed. With no `--back-off` this subcommand writes
+nothing at all.
+
+**The directory is an argument because the watched worktree moves.** A schedule can
+follow a work item from the implementation worktree to the reviewer's own worktree.
+The markers move with it, and an answered wake then fires again from a fresh
+directory. So the caller passes one directory that outlives every such move, and
+the markers still die with the work item.
 
 The two signals are work product, so neither can report success for a dead worker
 (ADR 0018). The item's phase names which one a tick reads, so no flag carries the
@@ -64,9 +78,22 @@ worker's role:
   `.orchestrator/checklist-<item>.md` is ticked. In `phase:review`, a comment on
   the work item carries a `Verdict:` line whose value is `approve` or
   `request-changes`.
-- **stalled** — the newer of the checklist file's write time and the branch's last
-  commit time is older than `--stall-after`. This is the freshness of work
-  product, not the liveness of a shell.
+- **stalled** — in `phase:impl` and `phase:e2e`, the newer of the checklist file's
+  write time and the branch's last commit time is older than `--stall-after`. This
+  is the freshness of work product, not the liveness of a shell. In `phase:review`
+  the freshness fact is the newest `Verdict:` comment, and this seam reads no commit
+  at all. A reviewer inherits the implementation's commit, so its fresh worktree
+  starts life with work product that is already stale. A verdict that exists fires
+  its own outcome above. So a review tick that reaches the stall check has no
+  verdict, and no stall can be proven. `dead` is the reviewer's signal instead, and
+  it needs no window.
+
+**The tracker CLI is an argument.** `--tracker-cli` picks which command reads the
+labels and the comments. `--tracker-host` names the server where the tracker is
+self-hosted. The caller resolves both from `docs/agents/issue-tracker.md`, the same
+way it resolves every other configuration value. So this seam names a tracker in its
+two argv builders and nowhere else. A project on the other tracker then needs no
+wrapper script outside this repo.
 
 **What this seam refuses to do.** It composes no prompt, kills no process, writes
 no label, moves no card and spawns nothing. Every destructive act stays in a
@@ -105,7 +132,7 @@ EXIT_USAGE = 64
 EXIT_NOT_READY = 1
 
 # `phase` answers one bit too, because a `--precheck` reads one bit (ADR 0022).
-# Zero means a transition is due, whichever of the seven outcomes fired, and the
+# Zero means a transition is due, whichever of the eight outcomes fired, and the
 # printed line is what names it. Every quiet outcome shares code 1, so a tick that
 # has nothing to do records as a skipped automation run. A worktree that is gone
 # keeps code 3 here as well.
@@ -123,12 +150,16 @@ BOX = re.compile(r"^\s*[-*+]\s*\[([ xX])\]")
 
 UNITS = {"s": 1, "m": 60, "h": 3600}
 
-# ponytail: `gh` is hardcoded, so a verdict is read from GitHub and from no other
-# tracker — the same ceiling `scripts/close_item.py` names, and the same upgrade
-# path: swap the one command below for its `glab` equivalent, or put a
-# `--tracker-cli` argument in front of it. Nothing above it changes, because the
-# tick does not know which CLI ran.
+# The directory a worker's own files live in, inside its worktree: the
+# **Checklist** a tick reads, and the back-off markers a fire writes. It is also
+# the default for `--marker-dir`.
+ORCHESTRATOR_DIR = ".orchestrator"
+
+# The two tracker CLIs a caller can pass to `--tracker-cli`. Each one has its own
+# argv builder below, and those two functions are the only place in this file that
+# knows one tracker from the other. Everything above them reads two lists.
 GH = "gh"
+GLAB = "glab"
 
 
 def parse_duration(text):
@@ -252,7 +283,7 @@ def ready(worktree, pattern):
 
 def checklist_path(worktree, item):
     """Where a worker's **Checklist** lives, which is its completion contract."""
-    return Path(worktree) / ".orchestrator" / f"checklist-{item}.md"
+    return Path(worktree) / ORCHESTRATOR_DIR / f"checklist-{item}.md"
 
 
 def boxes(path):
@@ -265,11 +296,16 @@ def boxes(path):
     return sum(1 for mark in marks if mark != " "), len(marks)
 
 
-def item_facts(item, repo, fixture=None):
+def item_facts(item, repo, fixture=None, cli=GH, host=""):
     """The two tracker facts about a work item: `(labels, comment bodies)`.
 
-    One read, because a **Phase** tick needs both. A fixture file (`--gh-fixture`)
-    is how the tests fire a verdict and a phase with no network and no `gh` login.
+    One call, because a **Phase** tick needs both. `--tracker-cli` picks which
+    builder below runs, and a read that fails raises `TrackerError` for the
+    `unreadable` outcome to report.
+
+    A fixture file (`--gh-fixture`) stands in for the read itself, so the tests
+    fire a verdict and a phase with no network and no login. It stands in for
+    either tracker, because both builders answer with the same two lists.
     `scripts/close_item.py` takes the same kind of file. It holds both facts keyed
     by item number:
 
@@ -285,21 +321,82 @@ def item_facts(item, repo, fixture=None):
             list((data.get("labels") or {}).get(str(item)) or []),
             list((data.get("comments") or {}).get(str(item)) or []),
         )
-    argv = [GH, "issue", "view", str(item), "--json", "comments,labels"]
-    if repo:
-        argv += ["--repo", repo]
+    if cli == GLAB:
+        return glab_facts(item, repo, host)
+    return gh_facts(item, repo)
+
+
+class TrackerError(RuntimeError):
+    """A tracker read failed — reported as the `unreadable` outcome, never raised
+    past `phase`."""
+
+
+def tracker_read(argv):
+    """The standard output of one tracker command, or `TrackerError`.
+
+    The part both builders share, so neither one repeats how a failure is
+    reported. The command is in the message, because the line a tick prints is
+    what a maintainer reads to fix a broken read.
+    """
     proc = subprocess.run(argv, capture_output=True, text=True)
     if proc.returncode != 0:
         raise TrackerError(f"{' '.join(argv)} failed: {proc.stderr.strip()}")
-    data = json.loads(proc.stdout or "{}")
+    return proc.stdout
+
+
+def gh_facts(item, repo):
+    """The two facts from `gh`, which reads both of them in one command."""
+    argv = [GH, "issue", "view", str(item), "--json", "comments,labels"]
+    if repo:
+        argv += ["--repo", repo]
+    data = json.loads(tracker_read(argv) or "{}")
     return (
         [entry.get("name") or "" for entry in data.get("labels") or []],
         [entry.get("body") or "" for entry in data.get("comments") or []],
     )
 
 
-class TrackerError(RuntimeError):
-    """A tracker read failed — reported as no verdict yet, never raised past main."""
+def glab_facts(item, repo, host):
+    """The two facts from `glab`, which reads them in two commands.
+
+    The host goes in a different place in each command. That difference is why this
+    builder exists, and not one command with a flag:
+
+    - the labels come from `glab issue view <n> -F json -R <host>/<owner>/<name>`,
+      where the host is part of the repository argument.
+    - the comments come from
+      `glab api projects/<owner>%2F<name>/issues/<n>/notes --hostname <host>`,
+      where the host is a flag and the project path carries no host at all. A bare
+      `owner/name` in that path resolves against the CLI's default server, which
+      answers 404 or `Unauthenticated` for a project it does not hold.
+
+    With no `--tracker-host` neither command names a host, so both reads go to the
+    CLI's own default server.
+    """
+    if not repo:
+        raise TrackerError(
+            "a glab read needs --repo as OWNER/NAME, because the project path is "
+            "part of both commands"
+        )
+    labels_argv = [GLAB, "issue", "view", str(item), "-F", "json"]
+    labels_argv += ["-R", f"{host}/{repo}" if host else repo]
+    notes_argv = [
+        GLAB,
+        "api",
+        f"projects/{repo.replace('/', '%2F')}/issues/{item}/notes",
+    ]
+    if host:
+        notes_argv += ["--hostname", host]
+    issue = json.loads(tracker_read(labels_argv) or "{}")
+    notes = json.loads(tracker_read(notes_argv) or "[]")
+    return (
+        # A label is a plain string on this tracker, and an object on the other one.
+        [
+            entry if isinstance(entry, str) else entry.get("name") or ""
+            for entry in issue.get("labels") or []
+        ],
+        [entry.get("body") or "" for entry in notes or []],
+    )
 
 
 def verdicts_in(bodies):
@@ -330,7 +427,7 @@ def last_commit_time(worktree):
     return int(proc.stdout.strip())
 
 
-def newest_work_product(worktree, item):
+def newest_work_product(worktree, item, current):
     """`(timestamp, what it was)` for the freshest work product, or `(None, "")`.
 
     Two facts, and the newer one wins: the checklist file's write time and the
@@ -339,7 +436,16 @@ def newest_work_product(worktree, item):
     accepted and ADR 0022 narrows. A healthy reviewer that produces no work
     product still does not read as stalled. A dead one is reported by its absent
     process instead.
+
+    **In `phase:review` this function reads neither fact.** A reviewer's own verdict
+    is its work product, and its fresh worktree holds the implementation's commit and
+    the implementation's checklist. Both are stale on the reviewer's first minute, so
+    a long first read reported as a stall in about three minutes. A verdict that
+    exists fires its own outcome before this function runs. So a review tick that
+    gets here has no verdict, and no stall to prove.
     """
+    if current == PHASE_REVIEW:
+        return None, ""
     facts = []
     path = checklist_path(worktree, item)
     try:
@@ -378,18 +484,19 @@ def phase_of(labels):
     return ""
 
 
-def marker_path(worktree, item, outcome):
+def marker_path(marker_dir, item, outcome):
     """Where the back-off marker for one `(item, outcome)` pair lives.
 
-    It lives inside the worktree and beside the **Checklist**, so it dies with the
-    worktree and no tool-specific run history enters the answer. One file per pair,
-    so a `dead` tick is never suppressed by a `request-changes` fire a moment
-    earlier.
+    The directory is an argument (`--marker-dir`), and its default is
+    `.orchestrator/` in the watched worktree. So the marker still dies with the
+    directory that holds it, and no tool-specific run history enters the answer. One
+    file per pair, so a `dead` tick is never suppressed by a `request-changes` fire a
+    moment earlier.
     """
-    return Path(worktree) / ".orchestrator" / f"phase-{item}-{outcome}.fired"
+    return Path(marker_dir) / f"phase-{item}-{outcome}.fired"
 
 
-def held_back(worktree, item, outcome, back_off):
+def held_back(marker_dir, item, outcome, back_off):
     """The `suppressed` line where this pair already fired inside the window, or None.
 
     A fire that is not suppressed refreshes the marker, so the window always runs
@@ -397,7 +504,7 @@ def held_back(worktree, item, outcome, back_off):
     """
     if not back_off:
         return None
-    path = marker_path(worktree, item, outcome)
+    path = marker_path(marker_dir, item, outcome)
     try:
         age = time.time() - path.stat().st_mtime
     except OSError:
@@ -455,7 +562,7 @@ def transition(item, worktree, current, bodies, rounds, pattern, stall_after):
         )
     pid, name, _ = found
 
-    newest, source = newest_work_product(worktree, item)
+    newest, source = newest_work_product(worktree, item, current)
     if newest is not None:
         age = time.time() - newest
         if age > stall_after:
@@ -465,6 +572,8 @@ def transition(item, worktree, current, bodies, rounds, pattern, stall_after):
                 f"of {human(stall_after)}"
             )
         freshness = f"its work product is {human(age)} old"
+    elif current == PHASE_REVIEW:
+        freshness = "no Verdict: comment dates its work yet, so no stall can be proven"
     else:
         freshness = "it has no work product yet"
 
@@ -483,13 +592,17 @@ def phase(
     repo="",
     fixture=None,
     back_off=None,
+    marker_dir=None,
+    tracker_cli=GH,
+    tracker_host="",
 ):
     """The `phase` answer: `(exit code, the one line to print)`.
 
     A worktree that is gone is answered first, so a torn-down worker is never
-    reported as a stall. The **Phase** label comes next, because it decides which
-    outcomes this tick can reach. A tracker read that fails reports nothing to do. So
-    a read that fails once costs a late report and never a wrong transition.
+    reported as a stall. A tracker read that fails comes next, and it is the
+    `unreadable` outcome. No phase label gates that outcome, because a read that
+    failed cannot say which phase the item is in. The **Phase** label follows,
+    because it decides which of the other outcomes this tick can reach.
     """
     worktree = Path(os.path.realpath(worktree))
     if not worktree.is_dir():
@@ -497,17 +610,25 @@ def phase(
             f"gone: there is no worktree at {worktree} — nothing left to watch"
         )
 
+    markers = Path(marker_dir) if marker_dir else worktree / ORCHESTRATOR_DIR
+
+    def fire(outcome, detail):
+        """One fire, through the back-off window every outcome shares."""
+        line = held_back(markers, item, outcome, back_off)
+        if line:
+            return EXIT_NOTHING, line
+        return EXIT_DUE, f"{outcome}: {detail}"
+
     try:
-        labels, bodies = item_facts(item, repo, fixture)
+        labels, bodies = item_facts(item, repo, fixture, tracker_cli, tracker_host)
     except (TrackerError, OSError, json.JSONDecodeError) as exc:
-        print(
-            f"warning: the labels and comments on work item #{item} are unreadable, "
-            f"so this tick reports nothing to do: {exc}",
-            file=sys.stderr,
-        )
-        return EXIT_NOTHING, (
-            f"nothing: the labels and comments on work item #{item} are unreadable, "
-            f"so no transition can be read"
+        # A tick prints one line. The standard error of a failed command can hold
+        # many, so the cause collapses to one.
+        cause = " ".join(str(exc).split())
+        return fire(
+            "unreadable",
+            f"the labels and comments on work item #{item} are unreadable, so this "
+            f"tick can read no transition and the item is unobserved: {cause}",
         )
 
     current = phase_of(labels)
@@ -522,11 +643,7 @@ def phase(
     )
     if not outcome:
         return EXIT_NOTHING, f"nothing: {detail}"
-
-    line = held_back(worktree, item, outcome, back_off)
-    if line:
-        return EXIT_NOTHING, line
-    return EXIT_DUE, f"{outcome}: {detail}"
+    return fire(outcome, detail)
 
 
 # --- CLI --------------------------------------------------------------------
@@ -584,12 +701,14 @@ def main(argv=None):
         description=(
             "The predicate an Item automation runs as its --precheck. Exit 0 means a "
             "transition is due, and the printed line names which one. There are "
-            "seven: implementation-complete, proof-complete, verdict-approve, "
-            "verdict-request-changes, rounds-exhausted, dead, stalled. Exit 1 means "
-            "nothing to do, so the run records as skipped at no token cost. Exit 3 "
-            "means the worktree is gone. The item's own phase:* label decides which "
-            "outcomes a tick can reach. An item with no phase:* label is in human "
-            "review, where nothing is due."
+            "eight: implementation-complete, proof-complete, verdict-approve, "
+            "verdict-request-changes, rounds-exhausted, dead, stalled, unreadable. "
+            "Exit 1 means nothing to do, so the run records as skipped at no token "
+            "cost. Exit 3 means the worktree is gone. The item's own phase:* label "
+            "decides which outcomes a tick can reach. An item with no phase:* label "
+            "is in human review, where nothing is due. The one outcome no label "
+            "gates is unreadable, because a read that failed cannot say which phase "
+            "the item is in."
         ),
     )
     tick.add_argument("--item", required=True, type=int, help="the work item number")
@@ -626,17 +745,43 @@ def main(argv=None):
         "OWNER/NAME",
     )
     tick.add_argument(
+        "--tracker-cli",
+        default=GH,
+        choices=(GH, GLAB),
+        help="which CLI reads the labels and the comments. The caller resolves it "
+        "from docs/agents/issue-tracker.md. So this seam names a tracker in its two "
+        "argv builders and nowhere else",
+    )
+    tick.add_argument(
+        "--tracker-host",
+        default="",
+        metavar="HOST",
+        help="the tracker host, for a server the CLI does not reach by default. Each "
+        "read carries it in the place that read needs. With no host, every read goes "
+        "to the CLI's own default server",
+    )
+    tick.add_argument(
         "--back-off",
         metavar="DURATION",
         help="how long one outcome stays suppressed after it fires, so an "
         "unanswered wake does not repeat every minute. A marker file per "
-        "(item, outcome) pair inside the worktree holds it. With no --back-off this "
-        "subcommand writes nothing",
+        "(item, outcome) pair holds it. With no --back-off this subcommand writes "
+        "nothing",
+    )
+    tick.add_argument(
+        "--marker-dir",
+        default=None,
+        metavar="DIR",
+        help="where the --back-off marker files live. The default is .orchestrator/ "
+        "inside --worktree, so a caller that passes nothing behaves as it did before "
+        "this argument existed. Pass a directory that outlives a move of the watched "
+        "worktree. Otherwise an answered wake fires again from a fresh directory",
     )
     tick.add_argument(
         "--gh-fixture",
-        help="JSON that stands in for the label and comment read, so a verdict and a "
-        "phase need no network (used by the tests)",
+        help="JSON that stands in for any tracker read, so a verdict and a phase "
+        "need no network and no login (used by the tests). It keeps this name "
+        "because scripts/close_item.py takes the same kind of file",
     )
 
     args = parser.parse_args(argv)
@@ -666,6 +811,9 @@ def main(argv=None):
         args.repo,
         args.gh_fixture,
         back_off,
+        args.marker_dir,
+        args.tracker_cli,
+        args.tracker_host,
     )
     print(line)
     return code
