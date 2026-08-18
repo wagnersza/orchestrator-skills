@@ -13,9 +13,17 @@ orca worktree list --json | python3 -c "import json,sys;print('EXISTS' if any(w[
 One call cuts the branch, checks it out, runs the repo setup hook, and opens a terminal. Let the setup hook run — do **not** pass `--setup skip`; the worker needs deps installed.
 
 ```bash
-CJSON=$(orca worktree create --repo name:<repo> --name "$SLUG" --base-branch <base> --no-parent --json)
+CJSON=$(orca worktree create --repo name:<repo> --name "$SLUG" --issue <N> --base-branch <base> --no-parent --json)
 WT=$(echo "$CJSON" | python3 -c "import json,sys;print(json.load(sys.stdin)['result']['worktree']['id'])")
 ```
+
+`$SLUG` is `<N>-<slug>`, so the name begins with the work-item number. `--issue <N>`
+records the same work item in Orca metadata. So the link lives outside the name. The
+flag surface is `--issue <number|null>  Linked GitHub issue number`. The display name
+stays `$SLUG`, so operations 1, 8 and 9 match on it unchanged.
+
+The flag links a GitHub issue only. Where the tracker is not GitHub, omit the flag. The
+slug still carries the number.
 
 Stacking on another worktree's branch: pass `--base-branch <that-branch>` and `--parent-worktree` instead of `--no-parent`.
 
