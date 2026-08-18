@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Answer what the **Worker watch** asks about one worker, in two subcommands.
+"""Answer what the **Worker watch** asks about one worker, in three subcommands.
 
 Each one is the same question at a different moment. *Is a real agent at work in
 this worktree, and does that work need a decision now?* Readiness asks it before
 the first prompt. The phase predicate asks it once per **Item automation** tick.
-One seam answers both, for every tool and every harness (ADR 0019).
+The wake asks it and delivers the answer. One seam answers all three, for every
+tool and every harness (ADR 0019).
 
 **`ready`** — is a live agent process running with its working directory inside
 this worktree? Exit 0 ready, non-zero not:
@@ -92,8 +93,46 @@ worker's role:
 labels and the comments. `--tracker-host` names the server where the tracker is
 self-hosted. The caller resolves both from `docs/agents/issue-tracker.md`, the same
 way it resolves every other configuration value. So this seam names a tracker in its
-two argv builders and nowhere else. A project on the other tracker then needs no
+argv builders and nowhere else. A project on the other tracker then needs no
 wrapper script outside this repo.
+
+**`wake`** — the whole body of a tick. It asks the same `phase` predicate, and on a
+due transition it delivers that printed line itself:
+
+    python3 -m scripts.worker_state wake --item 62 \\
+        <every phase flag above> \\
+        --handle '<the orchestrator terminal, from operation 9>' \\
+        --title orchestrator \\
+        --send-command '<operation 4, with {target} and {text} in it>'
+
+| Code | Meaning |
+|---|---|
+| 4 | delivered — the printed line names the target that took it |
+| 5 | no target took the wake, and the seam prints every failure |
+| 1 or 3 | what the predicate answered, so there was nothing to deliver |
+
+**No path exits 0.** An **Item automation** starts its agent on exit 0 alone, so
+every tick records as skipped and the schedule's own prompt and provider never
+load. No agent runs on a tick. The only tokens the loop spends are the ones the
+**Orchestrator** session spends when it answers a wake (ADR 0027).
+
+There are three targets, in this order. The first one that succeeds ends the
+delivery:
+
+1. **the terminal handle** (`--handle`), which the caller resolves at spawn.
+2. **the terminal title** (`--title`), for a caller that resolved no handle.
+3. **a comment on the work item**, through `--tracker-cli`. So a transition is
+   recorded late rather than lost (ADR 0022, ADR 0024).
+
+`--send-command` is the template the first two targets use. The caller resolves it
+from the tool file's operation 4, so this seam names no tool. `{target}` is where
+the terminal goes and `{text}` is where the line goes. This seam splits the
+template into arguments before it writes either one in. So no shell reads the line,
+and a wake that carries a quote or a space stays one argument.
+
+**Delivery is not action.** The line this seam sends is the line it printed, and
+nothing in it was decided here. Every prohibition below holds for `wake` exactly as
+it holds for `phase`.
 
 **What this seam refuses to do.** It composes no prompt, kills no process, writes
 no label, moves no card and spawns nothing. Every destructive act stays in a
@@ -112,6 +151,7 @@ import argparse
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 import time
@@ -139,6 +179,19 @@ EXIT_NOT_READY = 1
 EXIT_DUE = 0
 EXIT_NOTHING = 1
 
+# `wake` is that same predicate plus the delivery of the line it printed, so no path
+# through it can exit 0. Exit 0 is what loads an **Item automation**'s provider, and
+# an agent on a tick is the cost this subcommand removes (ADR 0027). A delivered wake
+# and an undelivered one both exit non-zero, and they carry different codes because
+# that difference is the first fact a maintainer needs from a run history.
+EXIT_DELIVERED = 4
+EXIT_UNDELIVERED = 5
+
+# The two placeholders `--send-command` carries. The caller resolves that template
+# from the tool file's operation 4, so this seam names no tool.
+TARGET_TOKEN = "{target}"
+TEXT_TOKEN = "{text}"
+
 # The literal the review prompt writes and this seam reads. It is quoted in both
 # places, so a writing pass leaves it byte-identical (ADR 0018).
 VERDICT_VALUES = ("approve", "request-changes")
@@ -156,8 +209,10 @@ UNITS = {"s": 1, "m": 60, "h": 3600}
 ORCHESTRATOR_DIR = ".orchestrator"
 
 # The two tracker CLIs a caller can pass to `--tracker-cli`. Each one has its own
-# argv builder below, and those two functions are the only place in this file that
-# knows one tracker from the other. Everything above them reads two lists.
+# argv builders below, and those three functions are the only place in this file that
+# knows one tracker from the other: two of them read the labels and the comments, and
+# the third posts one comment as the last wake target. Everything else reads two
+# lists.
 GH = "gh"
 GLAB = "glab"
 
@@ -646,6 +701,139 @@ def phase(
     return fire(outcome, detail)
 
 
+# --- the wake (ADR 0027) ----------------------------------------------------
+
+
+def comment_argv(item, body, repo, cli=GH, host=""):
+    """The argv that posts one comment on a work item, which is wake target three.
+
+    One builder per tracker, for the same reason the two reads above have one each:
+    the flag that carries the message differs, and so does the place the host goes.
+    One CLI takes an optional repository, and falls back to the one the working
+    directory holds. For the other CLI the repository is part of the command.
+    """
+    if cli == GLAB:
+        argv = [GLAB, "issue", "note", str(item), "--message", body]
+        if repo:
+            argv += ["-R", f"{host}/{repo}" if host else repo]
+        return argv
+    argv = [GH, "issue", "comment", str(item), "--body", body]
+    if repo:
+        argv += ["--repo", repo]
+    return argv
+
+
+def send_argv(template, target, text):
+    """The argv for one send: the template split, then its placeholders filled.
+
+    The split runs before the substitution, so a wake line that carries a space, a
+    quote or a `$` stays one argument. Nothing here reaches a shell.
+    """
+    return [
+        token.replace(TARGET_TOKEN, target).replace(TEXT_TOKEN, text)
+        for token in shlex.split(template)
+    ]
+
+
+def attempt(argv):
+    """None where this command succeeded, or the one line that says why it did not."""
+    try:
+        proc = subprocess.run(argv, capture_output=True, text=True)
+    except OSError as exc:
+        return f"{argv[0]} did not start: {exc}"
+    if proc.returncode == 0:
+        return None
+    cause = " ".join(proc.stderr.split()) or "it printed nothing"
+    return f"{argv[0]} exited {proc.returncode}: {cause}"
+
+
+def wake_targets(line, item, handle, title, send_command, repo, cli, host):
+    """The wake targets in order, as `(what it is, argv)` pairs.
+
+    The terminal handle first, because the tool issued it and no display string can
+    move it. The terminal title second, for a caller that resolved no handle. A
+    comment on the work item last, so a transition is recorded late rather than lost
+    (ADR 0024). A target with nothing to address stays out of the list. So a caller
+    that passes no handle costs no failed send.
+    """
+    found = []
+    for what, target in (
+        ("the terminal handle", handle),
+        ("the terminal title", title),
+    ):
+        if send_command and target:
+            found.append((f"{what} {target}", send_argv(send_command, target, line)))
+    found.append(
+        (
+            f"a comment on work item #{item}",
+            comment_argv(item, line, repo, cli, host),
+        )
+    )
+    return found
+
+
+def deliver(line, item, handle, title, send_command, repo, cli, host):
+    """Deliver one line to the first target that succeeds.
+
+    Returns `(exit code, the lines to print)`. A delivery that fails everywhere
+    prints every failure. A maintainer who got no wake has to read why, and the three
+    causes ask for three different repairs.
+    """
+    failures = []
+    for what, argv in wake_targets(
+        line, item, handle, title, send_command, repo, cli, host
+    ):
+        why = attempt(argv)
+        if why is None:
+            return EXIT_DELIVERED, [f"delivered: {line} — {what} took it"]
+        failures.append(f"no wake to {what}: {why}")
+    return EXIT_UNDELIVERED, [f"undelivered: {line} — no target took it", *failures]
+
+
+def wake(
+    item,
+    worktree,
+    pattern,
+    rounds,
+    stall_after,
+    repo="",
+    fixture=None,
+    back_off=None,
+    marker_dir=None,
+    tracker_cli=GH,
+    tracker_host="",
+    handle="",
+    title="",
+    send_command="",
+):
+    """The `wake` answer: `(exit code, the lines to print)`.
+
+    The whole body of a tick. It asks `phase()`: the same predicate, the same eight
+    outcomes, the same order and the same `--back-off` window. Where a transition is
+    due it delivers that line itself. Where nothing is due it delivers nothing, and it
+    answers exactly what the predicate answered. No path exits 0, so no agent runs on
+    a tick (ADR 0027).
+    """
+    code, line = phase(
+        item,
+        worktree,
+        pattern,
+        rounds,
+        stall_after,
+        repo,
+        fixture,
+        back_off,
+        marker_dir,
+        tracker_cli,
+        tracker_host,
+    )
+    if code != EXIT_DUE:
+        return code, [line]
+    return deliver(
+        line, item, handle, title, send_command, repo, tracker_cli, tracker_host
+    )
+
+
 # --- CLI --------------------------------------------------------------------
 
 
@@ -662,6 +850,87 @@ class UsageExitParser(argparse.ArgumentParser):
         sys.exit(EXIT_USAGE if status else status)
 
 
+def add_tick_arguments(parser):
+    """Every flag the predicate reads, added to one subcommand.
+
+    `phase` and `wake` both take all of them, because `wake` is that predicate plus
+    a delivery. Written once, so the two can never drift apart (ADR 0027).
+    """
+    parser.add_argument("--item", required=True, type=int, help="the work item number")
+    parser.add_argument("--worktree", required=True, help="the worker's worktree")
+    parser.add_argument(
+        "--process",
+        required=True,
+        metavar="PATTERN",
+        help="a regular expression for the agent's process name. The `dead` outcome "
+        "fires when no process that matches it works inside the worktree. The caller "
+        "reads it from references/harnesses/<harness>.md, so this seam names no "
+        "harness",
+    )
+    parser.add_argument(
+        "--rounds",
+        required=True,
+        type=int,
+        metavar="N",
+        help="the Review round bound, which the caller resolves from `review.rounds` "
+        "in the Config. There is no default, so the bound is never hardcoded here",
+    )
+    parser.add_argument(
+        "--stall-after",
+        required=True,
+        metavar="DURATION",
+        help="how old the newest work product must be to count as a stall "
+        "(`45s`, `30m`, `4h`, or a bare number of seconds). Only `stalled` reads it, "
+        "because `dead` needs no window",
+    )
+    parser.add_argument(
+        "--repo",
+        default="",
+        help="the tracker repository the labels and the verdict comments sit on, as "
+        "OWNER/NAME",
+    )
+    parser.add_argument(
+        "--tracker-cli",
+        default=GH,
+        choices=(GH, GLAB),
+        help="which CLI reads the labels and the comments, and posts the wake comment "
+        "where no terminal takes it. The caller resolves it from "
+        "docs/agents/issue-tracker.md. So this seam names a tracker in its argv "
+        "builders and nowhere else",
+    )
+    parser.add_argument(
+        "--tracker-host",
+        default="",
+        metavar="HOST",
+        help="the tracker host, for a server the CLI does not reach by default. Each "
+        "read carries it in the place that read needs. With no host, every read goes "
+        "to the CLI's own default server",
+    )
+    parser.add_argument(
+        "--back-off",
+        metavar="DURATION",
+        help="how long one outcome stays suppressed after it fires, so an "
+        "unanswered wake does not repeat every minute. A marker file per "
+        "(item, outcome) pair holds it. With no --back-off this subcommand writes "
+        "nothing",
+    )
+    parser.add_argument(
+        "--marker-dir",
+        default=None,
+        metavar="DIR",
+        help="where the --back-off marker files live. The default is .orchestrator/ "
+        "inside --worktree, so a caller that passes nothing behaves as it did before "
+        "this argument existed. Pass a directory that outlives a move of the watched "
+        "worktree. Otherwise an answered wake fires again from a fresh directory",
+    )
+    parser.add_argument(
+        "--gh-fixture",
+        help="JSON that stands in for any tracker read, so a verdict and a phase "
+        "need no network and no login (used by the tests). It keeps this name "
+        "because scripts/close_item.py takes the same kind of file",
+    )
+
+
 def main(argv=None):
     parser = UsageExitParser(
         prog="python3 -m scripts.worker_state",
@@ -669,7 +938,8 @@ def main(argv=None):
             "Answer what the Worker watch asks about one worker: is a live agent "
             "process at work in this worktree, and is a Phase transition due for its "
             "work item. Reports and never acts — it composes no prompt, kills no "
-            "process, writes no label and spawns nothing."
+            "process, writes no label and spawns nothing. Its wake delivers the line "
+            "it printed, and every decision stays with the session that reads it."
         ),
     )
     subcommands = parser.add_subparsers(dest="command", required=True)
@@ -711,77 +981,48 @@ def main(argv=None):
             "the item is in."
         ),
     )
-    tick.add_argument("--item", required=True, type=int, help="the work item number")
-    tick.add_argument("--worktree", required=True, help="the worker's worktree")
-    tick.add_argument(
-        "--process",
-        required=True,
-        metavar="PATTERN",
-        help="a regular expression for the agent's process name. The `dead` outcome "
-        "fires when no process that matches it works inside the worktree. The caller "
-        "reads it from references/harnesses/<harness>.md, so this seam names no "
-        "harness",
+    add_tick_arguments(tick)
+
+    delivery = subcommands.add_parser(
+        "wake",
+        help="the whole body of a tick: ask the same predicate, and deliver the line "
+        "where a transition is due. No path exits 0",
+        description=(
+            "The command an Item automation runs as its --precheck. It asks the phase "
+            "predicate, and on a due transition it delivers the printed line to the "
+            "first target that succeeds: the terminal handle, then the terminal "
+            "title, then a comment on the work item. Exit 4 means delivered, and the "
+            "line names the target that took it. Exit 5 means no target took it, and "
+            "every failure is printed. Exit 1 and exit 3 are what the predicate "
+            "answered, so there was nothing to deliver. No path exits 0, so every "
+            "run records as skipped and the automation's own prompt and provider "
+            "never load. No agent runs on a tick."
+        ),
     )
-    tick.add_argument(
-        "--rounds",
-        required=True,
-        type=int,
-        metavar="N",
-        help="the Review round bound, which the caller resolves from `review.rounds` "
-        "in the Config. There is no default, so the bound is never hardcoded here",
-    )
-    tick.add_argument(
-        "--stall-after",
-        required=True,
-        metavar="DURATION",
-        help="how old the newest work product must be to count as a stall "
-        "(`45s`, `30m`, `4h`, or a bare number of seconds). Only `stalled` reads it, "
-        "because `dead` needs no window",
-    )
-    tick.add_argument(
-        "--repo",
+    add_tick_arguments(delivery)
+    delivery.add_argument(
+        "--handle",
         default="",
-        help="the tracker repository the labels and the verdict comments sit on, as "
-        "OWNER/NAME",
+        help="the orchestrator terminal, as the identifier the tool issued. This is "
+        "the first target. The caller resolves it at spawn from operation 9, so this "
+        "seam names no tool",
     )
-    tick.add_argument(
-        "--tracker-cli",
-        default=GH,
-        choices=(GH, GLAB),
-        help="which CLI reads the labels and the comments. The caller resolves it "
-        "from docs/agents/issue-tracker.md. So this seam names a tracker in its two "
-        "argv builders and nowhere else",
-    )
-    tick.add_argument(
-        "--tracker-host",
+    delivery.add_argument(
+        "--title",
         default="",
-        metavar="HOST",
-        help="the tracker host, for a server the CLI does not reach by default. Each "
-        "read carries it in the place that read needs. With no host, every read goes "
-        "to the CLI's own default server",
+        help="the orchestrator terminal's title, which is the second target. A title "
+        "is a display string that a harness can rename, so it is a second chance and "
+        "never the mechanism",
     )
-    tick.add_argument(
-        "--back-off",
-        metavar="DURATION",
-        help="how long one outcome stays suppressed after it fires, so an "
-        "unanswered wake does not repeat every minute. A marker file per "
-        "(item, outcome) pair holds it. With no --back-off this subcommand writes "
-        "nothing",
-    )
-    tick.add_argument(
-        "--marker-dir",
-        default=None,
-        metavar="DIR",
-        help="where the --back-off marker files live. The default is .orchestrator/ "
-        "inside --worktree, so a caller that passes nothing behaves as it did before "
-        "this argument existed. Pass a directory that outlives a move of the watched "
-        "worktree. Otherwise an answered wake fires again from a fresh directory",
-    )
-    tick.add_argument(
-        "--gh-fixture",
-        help="JSON that stands in for any tracker read, so a verdict and a phase "
-        "need no network and no login (used by the tests). It keeps this name "
-        "because scripts/close_item.py takes the same kind of file",
+    delivery.add_argument(
+        "--send-command",
+        default="",
+        metavar="TEMPLATE",
+        help="how to send one line to a terminal, which the caller resolves from the "
+        f"tool file's operation 4. {TARGET_TOKEN} is where the terminal goes and "
+        f"{TEXT_TOKEN} is where the line goes. This seam splits the template into "
+        "arguments before it writes either one in, so no shell reads the line. With "
+        "no template the comment is the only target",
     )
 
     args = parser.parse_args(argv)
@@ -791,10 +1032,11 @@ def main(argv=None):
         print(line)
         return code
 
-    # `phase` is the other subcommand, and `required=True` above leaves no third
-    # case. So this branch is unconditional rather than a second `if`, which is what
-    # keeps a fall-through out of the exit contract: an implicit `None` would exit 0
-    # and read as a due transition.
+    # `phase` and `wake` are the other two subcommands, and they share every flag
+    # above, so one validation serves both. `required=True` leaves no fourth case, so
+    # the last branch is unconditional rather than a third `if`. That is what keeps a
+    # fall-through out of the exit contract: an implicit `None` would exit 0 and read
+    # as a due transition.
     if args.rounds < 1:
         parser.error(f"--rounds must be a bound of 1 or more, not {args.rounds}")
     try:
@@ -802,7 +1044,36 @@ def main(argv=None):
         back_off = parse_duration(args.back_off) if args.back_off else None
     except ValueError as exc:
         parser.error(str(exc))
-    code, line = phase(
+
+    if args.command == "phase":
+        code, line = phase(
+            args.item,
+            args.worktree,
+            args.process,
+            args.rounds,
+            stall_after,
+            args.repo,
+            args.gh_fixture,
+            back_off,
+            args.marker_dir,
+            args.tracker_cli,
+            args.tracker_host,
+        )
+        print(line)
+        return code
+
+    if args.send_command:
+        try:
+            shlex.split(args.send_command)
+        except ValueError as exc:
+            parser.error(f"--send-command has an unbalanced quote: {exc}")
+        for token in (TARGET_TOKEN, TEXT_TOKEN):
+            if token not in args.send_command:
+                parser.error(
+                    f"--send-command must carry both {TARGET_TOKEN} and "
+                    f"{TEXT_TOKEN}, and this one has no {token}"
+                )
+    code, lines = wake(
         args.item,
         args.worktree,
         args.process,
@@ -814,8 +1085,12 @@ def main(argv=None):
         args.marker_dir,
         args.tracker_cli,
         args.tracker_host,
+        args.handle,
+        args.title,
+        args.send_command,
     )
-    print(line)
+    for line in lines:
+        print(line)
     return code
 
 
