@@ -40,5 +40,6 @@ Implements the [operation contract](_operations.md).
 | 10| teardown         | close-workspace + `git worktree remove` + `git branch -d` — **multi-step** |
 | 11| automation-create | **unsupported** — no automation surface is declared for cmux. The spawn skips the tick and the report says so |
 | 12| automation-remove | **unsupported** — nothing is created, so nothing is removed. Teardown stays operation 10 alone |
+| 13| automation-repoint | **unsupported** — nothing is created, so nothing is repointed. A phase transition changes nothing else about the flow, and the report says the repoint is unavailable on this tool |
 
 Fill this file in fully the first time cmux is configured, then the ambiguity is gone for every later run.

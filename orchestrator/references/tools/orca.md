@@ -236,3 +236,29 @@ the schedule. A session that does not hold `$AID` reads it back from the name:
 AID=$(orca automations list --json | python3 -c "import json,sys;a=[x for x in json.load(sys.stdin)['result']['automations'] if x['name']=='orchestrator-item-<N>'];print(a[0]['id'] if a else '')")
 orca automations remove --id "$AID" --json     # result.removed confirms it
 ```
+
+## 13. automation-repoint (supported)
+
+One edit points the schedule the item already owns at the worker that is now live. It
+creates nothing and it removes nothing, so the name, the trigger and the run history all
+stay. `$WT_LIVE` is the live worker's worktree, from operation 2. A session that does not
+hold `$AID` reads it back from the name, the way operation 12 does.
+
+```bash
+orca automations edit --id "$AID" --precheck "<precheck-command>" \
+  --workspace "id:$WT_LIVE" --json
+```
+
+The flag surface is `--id <id>`, `--precheck` and `--workspace <selector>`, confirmed
+against `orca automations edit --help`. The identifier is also positional
+(`orca automations edit <id>`), and `--id` is the form operation 12 already uses.
+
+`--precheck` takes the same `wake` command operation 11 wrote, with `--worktree` and
+`--process` renamed to the live worker. Every other flag keeps the value the spawn
+resolved, `--handle` and `--marker-dir` included. So a repoint never drops the wake target,
+and the back-off markers stay in one directory. `--workspace` moves the worktree the runs
+bind to, so the schedule and its precheck name one worker.
+
+The edit fails closed: a rejected call leaves the old precheck running, and the item keeps
+an observer. Rationale:
+[`../../docs/adr/0026-the-automation-follows-the-live-worker.md`](../../docs/adr/0026-the-automation-follows-the-live-worker.md).
