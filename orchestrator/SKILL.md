@@ -679,10 +679,10 @@ label moves no card ([Board status](#board-status)).
 
 | Outcome | Write first | Then |
 |---|---|---|
-| `implementation-complete` | `phase:impl` → `phase:e2e` where the proof-phase gate holds; else → `phase:review` where review is on; else remove it | Proof: [The proof phase](#the-proof-phase). Review on: [Adversarial review](#adversarial-review-when-configs-reviewenabled) steps 1 and 2. Review off: the worker already flipped its own work state and card, so report the finish and offer the review in one line |
+| `implementation-complete` | `phase:impl` → `phase:e2e` where the proof-phase gate holds; else → `phase:review` where review is on; else remove it | Proof: [The proof phase](#the-proof-phase). Review on: [Adversarial review](#adversarial-review-when-configs-reviewenabled) steps 1 and 2. Step 1 also **repoints the precheck** at the reviewer's worktree, with the review harness's process pattern — below. Review off: the worker already flipped its own work state and card, so report the finish and offer the review in one line |
 | `proof-complete` | `phase:e2e` → `phase:review` where review is on; else remove it | The same two branches, with the proof already done |
 | `verdict-approve` | remove `phase:review` | [Adversarial review](#adversarial-review-when-configs-reviewenabled) step 4 — gather evidence and hand the item to human review |
-| `verdict-request-changes` | nothing, because a fix round is inside `phase:review` | [Adversarial review](#adversarial-review-when-configs-reviewenabled) step 3, at the round the line names |
+| `verdict-request-changes` | nothing, because a fix round is inside `phase:review` | [Adversarial review](#adversarial-review-when-configs-reviewenabled) step 3, at the round the line names. That step also **repoints the precheck** back at the implementation worktree, with the implementation harness's pattern — below |
 | `rounds-exhausted` | remove `phase:review` | Step 4 again — "after the last round regardless". The bound is spent, so offer no further round |
 | `dead` | nothing, because the item stays in the phase it is in | Report, and **never re-prompt** — below |
 | `stalled` | nothing, for the same reason | Reset the context and re-prompt — below |
@@ -703,6 +703,41 @@ acknowledges those four wakes, so `--back-off` is what stops a repeat every minu
 **A repeat that carries the same round
 number, or the same checklist position, is a wake you already answered.** Say so in
 one line and do nothing. That stays a lookup, because the line carries both facts.
+
+**Two rows carry a second act: they repoint the precheck at the live worker.** One **Item
+automation** per item stands, and a transition moves the work to a different worker. So the
+precheck follows it (op 13,
+[`references/tools/_operations.md`](references/tools/_operations.md)). The repoint sits in
+the same row as the phase-label write, so one transition is one step. It is not a repair the
+maintainer has to remember:
+
+- `implementation-complete` points the precheck at the reviewer's worktree, with the review
+  harness's process pattern from
+  [`references/harnesses/<harness>.md`](references/harnesses/claude.md). Step 1 of
+  [Adversarial review](#adversarial-review-when-configs-reviewenabled) creates that
+  worktree, so the same row already holds both values.
+- `verdict-request-changes` points it back at the implementation worktree, with the
+  implementation harness's pattern. The fix round runs there.
+
+**The automation is repointed, and never restarted.** The schedule, its name and its run
+history all stay, so step 8 of a **Close transaction** still removes one schedule under one
+name. The edit fails closed: a rejected repoint leaves the old precheck running, and the
+item keeps an observer. **A row that names no next worker repoints nothing.**
+`verdict-approve` and `rounds-exhausted` end the phase axis. `dead`, `stalled` and
+`unreadable` say nothing about which worker is live. Rationale:
+[`docs/adr/0026-the-automation-follows-the-live-worker.md`](docs/adr/0026-the-automation-follows-the-live-worker.md).
+
+**The repointed precheck is the same `wake` command, with two flags changed.** `--worktree`
+and `--process` name the live worker. Every other flag keeps the value the spawn resolved
+([Start the tick](#start-the-tick--one-item-automation-per-worker)), and `--handle` is one
+of them. So a repoint never drops the wake target. **`--marker-dir` stays pointed at the
+item's implementation worktree.** So an answered wake cannot fire again from a fresh
+directory. The markers still die with the item, at step 8 of a **Close transaction**.
+
+**A tool that records operation 13 as unsupported changes nothing else about the flow.**
+`cmux` and `herdr` declare no automation surface, so no schedule exists and nothing needs a
+repoint. Run the rest of the row unchanged. Then say in the report that the repoint is
+unavailable on this tool ([Reporting to the user](#reporting-to-the-user)).
 
 **`dead` — a re-prompt cannot work, so nothing re-prompts.** No live agent process has its
 working directory inside the worktree, so nothing listens. Report which phase the item is
@@ -809,10 +844,13 @@ outcome that reports the bound spent.
    A review spawn needs this more than an impl spawn, not less. Its worktree is fresh,
    and its harness is usually the *other* vendor's — so it is the one this machine has
    launched least often. A lost review round is also silent: the impl worker waits, the
-   findings never arrive, and nothing reports an error. **Then create its Item automation**,
-   like any other spawn
-   ([Start the tick](#start-the-tick--one-item-automation-per-worker)). The precheck is the
-   same command. The item's `phase:review` label is what makes the tick read a verdict
+   findings never arrive, and nothing reports an error. **Then repoint the item's Item
+   automation at this worktree** (op 13), and create no second one. One schedule per
+   item stands, and its precheck follows the live worker
+   ([On the wake](#on-the-wake--one-response-per-outcome)). The precheck is the same `wake`
+   command. `--worktree` and `--process` then name this worktree and the review harness.
+   **The automation is repointed, and never restarted**, so the schedule and its run history
+   both stay. The item's `phase:review` label is what makes the tick read a verdict
    rather than a checklist. A reviewer needs no flag of its own.
 2. **Prompt it to review** the diff/MR against the work item's acceptance
    criteria — drafted, then run through `prompt-improver` for the review model's
@@ -848,8 +886,11 @@ outcome that reports the bound spent.
    `prompt-improver` with the rest — they restate no rule of the two-axis contract.
 3. **On request-changes:** reset the original impl worker's context
    ([Reset the worker's context before every re-prompt](#reset-the-workers-context-before-every-re-prompt)).
-   Then re-prompt **that same worker** with the findings to fix, and re-review. The
-   automation already runs and outlives the round, so nothing is restarted. Loop,
+   Then re-prompt **that same worker** with the findings to fix, and re-review. **Repoint the
+   precheck back at the implementation worktree** (op 13), with the implementation harness's
+   process pattern. The fix round then watches the worker that is fixing
+   ([On the wake](#on-the-wake--one-response-per-outcome)). The automation already runs and
+   outlives the round, so it is repointed and never restarted. Loop,
    bounded at the resolved `review.rounds` (default 3), and the round the tick's line names
    is the round you are on.
    Each fix round steps the impl worker's effort up one rung — a finding the model
