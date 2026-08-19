@@ -93,8 +93,11 @@ opens, and the failure modes. One of those modes is invisible to a bare `command
 the CLI check is green and a browser session still cannot start. Never restate one of
 its commands here or in a report. A copied command drifts from the maintained one.
 
-Throughout, address a worker by its **slug** (the work-item's ticket prefix, e.g.
-`#38 B5 · Contacts` → `b5-contacts`).
+Throughout, address a worker by its **slug**. The form is `<N>-<slug>`: the work-item
+number, then the ticket prefix. So `#38 B5 · Contacts` becomes `38-b5-contacts`. The
+number comes first, so a worktree name identifies its work item with no lookup. Where
+the tool can hold a link to the work item, op 2 records it as well. The link then lives
+outside the name ([`references/tools/<tool>.md`](references/tools/_operations.md)).
 
 ## Resolve the verb before you act
 
@@ -970,7 +973,7 @@ it. Shape output for acting on, not for completeness:
 
 - **Lead with state, not narration.** First line is the board: what changed and
   what's running.
-  `#38 b5-contacts spawned · /implement · heavy · opus-5 · xhigh. 2 workers live.`
+  `#38 38-b5-contacts spawned · /implement · heavy · opus-5 · xhigh. 2 workers live.`
   Never open with what you're about to do.
 - **Name the skill you routed to.** A verb resolved through
   [`references/skill-routing.md`](references/skill-routing.md) names its skill in the
