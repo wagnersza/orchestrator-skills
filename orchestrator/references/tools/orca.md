@@ -194,7 +194,7 @@ file keeps a placeholder for it.
 ```bash
 AJSON=$(orca automations create --name "orchestrator-item-<N>" --trigger '* * * * *' \
           --precheck "<precheck-command>" --workspace "id:$WT" \
-          --prompt "<relay-prompt>" --provider <agent> --json)
+          --prompt "<inert-prompt>" --provider <agent> --json)
 AID=$(echo "$AJSON" | python3 -c "import json,sys;print(json.load(sys.stdin)['result']['automation']['id'])")
 ```
 
@@ -203,14 +203,28 @@ expression, or an RRULE string. Only cron reaches one minute, so the one-minute 
 is `'* * * * *'`. `--workspace` binds the schedule to the worktree that already exists.
 `--repo` in its place cuts a new worktree per run.
 
-The CLI also requires `--prompt` and `--provider`, so the three inputs in the row are
-not the whole command. The prompt is the one line the relay sends. The provider is an
-agent id (`codex`, `claude`, `gemini`). `--precheck-timeout` defaults to 60 seconds,
-and its maximum is 600.
+The precheck is the seam's `wake` command, which is the whole body of a tick. The caller
+fills the placeholder. Its send template is **operation 4** of this file, with `{target}`
+where `--terminal` goes and `{text}` where the line goes:
+
+```bash
+--precheck "python3 -m scripts.worker_state wake --item <N> <the other flags> \
+  --handle <handle> --title orchestrator \
+  --send-command 'orca terminal send --terminal {target} --text {text} --enter'"
+```
+
+**The provider never runs, by design.** The CLI requires `--prompt` and `--provider`, and
+exit 0 is the only code that starts that agent. No path through `wake` exits 0, so every
+run records as skipped and both flags stay inert. Write a prompt that says the tick
+delivered its own line. The provider is an agent id (`codex`, `claude`, `gemini`), and the
+choice changes nothing. Rationale:
+[`../../docs/adr/0027-the-tick-delivers-its-own-wake.md`](../../docs/adr/0027-the-tick-delivers-its-own-wake.md).
+
+`--precheck-timeout` defaults to 60 seconds, and its maximum is 600.
 
 **The surface offers no model flag and no effort flag.** `--provider` picks an agent and
-says nothing else about it. So the precheck carries the whole tick: on a quiet minute
-the command exits non-zero, the run records as skipped, and no model loads. Rationale:
+says nothing else about it. So the precheck carries the whole tick. It exits non-zero on
+every path, so the run records as skipped and no model loads. Rationale:
 [`../../docs/adr/0022-item-automation-replaces-the-blocking-watch.md`](../../docs/adr/0022-item-automation-replaces-the-blocking-watch.md).
 
 ## 12. automation-remove (supported)

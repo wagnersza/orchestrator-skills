@@ -540,23 +540,32 @@ Definitions: the **Item automation** and **Phase** entries in
 [`CONTEXT.md`](CONTEXT.md). Rationale:
 [`docs/adr/0022-item-automation-replaces-the-blocking-watch.md`](docs/adr/0022-item-automation-replaces-the-blocking-watch.md).
 
-**The precheck is the seam asked as a predicate.** Exit 0 means a **Phase** transition is
-due and the printed line names which of the eight it is. Any other code means nothing to
-do, so a quiet minute records as a skipped run, loads no model and costs no tokens. That
-command goes into op 11's `<precheck-command>` placeholder:
+**The precheck is the whole tick.** `wake` asks the same predicate as `phase`. The eight
+outcomes, their order and the back-off window are unchanged. On a due transition it
+delivers the printed line itself. **No path through it exits 0**, so every run records as
+skipped, no model loads and no agent runs on a tick. That command goes into op 11's
+`<precheck-command>` placeholder:
 
 ```bash
-python3 -m scripts.worker_state phase --item <N> \
+python3 -m scripts.worker_state wake --item <N> \
   --worktree <the path from op 2> \
   --process '<the pattern from references/harnesses/<harness>.md>' \
   --rounds <config's review.rounds> --stall-after <duration> \
   --back-off <duration> --repo <owner>/<name> \
   --marker-dir <the implementation worktree from op 2>/.orchestrator \
-  --tracker-cli <gh or glab> --tracker-host <host>
+  --tracker-cli <gh or glab> --tracker-host <host> \
+  --handle <this session's terminal handle, from op 9> --title orchestrator \
+  --send-command '<op 4, with {target} where the terminal goes and {text} where the line goes>'
 ```
 
-**Resolve the seven config values once, here.** The seam parses no configuration file, and
-it names no harness and no tracker. So the spawn is the one place they are read:
+**Op 11's `--prompt` and `--provider` are inert.** The CLI requires both. Neither one runs.
+Exit 0 is what starts that agent, and no path through `wake` exits 0. Write a prompt that
+says the tick delivered its own line, so a maintainer who reads the schedule is not misled.
+Rationale:
+[`docs/adr/0027-the-tick-delivers-its-own-wake.md`](docs/adr/0027-the-tick-delivers-its-own-wake.md).
+
+**Resolve the config values once, here.** The seam parses no configuration file, and it
+names no harness, no tracker and no tool. So the spawn is the one place they are read:
 
 | Value | Where you read it | What it decides |
 |---|---|---|
@@ -565,12 +574,14 @@ it names no harness and no tracker. So the spawn is the one place they are read:
 | the harness process pattern | `references/harnesses/<harness>.md` | what the `dead` outcome looks for |
 | the stall window | longer than the item's slowest single step, so a worker thinking hard is never read as stalled | when `stalled` fires |
 | the marker directory | the item's implementation worktree (op 2), plus `/.orchestrator` | where a back-off marker lives, and what it outlives |
-| the tracker CLI | `docs/agents/issue-tracker.md` | which command reads the labels and the comments |
+| the tracker CLI | `docs/agents/issue-tracker.md` | which command reads the labels and the comments, and which posts the wake comment |
 | the tracker host | `docs/agents/issue-tracker.md`, where the tracker is self-hosted | which server those reads go to |
+| this session's handle and title | op 9, against this session's own worktree | where the wake is delivered, `--handle` first and `--title` second |
+| the send command | the tool file's operation 4 | how the tick delivers one line to a terminal |
 
-Six of the seven are flags on the command above. **The proof-phase gate is not.** The
-item's own `phase:*` label is what gates that outcome. So the gate decides which label this
-session writes when the implementation finishes, and the seam reads that label.
+Every value above is a flag on the command, except one. **The proof-phase gate is not a
+flag.** The item's own `phase:*` label is what gates that outcome. So the gate decides which
+label this session writes when the implementation finishes, and the seam reads that label.
 It is the same gate the Browser-surface preflight uses, so the two cannot disagree about
 when a proof phase applies.
 
@@ -586,21 +597,36 @@ fires again from a fresh directory. Pass the item's implementation worktree inst
 lives until step 8 of the **Close transaction** removes it, so the markers still die with
 the work item.
 
-**`--tracker-cli` and `--tracker-host` are the tracker read.** `gh` on github.com is the
-default and needs no host, so this repo passes neither flag. A self-hosted GitLab needs
-both, and it then needs no wrapper script outside this repo.
+**`--tracker-cli` and `--tracker-host` are the tracker read, and the wake comment that is
+target three below.** `gh` on github.com is the default and needs no host, so this repo
+passes neither flag. A self-hosted GitLab needs both, and it then needs no wrapper script
+outside this repo.
 
-**The relay carries no judgement.** Op 11 also takes a `--prompt` and a `--provider`, so
-a tick that the precheck lets through runs a bounded agent. That agent relays and does
-nothing else, and two instructions are the whole prompt. Send the precheck's printed line
-to the orchestrator terminal titled `orchestrator`. **Where no terminal by that title
-resolves, post the same line as a comment on the work item.** So a transition is recorded
-late rather than lost, which is the accepted risk in ADR 0022. `/orchestrator-setup` sets
-that title (step 5a of [`../orchestrator-setup/SKILL.md`](../orchestrator-setup/SKILL.md)),
-which is what makes the target resolvable across a restart. The automation writes no
-label, composes no prompt, spawns nothing and merges nothing. The **Item automation**
-entry in [`CONTEXT.md`](CONTEXT.md) holds that prohibition. It is why every destructive
-act stays in this session, where a human can interrupt it.
+**Resolve this session's own terminal handle here, and pass it as `--handle`.** Op 9 returns
+`{handle, title}` for a worktree, so a session that can list a worker can list itself. The
+wake has three targets, and the first one that succeeds ends the delivery:
+
+1. **the handle** (`--handle`) — the identifier the tool issued, so no display string can
+   move it.
+2. **the title** (`--title`), which is `orchestrator`. `/orchestrator-setup` sets it (step
+   5a of [`../orchestrator-setup/SKILL.md`](../orchestrator-setup/SKILL.md)). **A title is
+   not a stable target.** The `claude` harness renames its own tab while the session runs,
+   and that is the harness this session runs under. So the title is a second chance and
+   never the mechanism.
+3. **a comment on the work item**, through `--tracker-cli`. So a transition is recorded late
+   rather than lost, which is the accepted risk in ADR 0022.
+
+**Say which of the three is live on the spawn line**
+([Reporting to the user](#reporting-to-the-user)). A comment-only wake is then a fact the
+maintainer reads at spawn, rather than a silence they find many runs later. Rationale:
+[`docs/adr/0024-the-wake-target-is-a-resolved-handle.md`](docs/adr/0024-the-wake-target-is-a-resolved-handle.md).
+
+**The tick delivers the line it printed, and it decides nothing else.** It writes no label,
+composes no prompt, spawns nothing and merges nothing. The **Item automation** entry in
+[`CONTEXT.md`](CONTEXT.md) holds that prohibition. It is why every destructive act stays in
+this session, where a human can interrupt it. The wake it delivers can land in a busy
+terminal, and the tick does not wait for idle. That is the accepted risk in ADR 0027, and
+`--back-off` is its mitigation.
 
 **A tool with no automation surface spawns exactly as it does today.** Operations 11 and
 12 are optional (`references/tools/_operations.md`), and `cmux` and `herdr` record them
@@ -608,7 +634,7 @@ as unsupported. Skip the step and change nothing else about the spawn. **Then sa
 report that the tick is unavailable on this tool.** The maintainer then knows to monitor by
 hand ([Monitor workers](#monitor-workers)).
 
-The argument surface is `python3 -m scripts.worker_state phase --help`, and the module
+The argument surface is `python3 -m scripts.worker_state wake --help`, and the module
 docstring is the outcome table. **Never restate either here or in a report.** What this
 session does when a tick wakes it is
 [On the wake](#on-the-wake--one-response-per-outcome).
@@ -1005,6 +1031,12 @@ it. Shape output for acting on, not for completeness:
   checklist 4/7 · stall 1 of 2. Context reset, re-prompted with the unchecked boxes.` At
   `stall 2 of 2`, and on `dead`, the next step is a teardown — name it as the pending
   human decision.
+- **Name the live wake mode on the spawn line.** The tick delivers to the handle, the title
+  or a comment on the work item, and the first that succeeds ends the delivery
+  ([Start the tick](#start-the-tick--one-item-automation-per-worker)). Say which one this
+  spawn resolved: `#38 tick: wake by handle` / `wake by title` / `wake by comment`. A
+  comment-only wake is then a fact the user reads at spawn, rather than a silence they find
+  many runs later.
 - **Say when the tick is unavailable.** A tool that records operations 11 and 12 as
   unsupported gets no automation, so nothing wakes this session for that item. Say so on
   the spawn line, once, and point at the four monitor bullets
