@@ -151,8 +151,9 @@ ids), and the two `gh` calls all live in that section of
 Two rules:
 
 - **Write the card wherever you write a label** — and nowhere else. Three places in
-  this skill: the claim at spawn (step 5), the worker's own flip to the review state
-  (its final checklist box), and close (step 2). Plus the reconcile below.
+  this skill: the claim at spawn (step 5), the wake that ends the phase axis
+  ([On the wake](#on-the-wake--one-response-per-outcome)), and close (step 2). Plus the
+  reconcile below. **This session writes all three.** A worker writes no card.
 - **A missing `## Project board` section means every board write is a no-op.** A
   repo with no board is a supported configuration — skip the write silently and
   carry on with labels. Never fail a spawn or a close over the board.
@@ -496,16 +497,19 @@ than restating. Rationale, the rejected options and the accepted risk:
 Bake in the project recipe: boot the app with `run_recipe` on the per-item `ports`
 for evidence; satisfy `db_gate` if configured; meet the `evidence` bar (real-data
 proof + full suite — unit tests alone are not enough); post the review note on the
-**work item** (What to review / Main changes / How to test / Evidence); flip to
-the review state.
+**work item** (What to review / Main changes / How to test / Evidence). **That note is
+the worker's last act.**
 
-**The worker flips its own card.** That last step is the worker's, not yours, so the
-prompt must carry the board move with it: give the worker the two literal `gh`
-commands — the label swap and the `In review` write, with the real ids from
-`issue-tracker.md`'s `## Project board` section substituted in. A worker can't look
-up a field id it wasn't given. Omit the board command if that section is absent.
+**The worker writes no work-state label and moves no board card.** So the prompt hands
+it no `gh` command for either one. This session writes the review state itself, in one
+call with the removal of the `phase:review` label. It moves the card in the same step
+([On the wake](#on-the-wake--one-response-per-outcome)). The two labels name one moment,
+the end of the phase axis. One call is what keeps them consistent. A worker also cannot
+see that moment. Whether review is on, and which round the item is on, are facts this
+session resolves. Rationale:
+[`docs/adr/0025-the-session-writes-the-review-state.md`](docs/adr/0025-the-session-writes-the-review-state.md).
 
-**The `phase:*` label is not one of those commands.** This session owns the **Phase** axis
+**The `phase:*` label is not the worker's either.** This session owns the **Phase** axis
 at both ends: the spawn writes `phase:impl` (step 5), and the wake writes every transition
 after it. A worker that removes its own phase label leaves the tick with an item that reads as
 human review. That worker's finish then wakes nothing
@@ -540,23 +544,32 @@ Definitions: the **Item automation** and **Phase** entries in
 [`CONTEXT.md`](CONTEXT.md). Rationale:
 [`docs/adr/0022-item-automation-replaces-the-blocking-watch.md`](docs/adr/0022-item-automation-replaces-the-blocking-watch.md).
 
-**The precheck is the seam asked as a predicate.** Exit 0 means a **Phase** transition is
-due and the printed line names which of the eight it is. Any other code means nothing to
-do, so a quiet minute records as a skipped run, loads no model and costs no tokens. That
-command goes into op 11's `<precheck-command>` placeholder:
+**The precheck is the whole tick.** `wake` asks the same predicate as `phase`. The eight
+outcomes, their order and the back-off window are unchanged. On a due transition it
+delivers the printed line itself. **No path through it exits 0**, so every run records as
+skipped, no model loads and no agent runs on a tick. That command goes into op 11's
+`<precheck-command>` placeholder:
 
 ```bash
-python3 -m scripts.worker_state phase --item <N> \
+python3 -m scripts.worker_state wake --item <N> \
   --worktree <the path from op 2> \
   --process '<the pattern from references/harnesses/<harness>.md>' \
   --rounds <config's review.rounds> --stall-after <duration> \
   --back-off <duration> --repo <owner>/<name> \
   --marker-dir <the implementation worktree from op 2>/.orchestrator \
-  --tracker-cli <gh or glab> --tracker-host <host>
+  --tracker-cli <gh or glab> --tracker-host <host> \
+  --handle <this session's terminal handle, from op 9> --title orchestrator \
+  --send-command '<op 4, with {target} where the terminal goes and {text} where the line goes>'
 ```
 
-**Resolve the seven config values once, here.** The seam parses no configuration file, and
-it names no harness and no tracker. So the spawn is the one place they are read:
+**Op 11's `--prompt` and `--provider` are inert.** The CLI requires both. Neither one runs.
+Exit 0 is what starts that agent, and no path through `wake` exits 0. Write a prompt that
+says the tick delivered its own line, so a maintainer who reads the schedule is not misled.
+Rationale:
+[`docs/adr/0027-the-tick-delivers-its-own-wake.md`](docs/adr/0027-the-tick-delivers-its-own-wake.md).
+
+**Resolve the config values once, here.** The seam parses no configuration file, and it
+names no harness, no tracker and no tool. So the spawn is the one place they are read:
 
 | Value | Where you read it | What it decides |
 |---|---|---|
@@ -565,12 +578,14 @@ it names no harness and no tracker. So the spawn is the one place they are read:
 | the harness process pattern | `references/harnesses/<harness>.md` | what the `dead` outcome looks for |
 | the stall window | longer than the item's slowest single step, so a worker thinking hard is never read as stalled | when `stalled` fires |
 | the marker directory | the item's implementation worktree (op 2), plus `/.orchestrator` | where a back-off marker lives, and what it outlives |
-| the tracker CLI | `docs/agents/issue-tracker.md` | which command reads the labels and the comments |
+| the tracker CLI | `docs/agents/issue-tracker.md` | which command reads the labels and the comments, and which posts the wake comment |
 | the tracker host | `docs/agents/issue-tracker.md`, where the tracker is self-hosted | which server those reads go to |
+| this session's handle and title | op 9, against this session's own worktree | where the wake is delivered, `--handle` first and `--title` second |
+| the send command | the tool file's operation 4 | how the tick delivers one line to a terminal |
 
-Six of the seven are flags on the command above. **The proof-phase gate is not.** The
-item's own `phase:*` label is what gates that outcome. So the gate decides which label this
-session writes when the implementation finishes, and the seam reads that label.
+Every value above is a flag on the command, except one. **The proof-phase gate is not a
+flag.** The item's own `phase:*` label is what gates that outcome. So the gate decides which
+label this session writes when the implementation finishes, and the seam reads that label.
 It is the same gate the Browser-surface preflight uses, so the two cannot disagree about
 when a proof phase applies.
 
@@ -586,21 +601,36 @@ fires again from a fresh directory. Pass the item's implementation worktree inst
 lives until step 8 of the **Close transaction** removes it, so the markers still die with
 the work item.
 
-**`--tracker-cli` and `--tracker-host` are the tracker read.** `gh` on github.com is the
-default and needs no host, so this repo passes neither flag. A self-hosted GitLab needs
-both, and it then needs no wrapper script outside this repo.
+**`--tracker-cli` and `--tracker-host` are the tracker read, and the wake comment that is
+target three below.** `gh` on github.com is the default and needs no host, so this repo
+passes neither flag. A self-hosted GitLab needs both, and it then needs no wrapper script
+outside this repo.
 
-**The relay carries no judgement.** Op 11 also takes a `--prompt` and a `--provider`, so
-a tick that the precheck lets through runs a bounded agent. That agent relays and does
-nothing else, and two instructions are the whole prompt. Send the precheck's printed line
-to the orchestrator terminal titled `orchestrator`. **Where no terminal by that title
-resolves, post the same line as a comment on the work item.** So a transition is recorded
-late rather than lost, which is the accepted risk in ADR 0022. `/orchestrator-setup` sets
-that title (step 5a of [`../orchestrator-setup/SKILL.md`](../orchestrator-setup/SKILL.md)),
-which is what makes the target resolvable across a restart. The automation writes no
-label, composes no prompt, spawns nothing and merges nothing. The **Item automation**
-entry in [`CONTEXT.md`](CONTEXT.md) holds that prohibition. It is why every destructive
-act stays in this session, where a human can interrupt it.
+**Resolve this session's own terminal handle here, and pass it as `--handle`.** Op 9 returns
+`{handle, title}` for a worktree, so a session that can list a worker can list itself. The
+wake has three targets, and the first one that succeeds ends the delivery:
+
+1. **the handle** (`--handle`) — the identifier the tool issued, so no display string can
+   move it.
+2. **the title** (`--title`), which is `orchestrator`. `/orchestrator-setup` sets it (step
+   5a of [`../orchestrator-setup/SKILL.md`](../orchestrator-setup/SKILL.md)). **A title is
+   not a stable target.** The `claude` harness renames its own tab while the session runs,
+   and that is the harness this session runs under. So the title is a second chance and
+   never the mechanism.
+3. **a comment on the work item**, through `--tracker-cli`. So a transition is recorded late
+   rather than lost, which is the accepted risk in ADR 0022.
+
+**Say which of the three is live on the spawn line**
+([Reporting to the user](#reporting-to-the-user)). A comment-only wake is then a fact the
+maintainer reads at spawn, rather than a silence they find many runs later. Rationale:
+[`docs/adr/0024-the-wake-target-is-a-resolved-handle.md`](docs/adr/0024-the-wake-target-is-a-resolved-handle.md).
+
+**The tick delivers the line it printed, and it decides nothing else.** It writes no label,
+composes no prompt, spawns nothing and merges nothing. The **Item automation** entry in
+[`CONTEXT.md`](CONTEXT.md) holds that prohibition. It is why every destructive act stays in
+this session, where a human can interrupt it. The wake it delivers can land in a busy
+terminal, and the tick does not wait for idle. That is the accepted risk in ADR 0027, and
+`--back-off` is its mitigation.
 
 **A tool with no automation surface spawns exactly as it does today.** Operations 11 and
 12 are optional (`references/tools/_operations.md`), and `cmux` and `herdr` record them
@@ -608,7 +638,7 @@ as unsupported. Skip the step and change nothing else about the spawn. **Then sa
 report that the tick is unavailable on this tool.** The maintainer then knows to monitor by
 hand ([Monitor workers](#monitor-workers)).
 
-The argument surface is `python3 -m scripts.worker_state phase --help`, and the module
+The argument surface is `python3 -m scripts.worker_state wake --help`, and the module
 docstring is the outcome table. **Never restate either here or in a report.** What this
 session does when a tick wakes it is
 [On the wake](#on-the-wake--one-response-per-outcome).
@@ -651,13 +681,22 @@ also the mitigation ADR 0021 names for its own accepted risk, that an owned
 item with no phase label reads as human review. So it goes first and never last. A phase
 label moves no card ([Board status](#board-status)).
 
+**The transition that ends the phase axis writes two labels in one call.** The removal of
+the `phase:*` label and the write of the review state name one moment. So one row does
+both: it adds `to-review` in the same `gh issue edit`, and it moves the card to
+`In review`. There is then no first act and no second act to get wrong. The card derives
+from the work-state label alone, so that half of the pair is what moves it
+([Board status](#board-status)). **This session writes all three, and the worker writes
+none of them** — its last act is the review note. Rationale:
+[`docs/adr/0025-the-session-writes-the-review-state.md`](docs/adr/0025-the-session-writes-the-review-state.md).
+
 | Outcome | Write first | Then |
 |---|---|---|
-| `implementation-complete` | `phase:impl` → `phase:e2e` where the proof-phase gate holds; else → `phase:review` where review is on; else remove it | Proof: [The proof phase](#the-proof-phase). Review on: [Adversarial review](#adversarial-review-when-configs-reviewenabled) steps 1 and 2. Review off: the worker already flipped its own work state and card, so report the finish and offer the review in one line |
-| `proof-complete` | `phase:e2e` → `phase:review` where review is on; else remove it | The same two branches, with the proof already done |
-| `verdict-approve` | remove `phase:review` | [Adversarial review](#adversarial-review-when-configs-reviewenabled) step 4 — gather evidence and hand the item to human review |
-| `verdict-request-changes` | nothing, because a fix round is inside `phase:review` | [Adversarial review](#adversarial-review-when-configs-reviewenabled) step 3, at the round the line names |
-| `rounds-exhausted` | remove `phase:review` | Step 4 again — "after the last round regardless". The bound is spent, so offer no further round |
+| `implementation-complete` | `phase:impl` → `phase:e2e` where the proof-phase gate holds; else → `phase:review` where review is on; else remove it **and add `to-review` in the same call, and move the card to `In review`** | Proof: [The proof phase](#the-proof-phase). Review on: [Adversarial review](#adversarial-review-when-configs-reviewenabled) steps 1 and 2. Step 1 also **repoints the precheck** at the reviewer's worktree, with the review harness's process pattern — below. Review off: this wake is the hand-off to a human. Report the finish, the label pair you wrote, and the review you can still offer, in one line |
+| `proof-complete` | `phase:e2e` → `phase:review` where review is on; else remove it **and add `to-review` in the same call, and move the card to `In review`** | The same two branches, with the proof already done |
+| `verdict-approve` | remove `phase:review` **and add `to-review` in the same call, and move the card to `In review`** | [Adversarial review](#adversarial-review-when-configs-reviewenabled) step 4 — gather evidence and hand the item to human review |
+| `verdict-request-changes` | nothing, because a fix round is inside `phase:review` | [Adversarial review](#adversarial-review-when-configs-reviewenabled) step 3, at the round the line names. That step also **repoints the precheck** back at the implementation worktree, with the implementation harness's pattern — below |
+| `rounds-exhausted` | remove `phase:review` **and add `to-review` in the same call, and move the card to `In review`** | Step 4 again — "after the last round regardless". The bound is spent, so offer no further round |
 | `dead` | nothing, because the item stays in the phase it is in | Report, and **never re-prompt** — below |
 | `stalled` | nothing, for the same reason | Reset the context and re-prompt — below |
 | `unreadable` | nothing, because a read that failed cannot say which phase the item is in | Report in one line: the tracker read is broken, and the item is unobserved until that read works again |
@@ -677,6 +716,41 @@ acknowledges those four wakes, so `--back-off` is what stops a repeat every minu
 **A repeat that carries the same round
 number, or the same checklist position, is a wake you already answered.** Say so in
 one line and do nothing. That stays a lookup, because the line carries both facts.
+
+**Two rows carry a second act: they repoint the precheck at the live worker.** One **Item
+automation** per item stands, and a transition moves the work to a different worker. So the
+precheck follows it (op 13,
+[`references/tools/_operations.md`](references/tools/_operations.md)). The repoint sits in
+the same row as the phase-label write, so one transition is one step. It is not a repair the
+maintainer has to remember:
+
+- `implementation-complete` points the precheck at the reviewer's worktree, with the review
+  harness's process pattern from
+  [`references/harnesses/<harness>.md`](references/harnesses/claude.md). Step 1 of
+  [Adversarial review](#adversarial-review-when-configs-reviewenabled) creates that
+  worktree, so the same row already holds both values.
+- `verdict-request-changes` points it back at the implementation worktree, with the
+  implementation harness's pattern. The fix round runs there.
+
+**The automation is repointed, and never restarted.** The schedule, its name and its run
+history all stay, so step 8 of a **Close transaction** still removes one schedule under one
+name. The edit fails closed: a rejected repoint leaves the old precheck running, and the
+item keeps an observer. **A row that names no next worker repoints nothing.**
+`verdict-approve` and `rounds-exhausted` end the phase axis. `dead`, `stalled` and
+`unreadable` say nothing about which worker is live. Rationale:
+[`docs/adr/0026-the-automation-follows-the-live-worker.md`](docs/adr/0026-the-automation-follows-the-live-worker.md).
+
+**The repointed precheck is the same `wake` command, with two flags changed.** `--worktree`
+and `--process` name the live worker. Every other flag keeps the value the spawn resolved
+([Start the tick](#start-the-tick--one-item-automation-per-worker)), and `--handle` is one
+of them. So a repoint never drops the wake target. **`--marker-dir` stays pointed at the
+item's implementation worktree.** So an answered wake cannot fire again from a fresh
+directory. The markers still die with the item, at step 8 of a **Close transaction**.
+
+**A tool that records operation 13 as unsupported changes nothing else about the flow.**
+`cmux` and `herdr` declare no automation surface, so no schedule exists and nothing needs a
+repoint. Run the rest of the row unchanged. Then say in the report that the repoint is
+unavailable on this tool ([Reporting to the user](#reporting-to-the-user)).
 
 **`dead` — a re-prompt cannot work, so nothing re-prompts.** No live agent process has its
 working directory inside the worktree, so nothing listens. Report which phase the item is
@@ -783,10 +857,13 @@ outcome that reports the bound spent.
    A review spawn needs this more than an impl spawn, not less. Its worktree is fresh,
    and its harness is usually the *other* vendor's — so it is the one this machine has
    launched least often. A lost review round is also silent: the impl worker waits, the
-   findings never arrive, and nothing reports an error. **Then create its Item automation**,
-   like any other spawn
-   ([Start the tick](#start-the-tick--one-item-automation-per-worker)). The precheck is the
-   same command. The item's `phase:review` label is what makes the tick read a verdict
+   findings never arrive, and nothing reports an error. **Then repoint the item's Item
+   automation at this worktree** (op 13), and create no second one. One schedule per
+   item stands, and its precheck follows the live worker
+   ([On the wake](#on-the-wake--one-response-per-outcome)). The precheck is the same `wake`
+   command. `--worktree` and `--process` then name this worktree and the review harness.
+   **The automation is repointed, and never restarted**, so the schedule and its run history
+   both stay. The item's `phase:review` label is what makes the tick read a verdict
    rather than a checklist. A reviewer needs no flag of its own.
 2. **Prompt it to review** the diff/MR against the work item's acceptance
    criteria — drafted, then run through `prompt-improver` for the review model's
@@ -822,8 +899,11 @@ outcome that reports the bound spent.
    `prompt-improver` with the rest — they restate no rule of the two-axis contract.
 3. **On request-changes:** reset the original impl worker's context
    ([Reset the worker's context before every re-prompt](#reset-the-workers-context-before-every-re-prompt)).
-   Then re-prompt **that same worker** with the findings to fix, and re-review. The
-   automation already runs and outlives the round, so nothing is restarted. Loop,
+   Then re-prompt **that same worker** with the findings to fix, and re-review. **Repoint the
+   precheck back at the implementation worktree** (op 13), with the implementation harness's
+   process pattern. The fix round then watches the worker that is fixing
+   ([On the wake](#on-the-wake--one-response-per-outcome)). The automation already runs and
+   outlives the round, so it is repointed and never restarted. Loop,
    bounded at the resolved `review.rounds` (default 3), and the round the tick's line names
    is the round you are on.
    Each fix round steps the impl worker's effort up one rung — a finding the model
@@ -854,11 +934,15 @@ outcome that reports the bound spent.
    [The prompt: checklist + completion contract](#the-prompt-checklist--completion-contract)
    applies to it unchanged.
 4. **On approve, or after the last round regardless:** gather evidence and flip
-   the item to **human review**. **That transition is the removal of the `phase:review`
-   label**, and it is the first act (ADR 0021). The item stays `in-progress` and
-   `phase:review` right through the loop, because a worker owns it and a fix round is
-   inside the phase. So both labels change only when the loop concludes. Merge is always
-   a human step.
+   the item to **human review**. **That transition is one call: it removes the
+   `phase:review` label and it writes `to-review`.** The card moves to `In review` with it
+   ([Board status](#board-status)). **This session writes all three. The worker wrote
+   none of them**, because its last act was the review note. The item holds
+   `in-progress` and `phase:review` for the whole loop, because a worker owns it and a
+   fix round is inside the phase. So both labels change only here, at the one moment the
+   phase axis concludes
+   ([`docs/adr/0025-the-session-writes-the-review-state.md`](docs/adr/0025-the-session-writes-the-review-state.md)).
+   Merge is always a human step.
 
 On demand: **"review #N adversarially"** runs this flow directly even if review is
 off in config.
@@ -998,13 +1082,21 @@ it. Shape output for acting on, not for completeness:
   tick's own word: `implementation-complete`, `proof-complete`, `verdict-approve`,
   `verdict-request-changes`, `rounds-exhausted`, `dead`, `stalled` or `unreadable`. Then
   the phase label you wrote, then what you did. `#38 implementation-complete · phase:impl →
-  phase:review. Reviewer spawned, gpt-5.6-terra @ high.`
+  phase:review. Reviewer spawned, gpt-5.6-terra @ high.` **Where the wake ended the phase
+  axis, name the label pair you wrote.** That one call is the hand-off to a human:
+  `#38 verdict-approve · phase:review removed · to-review · card In review.`
 - **Both counts come from the tracker, so restate both.**
   [On the wake](#on-the-wake--one-response-per-outcome) says how to read each one.
   `#38 stalled at phase:impl ·
   checklist 4/7 · stall 1 of 2. Context reset, re-prompted with the unchecked boxes.` At
   `stall 2 of 2`, and on `dead`, the next step is a teardown — name it as the pending
   human decision.
+- **Name the live wake mode on the spawn line.** The tick delivers to the handle, the title
+  or a comment on the work item, and the first that succeeds ends the delivery
+  ([Start the tick](#start-the-tick--one-item-automation-per-worker)). Say which one this
+  spawn resolved: `#38 tick: wake by handle` / `wake by title` / `wake by comment`. A
+  comment-only wake is then a fact the user reads at spawn, rather than a silence they find
+  many runs later.
 - **Say when the tick is unavailable.** A tool that records operations 11 and 12 as
   unsupported gets no automation, so nothing wakes this session for that item. Say so on
   the spawn line, once, and point at the four monitor bullets

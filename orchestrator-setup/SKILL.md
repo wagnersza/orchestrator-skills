@@ -413,11 +413,16 @@ writing. Then:
 ### 5a. Title the orchestrator terminal
 
 Each live work item gets an **Item automation**. Its tick wakes the orchestrator session
-with one line to that session's terminal, found **by title**. An auto-generated title
-changes, so the wake target must be a fixed literal: **`orchestrator`**. Set it once here
-and it survives a restart of the session
+with one line. It has three targets in one order: the terminal **handle**, then the terminal
+**title**, then a comment on the work item.
+
+**The handle wins.** The spawn resolves it at that moment, and it is the identifier the tool
+issued. So no display string can move it. The title is target two, for a spawn that resolved
+no handle. An auto-generated title changes, so that fallback needs a fixed literal:
+**`orchestrator`**. Set it once here and it survives a restart of the session
 ([`../orchestrator/SKILL.md`](../orchestrator/SKILL.md), *Start the tick*;
-[ADR 0022](../orchestrator/docs/adr/0022-item-automation-replaces-the-blocking-watch.md)).
+[ADR 0024](../orchestrator/docs/adr/0024-the-wake-target-is-a-resolved-handle.md);
+[ADR 0027](../orchestrator/docs/adr/0027-the-tick-delivers-its-own-wake.md)).
 
 Only for a tool whose reference file supports operation 11
 ([`../orchestrator/references/tools/_operations.md`](../orchestrator/references/tools/_operations.md)).
@@ -431,8 +436,9 @@ orca terminal rename --terminal <handle> --title "orchestrator"
 More than one terminal can sit in the active worktree. So **confirm which handle is this
 session's** before you rename it. A title on the wrong terminal sends every wake to a shell
 nobody reads. Where the tool records operation 11 as unsupported, there is no tick at all.
-Skip this step and say so in one line. Where the title cannot be set, say that the wake
-falls back to a comment on the work item. That is a supported configuration and not a gap.
+Skip this step and say so in one line. Where the title cannot be set, the handle is still
+target one and the comment is still the last fallback. Say which of the three the spawn
+will use. That is a supported configuration and not a gap.
 
 ## 6. Done
 

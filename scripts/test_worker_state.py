@@ -17,6 +17,10 @@ runs the command it built, and the assertion is on what the command received.
 Neither CLI has to be installed. `PATH` starts with that directory for every case,
 so no case here can reach a real `gh` or `glab` by accident.
 
+The `wake` cases stand in for the send the same way (`fake_sender`). The stub logs
+every argv and succeeds only for the targets a case accepts, which is how a case
+walks the three targets in order. So no case needs a tool, a terminal or a network.
+
 `ready` is tested with a real process: a short-lived `python3` child whose working
 directory is the temp worktree. That is what makes the process check credible
 rather than asserted. Durations are arguments, so no case here sleeps for a real
@@ -59,6 +63,14 @@ EXIT_USAGE = 64
 # `phase` is a predicate, so it has two codes plus the worktree that is gone.
 EXIT_DUE = 0
 EXIT_NOTHING = 1
+
+# `wake` is that predicate plus a delivery, and no path through it exits 0.
+EXIT_DELIVERED = 4
+EXIT_UNDELIVERED = 5
+
+# The send template a spawn resolves from the tool file's operation 4. `sender` is a
+# stub this suite writes onto `PATH`, so no test names a real Tool either.
+SEND = "sender terminal send --terminal {target} --text {text} --enter"
 
 IMPL = ["in-progress", "phase:impl"]
 REVIEW = ["in-progress", "phase:review"]
@@ -169,6 +181,31 @@ class WorkerStateTestCase(unittest.TestCase):
         script.chmod(0o755)
         return log
 
+    def fake_sender(self, accept=(), name="sender"):
+        """A send command on `PATH` that succeeds only for a target in `accept`.
+
+        It logs every argv it received, so a case asserts what each target got. A
+        target it does not accept exits non-zero, which is how a case walks the
+        ladder down to the next target. So the delivery needs no tool and no
+        terminal.
+        """
+        log = self.root / f"{name}.argv"
+        accepted = " ".join(f"'{value}'" for value in accept) or "''"
+        script = self.bin / name
+        script.write_text(
+            "#!/bin/sh\n"
+            f"printf '%s\\n' \"$*\" >> '{log}'\n"
+            f"for ok in {accepted}; do\n"
+            '  for arg in "$@"; do\n'
+            '    [ "$arg" = "$ok" ] && exit 0\n'
+            "  done\n"
+            "done\n"
+            "echo 'stub: this target does not accept a send' >&2\n"
+            "exit 7\n"
+        )
+        script.chmod(0o755)
+        return log
+
     def backdate(self, seconds):
         """Age both freshness facts, so a stall needs no real waiting.
 
@@ -187,8 +224,8 @@ class WorkerStateTestCase(unittest.TestCase):
         )
         os.utime(self.checklist, (old, old))
 
-    def run_seam(self, *argv, expect=0):
-        """Run the seam and return the one line it printed."""
+    def run_seam(self, *argv, expect=0, lines=1):
+        """Run the seam and return what it printed, with the line count asserted."""
         proc = subprocess.run(
             [sys.executable, "-m", "scripts.worker_state", *argv],
             cwd=REPO_ROOT,
@@ -199,12 +236,12 @@ class WorkerStateTestCase(unittest.TestCase):
         self.assertEqual(proc.returncode, expect, f"stdout: {proc.stdout}")
         self.assertLessEqual(
             len(proc.stdout.strip().splitlines()),
-            1,
-            f"more than one line printed: {proc.stdout!r}",
+            lines,
+            f"more lines printed than {lines}: {proc.stdout!r}",
         )
         return proc.stdout.strip()
 
-    def tick(
+    def tick_argv(
         self,
         *extra,
         rounds=3,
@@ -212,15 +249,13 @@ class WorkerStateTestCase(unittest.TestCase):
         pattern=PROCESS_PATTERN,
         worktree=None,
         fixture=True,
-        expect=0,
     ):
-        """Ask the predicate once, the way an Item automation's precheck asks it.
+        """The flags both the predicate and the wake take, in one place.
 
         `fixture=False` drops `--gh-fixture`, so the tick makes a real tracker read
         against whichever stub CLI the case put on `PATH`.
         """
-        return self.run_seam(
-            "phase",
+        return [
             "--item",
             str(ITEM),
             "--worktree",
@@ -233,7 +268,32 @@ class WorkerStateTestCase(unittest.TestCase):
             stall,
             *(("--gh-fixture", str(self.fixture)) if fixture else ()),
             *extra,
+        ]
+
+    def tick(self, *extra, expect=0, **flags):
+        """Ask the predicate once, the way an Item automation's precheck asked it
+        before the wake existed."""
+        return self.run_seam("phase", *self.tick_argv(*extra, **flags), expect=expect)
+
+    def wake(
+        self,
+        *extra,
+        handle="",
+        title="",
+        send="",
+        expect=EXIT_DELIVERED,
+        lines=1,
+        **flags,
+    ):
+        """Run the whole body of a tick: the same predicate, plus the delivery."""
+        return self.run_seam(
+            "wake",
+            *self.tick_argv(*extra, **flags),
+            *(("--handle", handle) if handle else ()),
+            *(("--title", title) if title else ()),
+            *(("--send-command", send) if send else ()),
             expect=expect,
+            lines=lines,
         )
 
     def marker(self, outcome, directory=None):
@@ -856,6 +916,191 @@ class WorkerStateTestCase(unittest.TestCase):
             self.assertEqual(proc.stdout, "", argv)
             self.assertNotIn(proc.returncode, (EXIT_DUE, EXIT_NOTHING, EXIT_GONE))
 
+    # --- wake: the whole body of a tick -------------------------------------
+
+    def complete_line(self):
+        """The line a ticked checklist prints, with the path the seam resolves."""
+        checklist = (
+            Path(os.path.realpath(self.worktree))
+            / ".orchestrator"
+            / f"checklist-{ITEM}.md"
+        )
+        return f"implementation-complete: every box in {checklist} is ticked (3 of 3)"
+
+    def test_a_due_transition_delivers_to_the_handle_and_exits_non_zero(self):
+        """The handle is target one, and the argv it receives is the send template
+        with the whole printed line in it. The exit code is not 0, so the automation
+        records the run as skipped and its provider never loads."""
+        log = self.fake_sender(accept=("H1",))
+        write(self.checklist, TICKED)
+        self.write_fixture(labels=IMPL)
+
+        line = self.wake(handle="H1", title="orchestrator", send=SEND)
+
+        self.assertEqual(
+            line, f"delivered: {self.complete_line()} — the terminal handle H1 took it"
+        )
+        self.assertNotEqual(EXIT_DELIVERED, EXIT_DUE)
+        self.assertEqual(
+            log.read_text().splitlines(),
+            [f"terminal send --terminal H1 --text {self.complete_line()} --enter"],
+        )
+
+    def test_a_failed_send_falls_back_to_the_title_and_then_to_a_comment(self):
+        """Three targets in one order, and the first that succeeds ends the delivery.
+        A stale handle then costs one failed send rather than a lost wake."""
+        log = self.fake_sender(accept=("orchestrator",))
+        comments = self.fake_cli("gh", issue={})
+        write(self.checklist, TICKED)
+        self.write_fixture(labels=IMPL)
+
+        line = self.wake(
+            "--repo", "owner/name", handle="H1", title="orchestrator", send=SEND
+        )
+
+        self.assertIn("the terminal title orchestrator took it", line)
+        self.assertEqual(
+            log.read_text().splitlines(),
+            [
+                f"terminal send --terminal H1 --text {self.complete_line()} --enter",
+                "terminal send --terminal orchestrator --text "
+                f"{self.complete_line()} --enter",
+            ],
+        )
+        # The ladder stopped at target two, so the tracker was never asked.
+        self.assertFalse(comments.exists())
+
+        # Neither terminal takes it now, so the comment does. That records the
+        # transition late rather than losing it.
+        self.fake_sender(accept=())
+        line = self.wake(
+            "--repo", "owner/name", handle="H1", title="orchestrator", send=SEND
+        )
+
+        self.assertIn(f"a comment on work item #{ITEM} took it", line)
+        self.assertEqual(
+            comments.read_text().splitlines(),
+            [f"issue comment {ITEM} --body {self.complete_line()} --repo owner/name"],
+        )
+
+    def test_a_wake_that_no_target_takes_prints_every_failure(self):
+        """A maintainer who got no wake has to read why, and the three causes ask for
+        three different repairs. So every failure is printed, not just the last."""
+        self.fake_sender(accept=())
+        self.fake_cli("gh")  # no payload, so the comment fails as well
+        write(self.checklist, TICKED)
+        self.write_fixture(labels=IMPL)
+
+        out = self.wake(
+            "--repo",
+            "owner/name",
+            handle="H1",
+            title="orchestrator",
+            send=SEND,
+            expect=EXIT_UNDELIVERED,
+            lines=4,
+        )
+
+        printed = out.splitlines()
+        self.assertEqual(
+            printed[0], f"undelivered: {self.complete_line()} — no target took it"
+        )
+        self.assertEqual(len(printed), 4, out)
+        for what in (
+            "the terminal handle H1",
+            "the terminal title orchestrator",
+            f"a comment on work item #{ITEM}",
+        ):
+            self.assertTrue(
+                any(what in row and "exited" in row for row in printed[1:]), what
+            )
+
+    def test_a_quiet_tick_delivers_nothing(self):
+        """The common case. Nothing is due, so nothing is sent and no command runs."""
+        log = self.fake_sender(accept=("H1",))
+        self.write_fixture(labels=IMPL)
+        self.child_in(self.worktree)
+
+        line = self.wake(handle="H1", send=SEND, expect=EXIT_NOTHING)
+
+        self.assertTrue(line.startswith("nothing:"), line)
+        self.assertFalse(log.exists())
+
+    def test_a_suppressed_outcome_delivers_nothing(self):
+        """The back-off window is unchanged, and it is what stops one unanswered wake
+        from being delivered sixty times in an hour."""
+        log = self.fake_sender(accept=("H1",))
+        write(self.checklist, TICKED)
+        self.write_fixture(labels=IMPL)
+
+        first = self.wake("--back-off", "1h", handle="H1", send=SEND)
+        held = self.wake("--back-off", "1h", handle="H1", send=SEND, expect=EXIT_NOTHING)
+
+        self.assertTrue(first.startswith("delivered:"), first)
+        self.assertTrue(held.startswith("suppressed:"), held)
+        self.assertEqual(len(log.read_text().splitlines()), 1, log.read_text())
+
+    def test_no_wake_path_exits_zero_so_no_agent_runs_on_a_tick(self):
+        """Exit 0 is the one code that loads an automation's provider. Five paths,
+        and none of them is 0: delivered, undelivered, a quiet tick, a suppressed
+        fire and a worktree that is gone."""
+        self.fake_sender(accept=("H1",))
+        codes = {}
+
+        self.write_fixture(labels=IMPL)
+        self.child_in(self.worktree)
+        codes["nothing"] = EXIT_NOTHING
+        self.assertTrue(
+            self.wake(handle="H1", send=SEND, expect=EXIT_NOTHING).startswith("nothing:")
+        )
+
+        write(self.checklist, TICKED)
+        codes["delivered"] = EXIT_DELIVERED
+        self.assertTrue(
+            self.wake("--back-off", "1h", handle="H1", send=SEND).startswith("delivered:")
+        )
+
+        codes["suppressed"] = EXIT_NOTHING
+        self.assertTrue(
+            self.wake(
+                "--back-off", "1h", handle="H1", send=SEND, expect=EXIT_NOTHING
+            ).startswith("suppressed:")
+        )
+
+        self.fake_sender(accept=())
+        self.fake_cli("gh")
+        codes["undelivered"] = EXIT_UNDELIVERED
+        self.assertTrue(
+            self.wake(
+                handle="H1", send=SEND, expect=EXIT_UNDELIVERED, lines=3
+            ).startswith("undelivered:")
+        )
+
+        shutil.rmtree(self.worktree)
+        codes["gone"] = EXIT_GONE
+        self.assertTrue(
+            self.wake(handle="H1", send=SEND, expect=EXIT_GONE).startswith("gone:")
+        )
+
+        self.assertEqual(len(codes), 5)
+        self.assertNotIn(EXIT_DUE, codes.values())
+
+    def test_a_send_command_that_names_no_placeholder_is_a_usage_error(self):
+        """A template with no {target} sends the wake nowhere, and a template with no
+        {text} sends an empty one. Both would do it silently, so both are usage
+        errors and neither can read as an outcome."""
+        write(self.checklist, TICKED)
+        self.write_fixture(labels=IMPL)
+
+        for template in (
+            "sender terminal send --terminal {target}",
+            "sender terminal send --text {text}",
+            "sender terminal send --terminal 'H1 --text {text}",
+        ):
+            self.assertEqual(
+                self.wake(send=template, expect=EXIT_USAGE, lines=0), "", template
+            )
+
     # --- what the seam refuses to do ---------------------------------------
 
     def test_the_phase_predicate_writes_nothing_but_its_back_off_marker(self):
@@ -930,6 +1175,19 @@ class WorkerStateTestCase(unittest.TestCase):
         self.assertIn("no-such-agent-process", self.ready(
             pattern="no-such-agent-process", expect=EXIT_NOT_READY
         ))
+
+    def test_the_seam_names_no_tool(self):
+        """The send command is a template the spawn resolves from the tool file's
+        operation 4, so the module names no Tool in a command, a default or an
+        example. The one place a tool name may appear is a citation of the reference
+        file that records a measurement, and this asserts every hit is one of those."""
+        source = (REPO_ROOT / "scripts" / "worker_state.py").read_text().lower()
+        for tool in ("orca", "cmux", "herdr"):
+            self.assertEqual(
+                source.count(tool),
+                source.count(f"references/tools/{tool}.md"),
+                f"{tool!r} is named in the seam outside a citation of its file",
+            )
 
 
 if __name__ == "__main__":
