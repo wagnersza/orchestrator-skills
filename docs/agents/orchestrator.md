@@ -106,5 +106,8 @@ A worker on this repo should also:
   with no home is the thing that rots.
 - Record a decision that reverses or narrows an earlier one as a new ADR under
   `orchestrator/docs/adr/`, rather than silently editing the old one.
-- Bump `version` in `.claude-plugin/plugin.json` — minor for a contract or
-  dependency change, patch for docs-only.
+- Bump `version` in `.claude-plugin/plugin.json` only when a user story finishes. The
+  bump lands with the last child of the story, and never once per work item. Minor for a
+  story that changed a contract or a dependency, patch for a docs-only story. A worker on
+  one child leaves the version untouched. Two children that each bump pick the same
+  number, and the merge then keeps one bump and loses the other.
