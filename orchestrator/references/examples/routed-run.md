@@ -73,7 +73,7 @@ The user reads the spec, and the acceptance criteria are enumerated on it.
   effort.
 
 The worker's first act inside the worktree is `/implement`. It then works the
-checklist to the review note and the card flip, exactly as before this routing
+checklist to the review note and stops there, exactly as before this routing
 existed.
 
 ## The same two turns on a `codex` harness

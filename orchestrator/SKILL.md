@@ -151,8 +151,9 @@ ids), and the two `gh` calls all live in that section of
 Two rules:
 
 - **Write the card wherever you write a label** — and nowhere else. Three places in
-  this skill: the claim at spawn (step 5), the worker's own flip to the review state
-  (its final checklist box), and close (step 2). Plus the reconcile below.
+  this skill: the claim at spawn (step 5), the wake that ends the phase axis
+  ([On the wake](#on-the-wake--one-response-per-outcome)), and close (step 2). Plus the
+  reconcile below. **This session writes all three.** A worker writes no card.
 - **A missing `## Project board` section means every board write is a no-op.** A
   repo with no board is a supported configuration — skip the write silently and
   carry on with labels. Never fail a spawn or a close over the board.
@@ -496,16 +497,19 @@ than restating. Rationale, the rejected options and the accepted risk:
 Bake in the project recipe: boot the app with `run_recipe` on the per-item `ports`
 for evidence; satisfy `db_gate` if configured; meet the `evidence` bar (real-data
 proof + full suite — unit tests alone are not enough); post the review note on the
-**work item** (What to review / Main changes / How to test / Evidence); flip to
-the review state.
+**work item** (What to review / Main changes / How to test / Evidence). **That note is
+the worker's last act.**
 
-**The worker flips its own card.** That last step is the worker's, not yours, so the
-prompt must carry the board move with it: give the worker the two literal `gh`
-commands — the label swap and the `In review` write, with the real ids from
-`issue-tracker.md`'s `## Project board` section substituted in. A worker can't look
-up a field id it wasn't given. Omit the board command if that section is absent.
+**The worker writes no work-state label and moves no board card.** So the prompt hands
+it no `gh` command for either one. This session writes the review state itself, in one
+call with the removal of the `phase:review` label. It moves the card in the same step
+([On the wake](#on-the-wake--one-response-per-outcome)). The two labels name one moment,
+the end of the phase axis. One call is what keeps them consistent. A worker also cannot
+see that moment. Whether review is on, and which round the item is on, are facts this
+session resolves. Rationale:
+[`docs/adr/0025-the-session-writes-the-review-state.md`](docs/adr/0025-the-session-writes-the-review-state.md).
 
-**The `phase:*` label is not one of those commands.** This session owns the **Phase** axis
+**The `phase:*` label is not the worker's either.** This session owns the **Phase** axis
 at both ends: the spawn writes `phase:impl` (step 5), and the wake writes every transition
 after it. A worker that removes its own phase label leaves the tick with an item that reads as
 human review. That worker's finish then wakes nothing
@@ -677,13 +681,22 @@ also the mitigation ADR 0021 names for its own accepted risk, that an owned
 item with no phase label reads as human review. So it goes first and never last. A phase
 label moves no card ([Board status](#board-status)).
 
+**The transition that ends the phase axis writes two labels in one call.** The removal of
+the `phase:*` label and the write of the review state name one moment. So one row does
+both: it adds `to-review` in the same `gh issue edit`, and it moves the card to
+`In review`. There is then no first act and no second act to get wrong. The card derives
+from the work-state label alone, so that half of the pair is what moves it
+([Board status](#board-status)). **This session writes all three, and the worker writes
+none of them** — its last act is the review note. Rationale:
+[`docs/adr/0025-the-session-writes-the-review-state.md`](docs/adr/0025-the-session-writes-the-review-state.md).
+
 | Outcome | Write first | Then |
 |---|---|---|
-| `implementation-complete` | `phase:impl` → `phase:e2e` where the proof-phase gate holds; else → `phase:review` where review is on; else remove it | Proof: [The proof phase](#the-proof-phase). Review on: [Adversarial review](#adversarial-review-when-configs-reviewenabled) steps 1 and 2. Step 1 also **repoints the precheck** at the reviewer's worktree, with the review harness's process pattern — below. Review off: the worker already flipped its own work state and card, so report the finish and offer the review in one line |
-| `proof-complete` | `phase:e2e` → `phase:review` where review is on; else remove it | The same two branches, with the proof already done |
-| `verdict-approve` | remove `phase:review` | [Adversarial review](#adversarial-review-when-configs-reviewenabled) step 4 — gather evidence and hand the item to human review |
+| `implementation-complete` | `phase:impl` → `phase:e2e` where the proof-phase gate holds; else → `phase:review` where review is on; else remove it **and add `to-review` in the same call, and move the card to `In review`** | Proof: [The proof phase](#the-proof-phase). Review on: [Adversarial review](#adversarial-review-when-configs-reviewenabled) steps 1 and 2. Step 1 also **repoints the precheck** at the reviewer's worktree, with the review harness's process pattern — below. Review off: this wake is the hand-off to a human. Report the finish, the label pair you wrote, and the review you can still offer, in one line |
+| `proof-complete` | `phase:e2e` → `phase:review` where review is on; else remove it **and add `to-review` in the same call, and move the card to `In review`** | The same two branches, with the proof already done |
+| `verdict-approve` | remove `phase:review` **and add `to-review` in the same call, and move the card to `In review`** | [Adversarial review](#adversarial-review-when-configs-reviewenabled) step 4 — gather evidence and hand the item to human review |
 | `verdict-request-changes` | nothing, because a fix round is inside `phase:review` | [Adversarial review](#adversarial-review-when-configs-reviewenabled) step 3, at the round the line names. That step also **repoints the precheck** back at the implementation worktree, with the implementation harness's pattern — below |
-| `rounds-exhausted` | remove `phase:review` | Step 4 again — "after the last round regardless". The bound is spent, so offer no further round |
+| `rounds-exhausted` | remove `phase:review` **and add `to-review` in the same call, and move the card to `In review`** | Step 4 again — "after the last round regardless". The bound is spent, so offer no further round |
 | `dead` | nothing, because the item stays in the phase it is in | Report, and **never re-prompt** — below |
 | `stalled` | nothing, for the same reason | Reset the context and re-prompt — below |
 | `unreadable` | nothing, because a read that failed cannot say which phase the item is in | Report in one line: the tracker read is broken, and the item is unobserved until that read works again |
@@ -921,11 +934,15 @@ outcome that reports the bound spent.
    [The prompt: checklist + completion contract](#the-prompt-checklist--completion-contract)
    applies to it unchanged.
 4. **On approve, or after the last round regardless:** gather evidence and flip
-   the item to **human review**. **That transition is the removal of the `phase:review`
-   label**, and it is the first act (ADR 0021). The item stays `in-progress` and
-   `phase:review` right through the loop, because a worker owns it and a fix round is
-   inside the phase. So both labels change only when the loop concludes. Merge is always
-   a human step.
+   the item to **human review**. **That transition is one call: it removes the
+   `phase:review` label and it writes `to-review`.** The card moves to `In review` with it
+   ([Board status](#board-status)). **This session writes all three. The worker wrote
+   none of them**, because its last act was the review note. The item holds
+   `in-progress` and `phase:review` for the whole loop, because a worker owns it and a
+   fix round is inside the phase. So both labels change only here, at the one moment the
+   phase axis concludes
+   ([`docs/adr/0025-the-session-writes-the-review-state.md`](docs/adr/0025-the-session-writes-the-review-state.md)).
+   Merge is always a human step.
 
 On demand: **"review #N adversarially"** runs this flow directly even if review is
 off in config.
@@ -1065,7 +1082,9 @@ it. Shape output for acting on, not for completeness:
   tick's own word: `implementation-complete`, `proof-complete`, `verdict-approve`,
   `verdict-request-changes`, `rounds-exhausted`, `dead`, `stalled` or `unreadable`. Then
   the phase label you wrote, then what you did. `#38 implementation-complete · phase:impl →
-  phase:review. Reviewer spawned, gpt-5.6-terra @ high.`
+  phase:review. Reviewer spawned, gpt-5.6-terra @ high.` **Where the wake ended the phase
+  axis, name the label pair you wrote.** That one call is the hand-off to a human:
+  `#38 verdict-approve · phase:review removed · to-review · card In review.`
 - **Both counts come from the tracker, so restate both.**
   [On the wake](#on-the-wake--one-response-per-outcome) says how to read each one.
   `#38 stalled at phase:impl ·
