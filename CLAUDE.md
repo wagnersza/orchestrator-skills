@@ -55,8 +55,11 @@ its stdlib-only test suite: **run the tests when you touch a Python file**, per 
   `orchestrator/docs/adr/`, rather than a silent edit to the old one.
 - **Renaming or deleting a reference file means updating every link to it.** A
   dangling cross-reference is this repo's main failure mode.
-- **Bump `version` in `.claude-plugin/plugin.json`** — minor for a contract or
-  dependency change, patch for docs-only.
+- **Bump `version` in `.claude-plugin/plugin.json` only when a user story finishes.**
+  The bump lands with the last child of the story, and never once per work item. Minor
+  for a story that changed a contract or a dependency, patch for a docs-only story. A
+  worker on one child leaves the version untouched. Two children that each bump pick
+  the same number, and the merge then keeps one bump and loses the other.
 
 ## Agent skills
 
