@@ -74,5 +74,4 @@ sync with no registry to update.
   exercise a hook — so its assertions test whether the skill body still *says*
   what the completion contract assumes, not its runtime behaviour. Recorded here
   rather than papered over.
-- The budget rule is enforced in
-  [`skill-fork-sync/references/sync.md`](../../../skill-fork-sync/references/sync.md).
+- The budget rule is enforced in `skill-fork-sync/references/sync.md`.

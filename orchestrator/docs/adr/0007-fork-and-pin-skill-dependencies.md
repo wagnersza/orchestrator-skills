@@ -82,5 +82,4 @@ leaving that file untouched keeps `mattpocock-skills@mattpocock` and
   installed (`caveman`, `skill-creator`) stay out until they are declared;
   skills that ship with a desktop app and have no public upstream are a vendoring
   problem, not a forking one.
-- Turning the dial is what `/skill-fork-sync` exists for —
-  [`skill-fork-sync/SKILL.md`](../../../skill-fork-sync/SKILL.md).
+- Turning the dial is what `/skill-fork-sync` exists for — `skill-fork-sync/SKILL.md`.
