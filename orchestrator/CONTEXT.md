@@ -71,7 +71,7 @@ The external skill that owns **all** prompt composition — the diagnosis checkl
 _Avoid_: prompting guide, composing rules (both were vendored files, now removed).
 
 **simple-english**:
-The external skill that owns **all** writing rules for a **Prose deliverable**. It applies ASD-STE100 Simplified Technical English: the sentence limits, the vocabulary discipline, and the mode definitions. A dependency, not vendored: <https://github.com/AminBlg/SimpleEnglish> (MIT, no dependencies of its own). This repo states only *when* to invoke the skill and *what counts as a prose deliverable*, and copies no rule of the standard. Same posture as **prompt-improver**, for the same reason: a copied rule set drifts from the upstream that maintains it. The default mode here is **pragmatic**, which keeps domain vocabulary. Every glossary term in this file therefore survives a writing pass unchanged, and a worker must never "simplify" Tool, Harness, Worker or Pinned SHA. **Strict** mode needs the official ASD-STE100 dictionary, which this repo does not have, so nothing here asks for strict. The skill installs through the `skills` CLI (`npx skills add AminBlg/SimpleEnglish`), which registers no Claude plugin marketplace. So `/skill-fork-sync` cannot pin the skill, and it never appears in a **Sync plan** — the accepted risk in `docs/adr/0011-delegate-technical-writing-to-simple-english.md`. Install shapes and commands: `references/requirements.md`.
+The external skill that owns **all** writing rules for a **Prose deliverable**. It applies ASD-STE100 Simplified Technical English: the sentence limits, the vocabulary discipline, and the mode definitions. A dependency, not vendored: <https://github.com/AminBlg/SimpleEnglish> (MIT, no dependencies of its own). This repo states only *when* to invoke the skill and *what counts as a prose deliverable*, and copies no rule of the standard. Same posture as **prompt-improver**, for the same reason: a copied rule set drifts from the upstream that maintains it. The default mode here is **pragmatic**, which keeps domain vocabulary. Every glossary term in this file therefore survives a writing pass unchanged, and a worker must never "simplify" Tool, Harness, Worker or Effort. **Strict** mode needs the official ASD-STE100 dictionary, which this repo does not have, so nothing here asks for strict. The skill installs through the `skills` CLI (`npx skills add AminBlg/SimpleEnglish`), which registers no Claude plugin marketplace. Install shapes and commands: `references/requirements.md`.
 _Avoid_: STE, ASD-STE100 (both name the standard, not the dependency), style guide, house style (both name the thing this repo refuses to own).
 
 **Prose deliverable**:
@@ -234,39 +234,3 @@ Both are **work product**: a worker writes them by doing the work. So neither on
 
 **Both shapes are read once per tick, rather than polled in a loop.** An **Item automation** asks the seam for a **Phase** transition every minute. So a signal is read at that moment, from disk or from the tracker, and nothing is held between reads. Shape 2 carries one fact more under the tick: **the count of `Verdict:` comments is the Review round number**. So *round 2 of 3* is read from the tracker rather than remembered by a session. Why the tick replaces the loop: `docs/adr/0022-item-automation-replaces-the-blocking-watch.md`.
 _Avoid_: done signal, exit signal, finish event, heartbeat (the last one names liveness, which is the signal this deliberately is not).
-
-## Skill dependency versioning
-
-Vocabulary for `/skill-fork-sync` (`../skill-fork-sync/SKILL.md`), which holds each declared skill dependency at a version this repo controls. Rationale: `docs/adr/0007-fork-and-pin-skill-dependencies.md` and `docs/adr/0008-diff-targeted-run-budget.md`.
-
-**Fork**:
-A copy of an upstream skill repo in the maintainer's own GitHub account, created with `gh repo fork` and registered as the marketplace source in place of the upstream. Its **default branch is the version dial**: whatever sits there is what sessions load, because `claude plugin marketplace add` accepts no ref/branch/tag flag. Public, and explicitly a fork (GitHub's fork banner, the `parent` API field, plus a `FORK.md` recording upstream, fork date, last-synced SHA and why it exists). Clone lives under `~/.orchestrator/forks/<marketplace-name>/`, never inside `~/.claude/plugins/marketplaces/`.
-_Avoid_: mirror, vendored copy (a fork tracks upstream via a remote; neither of those does).
-
-**Upstream**:
-The original third-party repo a **Fork** was made from (`mattpocock/skills`, `DietrichGebert/ponytail`), present in the fork clone as the `upstream` git remote. Commits accumulate there and reach no session until a **Promote** moves them.
-_Avoid_: origin (that's the fork), source repo, parent (that's GitHub's API field name, not the layer).
-
-**Pinned SHA**:
-The commit the fork's default branch currently sits at — the version every session actually loads. Always resolved **live from git** (`git rev-parse main` in the fork clone), never read from `FORK.md`, so a stale record can't drive a wrong decision. Set at bootstrap to the *currently-installed* SHA (`installed_plugins.json`'s `gitCommitSha`), which makes bootstrap behaviour-neutral.
-_Avoid_: version, tag, release (tag-based pinning was rejected — see ADR 0007), current SHA.
-
-**Sync candidate**:
-The upstream commit a sync is considering promoting to — `git rev-parse upstream/main`, also read live from git. Evaluated in a throwaway worktree with the live install untouched, so a bad candidate can't break the session evaluating it and rejecting it means deleting a worktree with no rollback path.
-_Avoid_: new version, upstream HEAD (that's where the candidate comes from, not the thing under evaluation), release candidate.
-
-**Consumed skill**:
-A skill in an upstream delta that **this repo references**, decided by grepping this repo for the skill's name. Only consumed skills spend **Run budget**; changed skills this repo never references are skipped. Self-maintaining — a new reference in any doc is covered by the next sync with no registry to update — and deliberately biased toward false positives, so the failure direction is over-testing rather than skipping risk.
-_Avoid_: used skill, dependency (a dependency is declared in `references/requirements.md`; consumption is per-skill and grep-derived), relevant skill.
-
-**Sync plan**:
-The JSON a sync's deterministic half emits before anything is spent: the **Pinned SHA** and **Sync candidate**, the changed paths, the changed paths mapped to skills, each one marked **consumed** or skipped, the **Run budget** allocation, and what was dropped. Produced by one seam (`scripts/fork_state.py`) that mutates nothing, so it is testable with plain asserts and zero agent runs.
-_Avoid_: diff report, delta, manifest.
-
-**Promote**:
-Turning the dial: fast-forward and push the fork's default branch to the approved **Sync candidate**, rewrite `FORK.md`'s synced SHA, update the marketplace, and update the plugin — as one step, so there is never a state where the fork and the install disagree. **Always an explicit human decision**, never automatic on a clean eval. The new skill body loads next session.
-_Avoid_: merge, upgrade, release, sync (sync only evaluates and recommends; promote is the act).
-
-**Run budget**:
-The cap on what one sync may spend: **5 worker runs total, pinned-baseline runs included**. So either two paired candidate-vs-pinned comparisons plus a tiebreak, or up to five candidate runs. The allocation and any coverage dropped for budget is always reported, so "tested" never silently means "partially tested". Diff-targeted rather than a fixed contract suite, which at this ceiling could consume the whole budget and leave nothing for the change that triggered the sync.
-_Avoid_: cost cap, token budget, quota, test budget.
