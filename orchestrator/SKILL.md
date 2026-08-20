@@ -1,6 +1,6 @@
 ---
 name: orchestrator
-description: Orchestrate agent worker sessions across any workspace tool (orca/cmux/herdr), harness (claude/codex/pi/copilot/cursor), and frontier model. Pick the next ready work item, spawn a worker in its own worktree on the right model and effort for the job, prompt/monitor it via a file-based checklist, run optional cross-vendor adversarial review, and close finished work. Trigger on "what next", "what should I run/work on", "what's ready", "work on #N / implement #N / implement X", "spawn a worker", "start a session for X", "prompt worker Y", "what are the workers doing", "review #N adversarially", "close task #N / it's done / wrap up X", "list workers", "orchestrate".
+description: Orchestrate agent worker sessions across any workspace tool (orca/cmux/herdr), harness (claude/codex/pi/copilot/cursor), and frontier model. Pick the next ready work item, read whether it is a user story or a leaf task, spawn a worker in its own worktree on the right model and effort for the job, prompt/monitor it via a file-based checklist, run optional cross-vendor adversarial review, then merge and close finished work. Use this skill for every work-item action, and never wait for the user to type /orchestrator. A work verb plus a work-item number N is enough, with or without a "#". Trigger on "work on N", "work on #N", "implement N", "build N", "start N", "do N", "implement X", "spawn a worker", "start a session for X", "prompt worker Y", "what next", "what should I run/work on", "what's ready", "what are the workers doing", "list workers", "review N adversarially", "merge and close N", "merge N and close it", "close N", "close task #N", "it's done", "wrap up N", "orchestrate". A bare number after a work verb always means a tracked work item, so route it here rather than reading it as a file or a line number.
 ---
 
 # Orchestrator
@@ -129,6 +129,13 @@ worked trace of both lanes, end to end, is
 should I run* / *what's ready*, resolve to no skill and route nowhere. Answer them
 with ["What next?"](#what-next--pick-the-next-work), unchanged.
 
+**A flow this skill owns is not a verb either.** *merge and close N*, *close N*,
+*wrap up N*, *list workers* and *what are the workers doing* each name a section
+below, so they resolve to no skill and route nowhere. Run the section
+([Close a task](#close-a-task), [Monitor workers](#monitor-workers)) and never ask the
+user to confirm a route. The one skill a close invokes is
+`resolving-merge-conflicts`, at step 1, and the close flow names it there.
+
 **An unmapped verb costs one line, then proceeds.** A verb that matches no row is
 not a near miss to act on. Ask once, in one line: name the closest row and the verb
 it holds, and ask whether to route there. `Nothing routes "<the user's phrase>".
@@ -137,6 +144,33 @@ that lane. On no, answer the verb freehand, the way this session does today. The
 in the report that no skill was routed to. A decline of the whole question reads as a
 no. This closes two failures: a fuzzy match into a skill nobody chose, and a silent
 freehand answer to a verb that wanted one.
+
+## Resolve the item shape before you pick a flow
+
+**A work verb plus a work-item number is a complete instruction.** `work on N` needs
+no slash command, no `#`, and no follow-up question. `N` is the work-item number the
+tracker issued, and the `#` in front of it is optional. **The item picks the flow, and the
+user's wording does not.** So read the item before you pick one:
+
+1. **Read the item.** Use the tracker CLI from `docs/agents/issue-tracker.md`. You need
+   its labels, its `## Blocked by` edges and its children.
+2. **It carries `user-story`** → ["Work a #N"](#work-a-n--batch-spawn-its-unblocked-children).
+   Batch-spawn every unblocked child at once. A child that carries `user-story` itself
+   is a nested spec, so descend to the implementable leaves. Never spawn the parent.
+3. **It carries no `user-story`** → [Spawn a worker](#spawn-a-worker-implement-x). One
+   item, one worktree, one worker.
+4. **The tracker read failed** → report it in one line and spawn nothing. A guess at
+   the shape spawns the wrong number of workers.
+
+**Ask nothing on the way.** Which child, which skill and which model are three
+resolutions this session already owns, and each one has its own section. A work verb
+asks in one case only: an unmapped verb, which costs one line
+([Resolve the verb before you act](#resolve-the-verb-before-you-act)).
+
+This resolution is independent of the other two. Verb → skill stays
+[`references/skill-routing.md`](references/skill-routing.md), and work item →
+`(model, effort)` stays [`references/models.md`](references/models.md). Rationale:
+[`docs/adr/0029-a-work-item-number-is-a-complete-instruction.md`](docs/adr/0029-a-work-item-number-is-a-complete-instruction.md).
 
 ## Board status
 
@@ -237,9 +271,11 @@ against its own labels and state, per that section.
 
 ## "Work a #N" — batch-spawn its unblocked children
 
-When the user says **work on #N / implement the unblocked tasks of #N / do #N,
-max K**: don't ask which child — spawn a worker for **every unblocked child at
-once**, capped at K (default 5). Resolve the children fresh exactly as in "What
+This flow runs when the item carries `user-story`
+([Resolve the item shape before you pick a flow](#resolve-the-item-shape-before-you-pick-a-flow)).
+The phrases that reach it are **work on N / work on #N / implement the unblocked tasks
+of #N / do #N, max K**: don't ask which child — spawn a worker for **every unblocked
+child at once**, capped at K (default 5). Resolve the children fresh exactly as in "What
 next?" (recurse through any `user-story` child to reach implementable leaves).
 Ports stay per-item (`N` = work-item number), so batch-spawned siblings never
 collide. **Classify each child's role separately** — a batch usually mixes heavy
@@ -258,7 +294,10 @@ example for how a `user-story` parent moves as a function of its children.
 
 ## Spawn a worker (implement X)
 
-When the user says **implement #N / implement X / start work on X**:
+This flow runs when the item carries no `user-story` label
+([Resolve the item shape before you pick a flow](#resolve-the-item-shape-before-you-pick-a-flow)),
+and when the user names work with no number at all. The phrases that reach it are
+**work on N / implement #N / implement X / start work on X**:
 
 1. **Already exists?** (op 1, worktree-exists?) — if a worktree matches the slug,
    reuse it: get its worker handle (op 9) and just send the prompt (step 6). Only
@@ -949,8 +988,8 @@ off in config.
 
 ## Close a task
 
-When the user says **close task #N / it's done / wrap up <slug>**: run one **Close
-transaction**. It is eight steps in one fixed order, defined in
+When the user says **merge and close N / close N / close task #N / it's done / wrap up
+<slug>**: run one **Close transaction**. It is eight steps in one fixed order, defined in
 [`CONTEXT.md`](CONTEXT.md). The split is by judgement. Steps 1 to 3 need it, so they
 are the prose below. Steps 4 to 8 need none, so `scripts/close_item.py` owns them.
 Rationale:
@@ -962,6 +1001,7 @@ before you touch anything:
 | Instruction | Teardown |
 |---|---|
 | "task done, merge and close" | yes |
+| "merge and close 20", "merge 20 and close it" | yes |
 | "close 20" | yes |
 | "wrap up 20" | yes |
 | "flip 20 to review", "advance 20" | no |
