@@ -467,7 +467,7 @@ Four things the prompt must carry:
   item is never exempt. The fourth class is orchestrator reports, which bind this
   session and no worker — see [Reporting to the user](#reporting-to-the-user).
 - **Which mode.** Pragmatic, which keeps domain vocabulary. Every `CONTEXT.md`
-  glossary term — Tool, Harness, Worker, Pinned SHA — survives the pass unchanged.
+  glossary term — Tool, Harness, Worker, Effort — survives the pass unchanged.
   Never ask for strict mode: it needs a dictionary this repo does not have.
 - **What stays byte-identical.** Code blocks, identifiers, file paths, commands,
   quoted error strings, YAML and JSON keys, link targets, and proper nouns. A pass

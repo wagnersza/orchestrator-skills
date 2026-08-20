@@ -134,7 +134,7 @@ separate install at all, because the skill ships inside the `mattpocock-skills` 
 | Shape | Where `SKILL.md` sits | Install with |
 |-------|-----------------------|--------------|
 | **Plugin cache** (what the plugin install writes) | `~/.claude/plugins/cache/<marketplace>/mattpocock-skills/<version>/skills/engineering/…` | `claude plugin install mattpocock-skills@mattpocock` |
-| **Marketplace clone** (the source the cache is built from, and the **Fork** under ADR 0007) | `~/.claude/plugins/marketplaces/<marketplace>/skills/engineering/…` | `claude plugin marketplace add <owner>/skills` |
+| **Marketplace clone** (the source the cache is built from) | `~/.claude/plugins/marketplaces/<marketplace>/skills/engineering/…` | `claude plugin marketplace add <owner>/skills` |
 | **Standalone clone, global** | `~/.claude/skills/resolving-merge-conflicts/` | copy the skill directory there, as with a `prompt-improver` clone |
 | **Standalone clone, project** | `<repo>/.claude/skills/resolving-merge-conflicts/` | the same copy, inside the repo |
 
