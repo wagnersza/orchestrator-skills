@@ -38,10 +38,14 @@ The user reads the spec, and the acceptance criteria are enumerated on it.
   so it is `heavy`, and `db_gate` is configured, which makes it heavy by definition.
   `models.heavy` resolves to `opus-5 @ xhigh`. The skill and the model are two
   resolutions over one item, and neither decided the other.
-- **Preflight the routed skill.** The harness is `claude`, so `/implement` is a plugin
-  skill. The `mattpocock-skills` plugin check runs, and the plugin is installed. If it
-  were missing, the spawn aborts here, before the worktree exists. The report then says
-  which skill, which harness, and that `/orchestrator-setup` installs it.
+- **Preflight the routed skill, in two halves.** The harness is `claude`, so
+  `/implement` is a plugin skill. **First half:** the `mattpocock-skills` plugin check
+  runs, and the plugin is installed. If it were missing, the spawn aborts here, before
+  the worktree exists, and the report says which skill, which harness, and that
+  `/orchestrator-setup` installs it. **Second half:** the skill list of this session
+  holds `implement`, so the model can invoke it. This trace continues on that branch.
+  The other branch is
+  [Turn 2 again, with the second half of the preflight failing](#turn-2-again-with-the-second-half-of-the-preflight-failing).
 - **Worktree + worker.** Branch `61-contacts-import` off the default branch,
   `pnpm install` through the setup hook, then `claude --model opus --effort xhigh
   --dangerously-skip-permissions`.
@@ -76,19 +80,60 @@ The worker's first act inside the worktree is `/implement`. It then works the
 checklist to the review note and stops there, exactly as before this routing
 existed.
 
+## Turn 2 again, with the second half of the preflight failing
+
+Same work item, same harness, same role. One fact differs: the frontmatter of the routed
+skill holds `disable-model-invocation: true`. The name is then absent from the skill list
+of this session. So no model can enter the skill, and only a human who types the slash
+command can.
+
+- **The spawn does not abort.** The plugin is installed and the skill body is on disk, so
+  the contract is reachable and only the slash command is not.
+- **The draft prompt carries no slash command.** In the place `Run /implement.` held, it
+  carries the row's *Without slash commands* prose:
+
+  ```
+  Implement work item #61 test-first, at agreed seams. Run the type check and the full
+  suite, review your own diff against the acceptance criteria, then commit.
+
+  Work item: #61 (contacts import). Acceptance criteria: <from the item>.
+  Checklist: .orchestrator/checklist-61.md — work it top to bottom, tick each box,
+  do not end the turn while any box is unchecked.
+  Recipe: scripts/run.sh start -d -a 8061 -w 3061 -g 3161. DB gate: <the config's>.
+  Evidence: real-data proof plus the full suite.
+  Do not touch: <the scope edges, the Browser surface edge included>.
+  ```
+
+- **Everything else is unchanged.** Same worktree, same claim on #61, same
+  `prompt-improver` pass as an agentic-pipeline prompt, same checklist file. The prose is
+  the worker's opening instruction, so it sits where the command sat.
+- **Report.** `#61 61-contacts-import spawned · prose fallback, the model cannot invoke
+  /implement · heavy · opus-5 · xhigh. 1 worker live.` The skill field names the branch.
+  A field that reads `/implement` names a skill the worker never entered.
+
+Sending `Run /implement.` anyway is the failure this avoids. The worker reads it as text,
+starts cold, and the transcript looks like it worked. **This is a trace of one run, and not
+a record of which skills carry the flag.** No file here holds that list, because a plugin
+update moves the flag.
+
 ## The same two turns on a `codex` harness
 
 Everything above holds except the shape of one line. `codex` parses no slash command,
 so the prompt carries the row's *Without slash commands* prose in place of
 `Run /implement.` — implement the item test-first, at agreed seams, run the type check
 and the full suite, review the diff against the criteria, then commit. The preflight
-changes with it. There is no plugin to check, so what the orchestrator confirms is that
-the row has that prose. A `/implement` sent to `codex` is the failure this avoids. The
-worker reads it as text and starts cold, and the transcript looks like it worked.
+changes with it. There is no plugin to check and no slash command to invoke, so what the
+orchestrator confirms is that the row has that prose. A `/implement` sent to `codex` is the
+failure this avoids. The worker reads it as text and starts cold, and the transcript looks
+like it worked. **That is the same failure, and the same fallback, as the section above.**
+Two branches reach one prose contract, so the only difference is the reason the report
+gives: `prose fallback, codex parses no slash command`.
 
 Turn 1 cannot happen on a session with no slash commands at all. There the
 orchestrator answers `to-spec` freehand and its report says the skill was
-unreachable.
+unreachable. **A session with slash commands reaches the same end where the model cannot
+invoke `/to-spec`.** The `inline` lane claims nothing either way: it asks the maintainer to
+type the command, or it answers the verb freehand and reports the skill as unreachable.
 
 ## Two variants worth tracing once
 
