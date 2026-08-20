@@ -45,7 +45,7 @@ setup_cmd:  "python3 --version"   # stdlib-only test suite; nothing to install. 
 run_recipe: ""            # no app to boot
 ports:      ""            # no ports (nothing listens)
 db_gate:    ""            # no database
-evidence:   "run the test suite and quote the result (`python3 -m pytest scripts/ -q`, or unittest discover if pytest is absent) — a green run is part of the bar whenever a Python file is touched, and 'no Python file changed' must be stated explicitly when it is skipped. Plus: the changed skill/reference read end to end for internal consistency, every cross-reference resolved (no link to a deleted or renamed file), and any manifest edit validated as JSON. For a change to a skill body, quote the before/after of each edited block in the review note."
+evidence:   "run the test suite and quote the result (`python3 -m pytest scripts/ -q`, or unittest discover if pytest is absent) — a green run is part of the bar whenever a Python or a Markdown file is touched. When the run is skipped, the review note must state 'no Python and no Markdown file changed'. Plus: the changed skill/reference read end to end for internal consistency, every cross-reference resolved (`scripts/test_links.py` in that suite proves this half, not a reading), and any manifest edit validated as JSON. For a change to a skill body, quote the before/after of each edited block in the review note."
 ```
 
 ## Notes
@@ -92,8 +92,8 @@ flows: `scripts/close_item.py` owns steps 4 to 8 of a **Close transaction** (ADR
   no network, no GitHub calls and no agent runs — so there is still nothing to
   install. `pytest` is used if present purely for nicer output; `python3 -m
   unittest discover -s scripts -q` is the fallback and the guaranteed path.
-- **Running the tests is part of the `evidence` bar** whenever a Python file is
-  touched, and a review note that skips it must say so and why.
+- **Running the tests is part of the `evidence` bar** whenever a Python or a
+  Markdown file is touched. A review note that skips the run must say so and why.
 
 The rest of the `evidence` bar replaces "boot the app and screenshot it" with what
 actually proves a skill edit is correct: cross-references resolve, the contract

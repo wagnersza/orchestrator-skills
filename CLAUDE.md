@@ -11,6 +11,8 @@ or migrate. The exceptions are two seams, `scripts/close_item.py` (the close
 transaction) and `scripts/worker_state.py` (the worker watch), each with a
 stdlib-only test suite: **run the tests when you touch a Python file**, per the
 `evidence` bar in [`docs/agents/orchestrator.md`](docs/agents/orchestrator.md).
+`scripts/test_links.py` puts every Markdown file in the repo under that same suite.
+So **run the tests when you touch a Markdown file too**.
 
 ## Working here
 
