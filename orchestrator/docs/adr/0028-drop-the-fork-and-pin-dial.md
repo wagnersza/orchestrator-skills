@@ -18,7 +18,7 @@ So the dial is removed, and not paused.
 ## What leaves
 
 - `skill-fork-sync/`, which is `SKILL.md` and the three mode references.
-- `scripts/fork_state.py`, the **Sync plan** seam, and `scripts/test_fork_state.py`.
+- `scripts/fork_state.py`, the sync-plan seam, and `scripts/test_fork_state.py`.
 - `evals/skill-fork-sync/sync-judgment.json`, and the `evals/` tree with it. That eval
   set had one member, and it was the dial's own self-eval.
 - The `./skill-fork-sync` entry in `.claude-plugin/plugin.json`, the fork vocabulary
@@ -54,8 +54,8 @@ who reaches for a pin again starts there.
   consistent with its eight terms. A dial nobody turns is worse than no dial, because
   it reads as a guarantee this repo does not have.
 - **Keep the seam and delete the skill** (rejected) — `scripts/fork_state.py` computes
-  a **Sync plan** for a sync that no longer exists. The test suite then passes and
-  proves nothing, which is a rule with no home.
+  a sync plan for a sync that no longer exists. The test suite then passes and proves
+  nothing, which is a rule with no home.
 - **Keep the `evals/` tree for a later subject** (rejected) — git tracks no empty
   directory, so the tree cannot survive its one member. An eval set for a different
   subject is new work, and it picks its own home then.
