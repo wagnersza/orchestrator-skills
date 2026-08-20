@@ -1,5 +1,7 @@
 # Fork each declared skill dependency and pin the fork's default branch
 
+> Superseded by [ADR 0028](0028-drop-the-fork-and-pin-dial.md)
+
 Every skill this repo declares as a dependency — `mattpocock-skills`, `ponytail`,
 `prompt-improver` — was installed straight from someone else's default branch,
 and this repo does not merely coexist with them: `references/requirements.md`

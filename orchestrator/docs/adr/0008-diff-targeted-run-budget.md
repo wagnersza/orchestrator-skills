@@ -1,5 +1,7 @@
 # A sync spends at most 5 worker runs, targeted by the diff
 
+> Superseded by [ADR 0028](0028-drop-the-fork-and-pin-dial.md)
+
 Evaluating a **Sync candidate** costs real agent runs, and the useful question is
 narrow: *did upstream regress something this repo relies on?* So a sync is capped
 at **5 worker runs total, pinned-baseline runs included** — either two paired
