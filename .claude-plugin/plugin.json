@@ -20,7 +20,6 @@
   "skills": [
     "./orchestrator",
     "./orchestrator-setup",
-    "./playwright-cli",
-    "./skill-fork-sync"
+    "./playwright-cli"
   ]
 }

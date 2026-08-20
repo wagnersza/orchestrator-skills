@@ -1,13 +1,5 @@
 # Worker checklist files — live in the worktree, torn down with it.
-# Also covers /skill-fork-sync eval results, transcripts and benchmarks under
-# .orchestrator/fork-sync/<fork>-<candidate-sha>/ — machine-local noise.
 .orchestrator/
 
 # Python bytecode from running the seam's test suite.
 __pycache__/
-
-# Eval sets are the opposite: committed, extended each sync so coverage
-# compounds. Nothing under evals/ is ignored — it is listed here only so the
-# rule is explicit, since evals/ has no content until the eval-set work item
-# lands and git tracks no empty directory.
-!evals/
