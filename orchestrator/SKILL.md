@@ -126,8 +126,8 @@ that law is what puts it there.
 **Lane `worker` — hand the skill to the worker.** Invoke nothing here. The
 invocation goes into the spawn prompt, so the worker's first act inside its own
 worktree is to enter the skill. [Spawn a worker](#spawn-a-worker-implement-x)
-preflights the skill and splices it. This section only resolves which skill it is. A
-worked trace of both lanes, end to end, is
+preflights the skill, then splices it or takes the prose fallback that preflight names.
+This section only resolves which skill it is. A worked trace of both lanes, end to end, is
 [`references/examples/routed-run.md`](references/examples/routed-run.md).
 
 **A queue question is not a verb.** A bare `/orchestrator`, and *what next* / *what
@@ -574,9 +574,9 @@ after it. A worker that removes its own phase label leaves the tick with an item
 human review. That worker's finish then wakes nothing
 ([On the wake](#on-the-wake--one-response-per-outcome)).
 
-**Harness shape:** a **claude** worker **does** enter the routed skill — the
-invocation is a literal slash command in the prompt (`/implement`), and its other
-slash skills (`/ponytail:ponytail`) stay available on top. See
+**Harness shape:** a **claude** worker **does** enter the routed skill, where the model
+can invoke that skill — the invocation is a literal slash command in the prompt
+(`/implement`), and its other slash skills (`/ponytail:ponytail`) stay available on top. See
 `references/harnesses/claude.md`. **Any other harness** gets the **same contract in
 plain English** — no slash commands, no "TodoWrite" wording; spell out the numbered
 checklist steps as prose. **The routed skill takes that same split.** A harness with
@@ -893,8 +893,10 @@ plain-English split every other part of the contract takes: never send a slash c
 a harness that cannot parse one.
 
 **The re-prompt is then self-contained.** A cleared worker has forgotten its spawn prompt.
-So the re-prompt re-carries four things. The routed skill, as a literal invocation. The
-worker's own harness, model, effort and role. Then the acceptance criteria and the scope
+So the re-prompt re-carries four things. The routed skill, **in the form the spawn used**.
+That is the literal invocation, or the row's *Without slash commands* prose where the spawn
+took the prose fallback. Then the worker's own harness, model, effort and role. Then the
+acceptance criteria and the scope
 edges. **That is the same list a fix prompt already carries** (step 3 of
 [Adversarial review](#adversarial-review-when-configs-reviewenabled)) — one contract
 reached from two directions, not two rules. A re-prompt is a worker prompt, so it goes
@@ -990,7 +992,10 @@ outcome that reports the bound spent.
      mentioning `/implement`. Same rule as a spawn prompt, for the same reason — a
      mention reads as a suggestion, and the worker then works freehand. **A fix prompt
      goes to a worker whose context this session has cleared**, so it re-states the
-     invocation instead of relying on the worker to remember entering it.
+     invocation instead of relying on the worker to remember entering it. **Where the
+     spawn took the prose fallback, the fix prompt takes it too**, because the model
+     still cannot invoke the skill
+     ([Spawn a worker](#spawn-a-worker-implement-x), step 2).
    - **The worker's own harness, model, effort and role.** Effort steps up each round,
      so the worker cannot infer its current setting from the last one it saw.
    - **The reviewer's model, effort and harness, with the cross-vendor fact stated.**
