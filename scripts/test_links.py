@@ -49,8 +49,9 @@ SKIP_SCHEMES = ("http://", "https://", "mailto:")
 LINK = re.compile(r"\[[^\]]*\]\(\s*([^)\s]+)")
 
 # A fence opens and closes a code block. Three or more of one character, and the
-# closing run is at least as long as the opening one.
-FENCE = re.compile(r"^ *(`{3,}|~{3,})")
+# closing run is at least as long as the opening one. Group 2 is what follows the
+# run: an info string on the opening fence, and nothing on the closing one.
+FENCE = re.compile(r"^ *(`{3,}|~{3,})(.*)$")
 
 ATX_HEADING = re.compile(r"^ {0,3}#{1,6} +(.+?) *$")
 
@@ -76,6 +77,10 @@ def body_lines(text):
 
     Both the links and the headings come through here. So a `#` comment in a shell
     example is no heading, and a path in example output is no cross-reference.
+
+    A closing fence carries no info string. So ```` ```js ```` inside a block opens
+    no second block and closes no first one, and a nested example stays inside its
+    outer block.
     """
     fence = None
     for number, line in enumerate(text.splitlines(), 1):
@@ -86,7 +91,11 @@ def body_lines(text):
                 fence = marker
             else:
                 yield number, line
-        elif marker.startswith(fence[0]) and len(marker) >= len(fence):
+        elif (
+            marker.startswith(fence[0])
+            and len(marker) >= len(fence)
+            and not found.group(2).strip()
+        ):
             fence = None
 
 
@@ -200,13 +209,9 @@ class LinkTestCase(unittest.TestCase):
         path.write_text(text, encoding="utf-8")
         return path
 
-    def assert_resolves(self, root, kind=None):
+    def assert_resolves(self, root):
         """Fail once, with every link that does not resolve in the message."""
-        failures = [
-            f"{found}: {message}"
-            for found, message in scan(root)
-            if kind is None or found == kind
-        ]
+        failures = [f"{found}: {message}" for found, message in scan(root)]
         if failures:
             self.fail("\n".join([f"{len(failures)} links do not resolve:", *failures]))
 
@@ -273,6 +278,21 @@ class LinkTestCase(unittest.TestCase):
         )
 
         self.assertEqual(self.reported_in("nested.md"), [])
+
+    def test_a_line_with_an_info_string_closes_no_fence(self):
+        """A closing fence carries no info string, so a nested example inside a
+        block of the same width leaves the block open. Without this rule the lines
+        after the inner example read as prose, and their links read as
+        cross-references."""
+        self.write(
+            "info.md",
+            "```markdown\n"
+            "```js\n"
+            "[example output](no-such-file.md)\n"
+            "```\n",
+        )
+
+        self.assertEqual(self.reported_in("info.md"), [])
 
     def test_an_indented_fence_still_opens_a_code_block(self):
         """A fenced block inside a list item is indented, and two files here hold
