@@ -224,6 +224,14 @@ The seam that observes a live **Worker**'s own work product and answers whether 
 **The blocking poll loop has retired, and the seam has not.** A loop in a background process of the orchestrator's own shell dies with that shell. It reports nothing when it does. So the trigger is an **Item automation**, and the seam is asked once per tick as a predicate. The exit-code contract survives, the statelessness survives, and the split above survives. What retired is the `watch` subcommand, with its bounded maximum wait and its per-role completion flag. The stall window survives as an argument to the predicate. `docs/adr/0022-item-automation-replaces-the-blocking-watch.md` narrows ADR 0018 to that extent and no further.
 _Avoid_: watchdog, monitor, supervisor, liveness probe (each implies restart authority this thing does not have).
 
+**Plugin root**:
+The directory this plugin is installed in. It holds `scripts/`, so it is the only working directory a bare `python3 -m scripts.<module>` resolves from. It is also never the working directory of either caller: a session runs in a target repo checkout, and a tick runs in a worker worktree. Two install shapes carry it. A **plugin-cache install** puts it at `~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/`, where the version segment changes on every update. A **clone** puts it at the checkout. So no path is hardcoded.
+
+**Every invocation of either seam names the file under this root**, as `python3 <plugin root>/scripts/<module>.py`. The **Orchestrator** resolves the root once per session, with one command that covers both shapes. It then substitutes the resolved value into each later invocation. A literal path is the only value that reaches an **Item automation**, because the **Tool** stores that precheck and runs it later, in a shell that saw no assignment. The spawn preflight proves the resolved command runs before the first automation exists, and a failure aborts the spawn.
+
+**A checkout of this plugin is where the module form looks healthy.** This repo has its own `scripts/`, so the module form resolves from that checkout and runs a copy the session never reads. It reports success and it reads the wrong file, which makes it a fourth **failure mode that reports success**. Rationale, the two rejected working forms, the measurements and the ban's test: `docs/adr/0034-the-seam-invocation-carries-a-resolved-plugin-root.md`.
+_Avoid_: skill root, install path, plugin directory, `$CLAUDE_PLUGIN_ROOT` (that names a harness variable which is unset in the shell a skill body opens).
+
 **Completion signal**:
 How a **Worker**'s finish is detected. Two shapes, and a tick reads exactly one — the item's **Phase** names which, so no flag carries the worker's **Role**:
 
