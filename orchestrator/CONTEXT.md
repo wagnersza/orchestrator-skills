@@ -244,7 +244,7 @@ One schedule per live **Work item**, owned by the **Tool** rather than by a sess
 _Avoid_: cron job, watcher, daemon, poller (each names a mechanism rather than the unit), run automation (`Run` is not a term this repo defines).
 
 **Worker watch**:
-The seam that observes a live **Worker**'s own work product and answers whether something needs a decision now. It is not a worker — it has no **Harness** and no **Model** — and it is not the orchestrator, because it decides nothing. **It reports and never acts.** Asked once per tick, it reads two facts on the file system plus the work item's labels and comments. It answers one bit: a **Phase** transition is due, or nothing is. The printed line names which of the eight outcomes fired. It composes no prompt, kills no process, writes no label, and spawns nothing, so every destructive act stays in a session a human can interrupt. It holds no state that changes an answer, which is what makes a restart after each re-prompt free.
+The seam that observes a live **Worker**'s own work product and answers whether something needs a decision now. It is not a worker — it has no **Harness** and no **Model** — and it is not the orchestrator, because it decides nothing. **It reports and never acts.** Asked once per tick, it reads three facts on the file system plus the work item's labels and comments. It answers one bit: a **Phase** transition is due, or nothing is. The printed line names which of the nine outcomes fired. It composes no prompt, kills no process, writes no label, and spawns nothing, so every destructive act stays in a session a human can interrupt. It holds no state that changes an answer, which is what makes a restart after each re-prompt free.
 
 **It also delivers the line it printed, and that is not a decision.** The seam sends the wake to the first target that succeeds. That is the terminal handle, then the terminal title, then a comment on the **Work item**. Every prohibition above holds for that delivery, and the send carries nothing the seam chose. It exits non-zero on every path, which is what keeps an agent off a tick (`docs/adr/0027-the-tick-delivers-its-own-wake.md`).
 
@@ -267,6 +267,8 @@ How a **Worker**'s finish is detected. Two shapes, and a tick reads exactly one 
 1. **A fully ticked checklist** — every box in `.orchestrator/checklist-<item>.md` is `- [x]`. This is the implementation worker's shape, read in `phase:impl` and in `phase:e2e`. It docks onto the completion contract the **Checklist** already is, so it adds no second place to record progress.
 2. **A `Verdict:` comment** on the **Work item** — the review worker's shape, read in `phase:review`, because a reviewer ticks no checklist. `Verdict:` is a fixed literal shared by the review prompt and the watch, and its value is `approve` or `request-changes`. It is quoted here, so a writing pass leaves it byte-identical.
 
+**Shape 1 reads a third fact, and that is the Gate record.** A ticked checklist on its own says a worker believes it is done. A ticked checklist plus a green line for every required layer at the current `HEAD` says a machine agreed. A missing line, a malformed line, a non-zero exit or a stale `head_sha` fires the `gates-unproven` outcome instead. The **Orchestrator** then re-prompts the worker, and the item does not move to review. Which layers are required arrives as a repeatable flag the spawn resolves, so the seam still parses no config (`docs/adr/0036-a-gate-run-is-work-product.md`).
+
 Both are **work product**: a worker writes them by doing the work. So neither one reports a finish for a dead worker. `orca terminal read` and `orca terminal wait --for tui-idle` both did report one, which is the failure mode recorded in `docs/adr/0017-gate-worker-readiness-on-a-process-check.md`. Why these two shapes, and why a reviewer's stall detection is weaker as accepted risk: `docs/adr/0018-the-worker-watch-is-a-stateless-seam.md`. Why the same seam also answers readiness for every **Tool**: `docs/adr/0019-readiness-is-a-tool-agnostic-process-check.md`.
 
 **Both shapes are read once per tick, rather than polled in a loop.** An **Item automation** asks the seam for a **Phase** transition every minute. So a signal is read at that moment, from disk or from the tracker, and nothing is held between reads. Shape 2 carries one fact more under the tick: **the count of `Verdict:` comments is the Review round number**. So *round 2 of 3* is read from the tracker rather than remembered by a session. Why the tick replaces the loop: `docs/adr/0022-item-automation-replaces-the-blocking-watch.md`.
@@ -277,6 +279,25 @@ One check with one command and one exit code. A non-zero exit stops the work, an
 
 **A DB gate is not a Gate.** The `db_gate` field of a **Project recipe** names the data an item's evidence needs, so it holds no command and no exit code, and it keeps its own name and its own checklist box.
 _Avoid_: check, hook, step, quality check (each one is broader than a command with an exit code).
+
+**Gate record**:
+What a **Gate** run leaves on disk. Each gate command appends one line to
+`.orchestrator/gates-<item>.jsonl` in the **Worker**'s own worktree, beside the
+**Checklist**. The line is one JSON object with four keys: `command` is the gate command
+that ran, `exit` is the code it returned, `utc` is when the run ended, and `head_sha` is
+the commit it saw. `head_sha` is what ties a green run to a commit, because a green line
+against a stale commit proves nothing. The format and its one home are
+[`references/quality-gates.md`](references/quality-gates.md).
+
+**A gate command appends its line whatever the exit code is.** A red run that writes no
+line reads as a run that never happened.
+
+**It is a record, and not a second enforcement mechanism.** No hook blocks a push, and no
+script rejects a commit. The **Worker watch** reads it as the third fact of the
+**Completion signal**, so an item whose record proves nothing stops before review instead.
+Rationale, the rejected mechanisms and the accepted risk that a line can be forged:
+[`docs/adr/0036-a-gate-run-is-work-product.md`](docs/adr/0036-a-gate-run-is-work-product.md).
+_Avoid_: gate log, gate report, audit trail, receipt (each one names a document a human reads, and this is a fact a tick reads).
 
 **Layer**:
 One of the five bands a **Gate** runs in, numbered 1 to 5. Layers 1 to 4 each hold one command, and each one stops a push. Layer 5 is advisory: it runs once per user story, and it emits candidate work items instead of an exit code. The word is **Layer** everywhere, and never "tier", because `_Avoid_: tier` already stands on **Role** and on **Cost profile**. One word must not name three axes. The five, with a command and a budget for each: `references/quality-gates.md`.

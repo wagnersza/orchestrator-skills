@@ -651,7 +651,7 @@ Definitions: the **Item automation** and **Phase** entries in
 [`CONTEXT.md`](CONTEXT.md). Rationale:
 [`docs/adr/0022-item-automation-replaces-the-blocking-watch.md`](docs/adr/0022-item-automation-replaces-the-blocking-watch.md).
 
-**The precheck is the whole tick.** `wake` asks the same predicate as `phase`. The eight
+**The precheck is the whole tick.** `wake` asks the same predicate as `phase`. The nine
 outcomes, their order and the back-off window are unchanged. On a due transition it
 delivers the printed line itself. **No path through it exits 0**, so every run records as
 skipped, no model loads and no agent runs on a tick. That command goes into op 11's
@@ -665,6 +665,7 @@ python3 <plugin root>/scripts/worker_state.py wake --item <N> \
   --back-off <duration> --repo <owner>/<name> \
   --marker-dir <the implementation worktree from op 2>/.orchestrator \
   --tracker-cli <gh or glab> --tracker-host <host> \
+  --require-gate '<one per required layer, from config's gates: block>' \
   --handle <this session's terminal handle, from op 9> --title orchestrator \
   --send-command '<op 4, with {target} where the terminal goes and {text} where the line goes>'
 ```
@@ -693,6 +694,7 @@ names no harness, no tracker and no tool. So the spawn is the one place they are
 | the proof-phase gate | a non-blank `run_recipe`, or an `evidence` bar that asks for UI proof | whether this item can ever reach `phase:e2e` — see [The proof phase](#the-proof-phase) |
 | the harness process pattern | `references/harnesses/<harness>.md` | what the `dead` outcome looks for |
 | the stall window | longer than the item's slowest single step, so a worker thinking hard is never read as stalled | when `stalled` fires |
+| the required gate layers | config's `gates:` block — one `--require-gate` per non-blank command, minus `deep` under the `lite` profile, and never `story` | when `gates-unproven` fires in place of a finish. With none the record is never read ([`references/quality-gates.md`](references/quality-gates.md)) |
 | the marker directory | the item's implementation worktree (op 2), plus `/.orchestrator` | where a back-off marker lives, and what it outlives |
 | the tracker CLI | `docs/agents/issue-tracker.md` | which command reads the labels and the comments, and which posts the wake comment |
 | the tracker host | `docs/agents/issue-tracker.md`, where the tracker is self-hosted | which server those reads go to |
@@ -788,7 +790,7 @@ are the whole of monitoring on a tool with no automation surface.
 ## On the wake — one response per outcome
 
 A tick wakes this session with the one line its precheck printed, and that line names one
-of eight outcomes. **The response is a lookup, not an interpretation.** Read the outcome,
+of nine outcomes. **The response is a lookup, not an interpretation.** Read the outcome,
 run its row, and report per [Reporting to the user](#reporting-to-the-user).
 
 **Write the `phase:*` label as the first act of every transition.** That write is what
@@ -810,6 +812,7 @@ none of them** — its last act is the review note. Rationale:
 |---|---|---|
 | `implementation-complete` | `phase:impl` → `phase:e2e` where the proof-phase gate holds; else → `phase:review` where review is on; else remove it **and add `to-review` in the same call, and move the card to `In review`** | Proof: [The proof phase](#the-proof-phase). Review on: [Adversarial review](#adversarial-review-when-configs-reviewenabled) steps 1 and 2. Step 1 also **repoints the precheck** at the reviewer's worktree, with the review harness's process pattern — below. Review off: this wake is the hand-off to a human. Report the finish, the label pair you wrote, and the review you can still offer, in one line |
 | `proof-complete` | `phase:e2e` → `phase:review` where review is on; else remove it **and add `to-review` in the same call, and move the card to `In review`** | The same two branches, with the proof already done |
+| `gates-unproven` | nothing, because the item stays in the phase it is in | Reset the context and re-prompt — below. The line names one of four causes, so quote that cause and name the command to run again. Never move the item to review on this line |
 | `verdict-approve` | remove `phase:review` **and add `to-review` in the same call, and move the card to `In review`** | [Adversarial review](#adversarial-review-when-configs-reviewenabled) step 4 — gather evidence and hand the item to human review |
 | `verdict-request-changes` | nothing, because a fix round is inside `phase:review` | [Adversarial review](#adversarial-review-when-configs-reviewenabled) step 3, at the round the line names. That step also **repoints the precheck** back at the implementation worktree, with the implementation harness's pattern — below |
 | `rounds-exhausted` | remove `phase:review` **and add `to-review` in the same call, and move the card to `In review`** | Step 4 again — "after the last round regardless". The bound is spent, so offer no further round |
@@ -818,17 +821,19 @@ none of them** — its last act is the review note. Rationale:
 | `unreadable` | nothing, because a read that failed cannot say which phase the item is in | Report in one line: the tracker read is broken, and the item is unobserved until that read works again |
 
 **The item's phase is what makes the response a lookup.** The seam reads that label to
-decide which of the seven gated outcomes a tick can reach. So `implementation-complete` and
+decide which of the eight gated outcomes a tick can reach. So `implementation-complete` and
 `verdict-approve` can never arrive for one item on the same minute. `unreadable` is the
-eighth, and no label gates it: the read that failed is the read that carries the label.
+ninth, and no label gates it: the read that failed is the read that carries the label.
 The on-demand door (`review #N adversarially`) is unchanged, and it writes `phase:review`
 itself.
 
-**Four rows write no label, because they are not phase transitions.** ADR 0021 rejected a
+**Five rows write no label, because they are not phase transitions.** ADR 0021 rejected a
 `phase:fix` value, so a fix round stays inside `phase:review`. And `dead` and `stalled` say
 something about the worker rather than about the phase. `unreadable` says something about
-the tracker read, and a fact the tick never read cannot decide a label. Nothing
-acknowledges those four wakes, so `--back-off` is what stops a repeat every minute.
+the tracker read, and a fact the tick never read cannot decide a label. `gates-unproven`
+says the work is not finished after all, so the item stays where it is
+([`docs/adr/0036-a-gate-run-is-work-product.md`](docs/adr/0036-a-gate-run-is-work-product.md)).
+Nothing acknowledges those five wakes, so `--back-off` is what stops a repeat every minute.
 **A repeat that carries the same round
 number, or the same checklist position, is a wake you already answered.** Say so in
 one line and do nothing. That stays a lookup, because the line carries both facts.
@@ -852,8 +857,8 @@ maintainer has to remember:
 history all stay, so step 8 of a **Close transaction** still removes one schedule under one
 name. The edit fails closed: a rejected repoint leaves the old precheck running, and the
 item keeps an observer. **A row that names no next worker repoints nothing.**
-`verdict-approve` and `rounds-exhausted` end the phase axis. `dead`, `stalled` and
-`unreadable` say nothing about which worker is live. Rationale:
+`verdict-approve` and `rounds-exhausted` end the phase axis. `dead`, `stalled`,
+`gates-unproven` and `unreadable` say nothing about which worker is live. Rationale:
 [`docs/adr/0026-the-automation-follows-the-live-worker.md`](docs/adr/0026-the-automation-follows-the-live-worker.md).
 
 **The repointed precheck is the same `wake` command, with two flags changed.** `--worktree`
@@ -867,6 +872,18 @@ directory. The markers still die with the item, at step 8 of a **Close transacti
 `cmux` and `herdr` declare no automation surface, so no schedule exists and nothing needs a
 repoint. Run the rest of the row unchanged. Then say in the report that the repoint is
 unavailable on this tool ([Reporting to the user](#reporting-to-the-user)).
+
+**`gates-unproven` — the record does not agree with the box, so a re-prompt is the
+response.** The line names one of four causes: a missing file, a missing line, a non-zero exit or
+a stale `head_sha`. Reset the worker's context
+([Reset the worker's context before every re-prompt](#reset-the-workers-context-before-every-re-prompt)).
+Then re-prompt with that cause and the command the line names, and ask for the gate run
+rather than for a tick of the box. A stale `head_sha` usually means the worker committed
+after the run, so the layer runs again at this commit. **The re-prompt is unconfirmed**,
+exactly as it is for a stall. **This is not a stall**, so it writes no `Stall:` comment and it counts
+toward no rung. **The record is not an enforcement mechanism**: nothing blocked the
+worker's push, and the item stops before review instead
+([`docs/adr/0036-a-gate-run-is-work-product.md`](docs/adr/0036-a-gate-run-is-work-product.md)).
 
 **`dead` — a re-prompt cannot work, so nothing re-prompts.** No live agent process has its
 working directory inside the worktree, so nothing listens. Report which phase the item is
@@ -891,7 +908,7 @@ changes with the rung, so the new worker's count starts again with nothing to re
 That teardown keeps its confirmation too. Do not diagnose *why* the worker stalled: that is
 judgement on a live terminal and nothing here asks for it.
 
-**Neither response touches the automation.** It outlives the re-prompt, the fix round and
+**No response above touches the automation.** It outlives the re-prompt, the fix round and
 this session, so there is nothing to restart. The seam still holds no state that changes an
 answer, which is what keeps a re-prompt free. Rationale:
 [`docs/adr/0018-the-worker-watch-is-a-stateless-seam.md`](docs/adr/0018-the-worker-watch-is-a-stateless-seam.md)
@@ -1260,8 +1277,9 @@ it. Shape output for acting on, not for completeness:
   checklist file, and the round number off the count of `Verdict:` comments. Do not ask the
   user to remember any of the three.
 - **A wake report names the outcome and the transition that ran.** The outcome is the
-  tick's own word: `implementation-complete`, `proof-complete`, `verdict-approve`,
-  `verdict-request-changes`, `rounds-exhausted`, `dead`, `stalled` or `unreadable`. Then
+  tick's own word: `implementation-complete`, `proof-complete`, `gates-unproven`,
+  `verdict-approve`, `verdict-request-changes`, `rounds-exhausted`, `dead`, `stalled` or
+  `unreadable`. Then
   the phase label you wrote, then what you did. `#38 implementation-complete · phase:impl →
   phase:review. Reviewer spawned, gpt-5.6-terra @ high.` **Where the wake ended the phase
   axis, name the label pair you wrote.** That one call is the hand-off to a human:
