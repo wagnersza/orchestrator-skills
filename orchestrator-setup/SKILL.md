@@ -1,6 +1,6 @@
 ---
 name: orchestrator-setup
-description: Zero-touch install, update, and config for the orchestrator skill — always updates the plugin and every dependency skill to the latest version first, then either reconciles an existing config (the default when one exists) or installs every missing dependency and writes a fresh per-project config after asking you to pick the workspace tool (orca/cmux/herdr), harness (claude/codex/pi/copilot/cursor) + models per role, adversarial-review policy, and project recipe. Use when the user says "set up the orchestrator", "configure orchestration for this repo", "orchestrator setup", "update the orchestrator", "update the orchestrator skills/plugin", "get the latest orchestrator", "re-run orchestrator setup", points Claude at a repo to get it orchestration-ready, or the orchestrator reports its config is missing or stale.
+description: Zero-touch install, update, and config for the orchestrator skill — always updates the plugin and every dependency skill to the latest version first, then either reconciles an existing config (the default when one exists) or installs every missing dependency and writes a fresh per-project config after asking you to pick the workspace tool (orca/cmux/herdr), harness (claude/codex/pi/copilot/cursor) + models per role, adversarial-review policy, project recipe, and gate profile. Use when the user says "set up the orchestrator", "configure orchestration for this repo", "orchestrator setup", "update the orchestrator", "update the orchestrator skills/plugin", "get the latest orchestrator", "re-run orchestrator setup", points Claude at a repo to get it orchestration-ready, or the orchestrator reports its config is missing or stale.
 disable-model-invocation: true
 ---
 
@@ -9,7 +9,7 @@ disable-model-invocation: true
 Take a repo from nothing to ready-to-orchestrate with **zero human touch beyond
 answering the option prompts**. Point Claude at the repo, run this skill, and it
 **installs every missing dependency itself** and writes the full config — the
-human only picks options (tool / harness / model / review / recipe). No manual
+human only picks options (tool / harness / model / review / recipe / gate profile). No manual
 install commands, no hand-edited files.
 
 Two modes, decided in step 0:
@@ -28,8 +28,8 @@ check-only setup: this one **runs the install commands**, it doesn't just print
 them.
 
 The vocabulary (Tool, Harness, Model, Vendor, Yolo mode, Adversarial review,
-Project recipe) is defined in the orchestrator skill's `CONTEXT.md` — use those
-terms.
+Project recipe, Gate, Layer) is defined in the orchestrator skill's `CONTEXT.md` —
+use those terms.
 
 ## 0. Update everything, then pick a mode
 
@@ -167,7 +167,7 @@ choices the user already made. Confirm before doing anything more:
 > 1. **Update only** (recommended) — keep the config as-is; just reconcile it
 >    against the new version and report anything that needs attention.
 > 2. **Change some choices** — say which (tool / harness / models / review /
->    recipe); everything else stays.
+>    recipe / gate profile); everything else stays.
 > 3. **Full re-setup** — re-interview from scratch and overwrite the config.
 
 **Default to 1.** Only run the full interview (step 3) if the user explicitly asks
@@ -187,13 +187,21 @@ For option 1, skip the interview entirely. Do this instead:
    `simple-english`, and `playwright-cli` plus its browsers where step 4's recipe
    gate applies. A repo configured before these dependencies existed has no
    install of them, so this path must install them for an existing user, not
-   merely report them missing.
+   merely report them missing. **It includes the gate tools of each language
+   family too, at the `strict` default.** Run step 1a first: this path asks no
+   interview question, so nothing else names a family.
 2. **Reconcile the existing config against the current template**
    ([orchestrator.template.md](orchestrator.template.md)) and
    `references/models.md` — report, don't silently rewrite:
    - **Fields the new version added** that the config lacks (e.g. a config still
      carrying a flat `model:` when roles now exist). Offer to add them with
      defaults.
+   - **A missing `gates:` block**, on a config written before the gates existed.
+     Offer to add it with the defaults of the template, plus the families step 1a
+     found and `profile: strict`. **Ask no interview question here.** So a
+     maintainer who answered the questions last month keeps every answer, and
+     still gains the block. Where the user declines it, the gate tools from point
+     1 stay installed and no layer command reaches a checklist.
    - **Values now invalid** — a model no longer in the registry, an effort the
      chosen harness can't reach, a same-vendor review pair.
    - **Dead references** — a `references/` path the config or `CLAUDE.md` points at
@@ -221,6 +229,41 @@ Don't assume — read the repo first:
 - `CLAUDE.md` / `AGENTS.md` — which exists, and is there an `## Agent skills` block?
 - Setup/run signals — `package.json` scripts, a `scripts/run.sh`, `pnpm-workspace.yaml`, a migrations dir (`alembic/`, `migrations/`, `prisma/`) → hints for `setup_cmd`, `run_recipe`, `db_gate`.
 - Which harness CLIs are installed (`which claude codex pi copilot cursor-agent`) and which tools (`which orca cmux herdr`).
+
+### 1a. Detect the language family
+
+A language family is one column of the gate matrix in
+[`references/quality-gates.md`](../orchestrator/references/quality-gates.md). Each column
+names the tools that family needs. Only the Python column has landed.
+
+Read the repo root for a Python marker file:
+
+```bash
+for M in pyproject.toml setup.py setup.cfg requirements.txt; do
+  [ -f "$M" ] && echo "python: $M"
+done
+```
+
+**A marker turns the family on.** Report every marker the loop printed, and name the
+family beside it. More than one marker is still one family. Each family you turn on goes
+to `gates.langs` in the config ([orchestrator.template.md](orchestrator.template.md)). The
+value is the family name, so a repo with a Python marker gets `python`.
+
+**No marker turns no family on.** Leave `gates.langs` blank, say so in one line, and
+continue with setup. A repo with no marker file is a supported configuration, the same as
+a blank recipe field. **Never stop setup here.**
+
+**The Go, TypeScript, Terraform and Kubernetes families each wait for a work item of their
+own.** No column names their tools yet. So this step turns none of them on, even where a
+marker file for one of them sits in the repo. Name the marker you saw, and say that the
+column has not landed.
+
+**This condition is also the install condition.** Step 4 requires a family's gate tools
+where that family is on, and nowhere else. One condition, read in two steps, so the two
+cannot disagree about when a tool is required. The **Browser surface** gate in step 4 has
+the same shape. Requirements in that catalog are conditional on config already
+([`references/requirements.md`](../orchestrator/references/requirements.md)), and this gate
+obeys that rule.
 
 ## 2. Ensure the tracker config exists
 
@@ -326,7 +369,20 @@ Take these in order; each leads with a recommendation.
    no database), `evidence` bar. Pre-fill from what exploration found and let the
    user correct. Offer to clone `references/examples/fullstack-app.md` as a
    starting point if the repo resembles it.
-7. **repo** — the absolute path to the main checkout (stays on the default
+7. **Gate profile** — `strict` or `lite`. Recommend **strict**: it runs all four gate
+   layers, so a machine finds each fault before a human reads the diff. **`lite` drops
+   layer 4**, which is the mutation score, the SAST scan and the dependency CVE scan. So a
+   `lite` repo needs no mutation runner and no SAST tool, and step 4 skips those rows. It
+   also drops the layer 4 box from the checklist, even where `deep` holds a command. Take
+   `lite` for a small repo, or where layer 4 costs more minutes than the repo is worth.
+   The answer goes to `gates.profile` in the config
+   ([orchestrator.template.md](orchestrator.template.md)). The layers themselves are in
+   [`references/quality-gates.md`](../orchestrator/references/quality-gates.md), and the
+   rationale is
+   [ADR 0032](../orchestrator/docs/adr/0032-quality-gates-are-a-layered-contract.md).
+   **The families are not a question here.** Step 1a detected them, and they go to
+   `gates.langs`.
+8. **repo** — the absolute path to the main checkout (stays on the default
    branch).
 
 ## 4. Install the dependencies (zero-touch)
@@ -356,6 +412,14 @@ Scope — only the chosen pieces apply:
   so the two cannot disagree about when the surface is required
   ([`../orchestrator/CONTEXT.md`](../orchestrator/CONTEXT.md), **Browser surface**;
   [ADR 0012](../orchestrator/docs/adr/0012-playwright-cli-is-the-only-browser-surface.md)).
+- **gate tools — conditional on the language family step 1a turned on.** Each family has
+  one table of tool rows in
+  [`references/requirements.md`](../orchestrator/references/requirements.md), and
+  `## Python gate tools` is the one that landed. Where `python` is on, that table is the
+  required set. Where no family is on, no row of it applies and setup checks nothing.
+  **This is the same condition step 1a used**, so the detection and the install cannot
+  disagree about when a tool is required. The gate profile then narrows that set, and it
+  never widens it — see the install loop below.
 - **tool:** the one in config (`orca` / `cmux` / `herdr`).
 - **harness(es):** the impl harness, **and** the review harness if
   `review.enabled` — a cross-vendor review setup (e.g. impl `claude`/opus-5,
@@ -366,9 +430,9 @@ Scope — only the chosen pieces apply:
 ### Install loop
 
 For each needed dep, run its check command. **If present, it was already brought up
-to date in step 0a** — skip it. The browser surface is the one exception, because
-step 0a cannot apply the recipe gate: see its bullet below. If missing, install it
-by running the command from `requirements.md`:
+to date in step 0a** — skip it. The browser surface and the gate tools are the two
+exceptions, because step 0a updates neither: see each bullet below. If missing, install
+it by running the command from `requirements.md`:
 
 - **Plugins** — `claude plugin marketplace add <slug> && claude plugin install <name>@<marketplace>` (mattpocock, ponytail, prompt-improver). Verified shell commands. A plugin auto-loads next session, so mention a restart (or `/reload-plugins`) is needed before the first spawn.
 - **`prompt-improver` specifically** — install as a plugin (see `requirements.md`). If exploration found an existing clone at `~/.claude/skills/prompt-improver`, **it's already satisfied** — don't install the plugin on top, which would leave two copies shadowing each other. Report it as present.
@@ -397,13 +461,43 @@ by running the command from `requirements.md`:
   step 0a runs before the recipe is known, so it cannot apply this gate. Update a
   present CLI here, with the line the update block in `requirements.md` already
   carries for it.
+- **Gate tools specifically — one row at a time, and every name comes from the table.**
+  Run the check command of each row in `## Python gate tools`. Install each missing one
+  with that row's install command. **Never name a tool that has no row there.** The matrix
+  and the catalog are held together by
+  [`../scripts/test_quality_gates.py`](../scripts/test_quality_gates.py), and a name
+  invented here escapes that test. Every command in that table carries a **(verify)**
+  note, because none of them has run on this machine yet. That note is not the
+  **(verify)** of an unpinned installer, and these commands are exact. So run each one,
+  then run the row's check command again. Report the row as **installed** only where that
+  second check is green.
+  - **A row that installs into the project needs the project environment active.** The
+    install command says which: `uv add --dev` writes into the project, and
+    `uv tool install` or `brew install` writes onto the machine. Activate that environment
+    before the check. A check that runs outside it reports a present tool as missing.
+  - **The profile drops a layer, and a dropped layer drops its rows.** On `lite`, skip
+    every row whose gate sits in layer 4 of the matrix. The `Layer` column names them, so
+    no list of tools stands here to go stale. Those rows read **not needed by this
+    profile** in the table below, and never missing. On `strict`, every row applies.
+  - **A row that needs a credential is never installed.** If a row needs an API key, a
+    license or a login, report it as **needs the user**, with the exact remaining action.
+    A credential cannot arrive unattended, and a config that names such a tool present is
+    a config that lies. No Python row needs one today, so this rule waits for the family
+    that brings one. `## Vendor keys` in the same catalog holds the rule for a harness.
+  - **A present gate tool stays as it is.** The update block in `requirements.md` carries
+    no line for one, so step 0a did not update it and this loop does not either. A green
+    check is the whole answer.
+  - **This step installs a tool and writes no file.** The gate script, the Makefile and
+    each tool config file are a work item of their own. So no threshold reaches a tool
+    config here.
 - **CLIs** — the documented installer (`brew install gh`/`glab`, `npm install -g @anthropic-ai/claude-code`, etc.).
 - **MCP** — `claude mcp add <name> <command/url>` once the server binary/endpoint is known.
 
 **Only pause for a human when you genuinely can't proceed automatically:**
 
 - An install command is marked **(verify)** in `requirements.md` (tool/harness
-  installers not pinned) — show the doc link and ask the user to run/confirm it.
+  installers not pinned) — show the doc link and ask the user to run/confirm it. **A gate
+  tool row is not this case**, and the install loop above says why.
 - **`codebase-memory-mcp`** has no public package resolved. Detect a local binary
   (e.g. `~/.local/bin/codebase-memory-mcp`); if found, register it with
   `claude mcp add codebase-memory-mcp <path>`. If not found, tell the user it must
@@ -438,6 +532,13 @@ machine with the CLI and no browsers is described as what it is. A "needs the us
 row on either one carries the exact remaining command from `requirements.md`. If the
 recipe names no browser-evidence need, both rows read **not needed by this recipe**
 rather than a gap. Nothing was checked, and nothing is missing.
+
+Give the gate tools **one row each**, on the same present / installed / needs-the-user
+terms. Name the language family and the marker that turned it on above the rows. Name the
+gate profile beside it. Then the table says which family setup found, which profile the
+user chose, and which tools are now present. Where no family is on, write one line in
+place of the rows: no family is on, so no gate tool applies. Nothing was checked, and
+nothing is missing.
 
 ## 5. Confirm and write
 
