@@ -24,6 +24,7 @@ The orchestrator reads these from here; its own config never redefines them.
 | ready | `ready-for-agent` | Fully specified; a worker can start. Gates the ready queue. |
 | in progress | `in-progress` | A worker owns it. Set at spawn, before the prompt. Held through the whole adversarial-review loop. |
 | review | `to-review` | Work done, PR open, evidence posted. Waiting on a human. |
+| to merge | `to-merge` | A human reviewed the item and approved the merge. |
 | done | *(closed)* | PR merged and the issue closed. |
 
 Triage roles (`needs-triage`, `needs-info`, `ready-for-human`, `wontfix`) are a
@@ -38,6 +39,7 @@ gh label create in-progress --color FBCA04 --description "An agent worker owns t
 gh label create to-review   --color 0E8A16 --description "Work done, PR open, awaiting human review"
 gh label create ready-for-agent --color 1D76DB --description "Fully specified, ready for an AFK agent"
 gh label create user-story  --color 5319E7 --description "A spec whose children are the implementable work"
+gh label create to-merge    --color 6F42C1 --description "A human reviewed this item and approved the merge"
 ```
 
 ## Phase labels
@@ -96,6 +98,7 @@ Coordinates:
 | `Ready` | `61e4505c` |
 | `In progress` | `47fc9ee4` |
 | `In review` | `df73e18b` |
+| `To merge` | `beff64f9` |
 | `Done` | `98236657` |
 
 ### Deriving `Status`
@@ -107,6 +110,7 @@ Coordinates:
 | open, `ready-for-agent`, **0 open blockers** | `Ready` |
 | open, `in-progress` | `In progress` |
 | open, `to-review` | `In review` |
+| open, `to-merge` | `To merge` |
 | closed | `Done` |
 
 **Open-blocker count is the same predicate the ready queue already uses** — don't
@@ -115,6 +119,22 @@ invent a second one. GitHub native issue dependencies:
 (open blockers only), falling back to the `Blocked by: #<n>` body line where
 dependencies aren't enabled. See the **Blocking** bullet under
 [Wayfinding operations](#wayfinding-operations) for the full contract.
+
+**The `To merge` column is the one exception, and it runs the other way.** For every
+other column, `Status` derives from the label. For this one column, the label derives
+from the column:
+
+- **One column.** The exception covers `To merge` and no other column.
+- **One direction: board to label.** A session reads the column and writes the label.
+  No write ever targets the column for this state.
+- **The promotion happens once.** A session promotes a card the first time it reads the
+  merge queue. It also promotes a card the first time it answers a `merge-requested` wake
+  and finds the card in `To merge` with no `to-merge` label yet. It then writes the label.
+- **The label is authoritative afterwards.** Once a card carries `to-merge`, every later
+  read uses the label, the same as every other work-state.
+
+Rationale:
+[`orchestrator/docs/adr/0038-the-to-merge-column-is-intent.md`](../../orchestrator/docs/adr/0038-the-to-merge-column-is-intent.md).
 
 Items labelled `user-story` are cards too. A `user-story` parent is never spawned
 directly, so its own labels lag its children: it sits in `In progress` while **any**
@@ -135,6 +155,10 @@ gh project item-edit --id "$ITEM" \
   --project-id PVT_kwHOAASnrs4BetWv \
   --field-id   PVTSSF_lAHOAASnrs4BetWvzhZFi3U \
   --single-select-option-id <option-id>
+
+# 3. find every card in the To merge column, for the promotion pass
+gh project item-list 6 --owner wagnersza --format json --limit 100 \
+  --jq '.items[] | select(.status=="To merge")'
 ```
 
 Step 2 is **idempotent** — writing the value a card already holds exits clean and
@@ -144,7 +168,8 @@ with no card yields an empty `$ITEM`: skip the write, don't fail.
 
 **A repo with no board leaves this section out entirely**, and every board write
 becomes a no-op — the orchestrator looks for this section, finds nothing, and runs
-on labels alone. Its absence is never an error.
+on labels alone. The promotion is a board write too. Its absence is never an error either.
+With no `To merge` column, the label stays the only entry for that state.
 
 ## Pull requests as a triage surface
 
