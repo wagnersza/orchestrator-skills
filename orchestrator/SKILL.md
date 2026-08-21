@@ -1089,6 +1089,46 @@ define a parent close, apply it after the seam exits clean. That is the last chi
 closed → close the parent, and the parent's card → `Done`. Then report per
 [Reporting to the user](#reporting-to-the-user).
 
+### The layer 5 story gate
+
+**Run `/improve-codebase-architecture` when a user story finishes.** The moment is the
+close of its last child, in the same turn that bumps the version in
+`.claude-plugin/plugin.json`. The bump rule itself is a project rule, in config at
+`docs/agents/orchestrator.md`, and this step performs no bump. The lane is `inline`, so
+this session invokes the skill here, in the main checkout, on the default branch
+([Resolve the verb before you act](#resolve-the-verb-before-you-act)).
+
+Layers 1 to 4 each read one work item, inside one worker worktree. This layer is the one
+that reads what ten green items left behind. The five layers are in
+[`references/quality-gates.md`](references/quality-gates.md), and the word is the
+**Layer** entry in [`CONTEXT.md`](CONTEXT.md).
+
+Hand the skill the direction to look in, where the maintainer named one. The Notes column
+of its row in [`references/skill-routing.md`](references/skill-routing.md) holds the rest.
+**The skill owns its own report.** Never restate one of its headings here, in a prompt or
+in a report.
+
+**Triage every candidate the report holds. This session does it, in prose:**
+
+- **`Strong`** becomes a work item, through `/to-tickets`.
+- **`Worth exploring`** goes to the backlog, with its card attached
+  ([Board status](#board-status)).
+- **`Speculative`** is dropped, with a one-line reason in the report to the user.
+
+The skill ends by asking which candidate to explore. This triage is the answer, so no
+grilling loop runs here.
+
+**The threshold is 0 untriaged `Strong` candidates, and not 0 findings.** This session
+checks it, and `scripts/close_item.py` does not. That seam owns the judgement-free steps
+of a **Close transaction** alone, and triage is judgement
+([Steps 4 to 8](#steps-4-to-8--close_item-owns-the-order)).
+
+**Layer 5 stops nothing.** It holds no exit code, so it fails no push and no merge. Depth
+is a judgement, and a hard gate here stalls every story on an opinion. A candidate still
+untriaged is work to report, and never a close this session refuses. Rationale, the
+threshold and the accepted risk:
+[`docs/adr/0033-the-story-gate-is-advisory.md`](docs/adr/0033-the-story-gate-is-advisory.md).
+
 ## Reporting to the user
 
 An orchestrator session runs long and the user reads it between other work. They
