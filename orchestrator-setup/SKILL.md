@@ -16,8 +16,9 @@ Two modes, decided in step 0:
 
 - **First setup** (no `docs/agents/orchestrator.md`) — the full flow, steps 1–6.
 - **Update** (config already there) — refresh the plugin and every dependency
-  skill, reconcile the existing config against the new version, and change
-  nothing the user didn't ask for. This is the **default** on any re-run.
+  skill, put the routed skills back in reach, reconcile the existing config against
+  the new version, and change nothing the user didn't ask for. This is the
+  **default** on any re-run.
 
 Either way, step 0 runs first and updates everything.
 
@@ -46,7 +47,7 @@ claude plugin list                        # FIRST — read the exact ids + versi
 claude plugin marketplace update          # refresh every marketplace source
 # then each plugin, by its FULL plugin@marketplace id from the list above
 claude plugin update orchestrator-skills@wsza
-claude plugin update mattpocock-skills@mattpocock
+claude plugin update mattpocock-skills@mattpocock   # or @claude-plugins-official — read the id from the list
 claude plugin update ponytail@ponytail
 # prompt-improver: read the SUFFIX from `claude plugin list` and pick ONE.
 #   @prompt-improver -> claude plugin update prompt-improver@prompt-improver
@@ -102,7 +103,55 @@ stale body — stop and restart, as above. This is the common case right after a
 update lands, and it's silent: the old body reads fine, it just points at
 reference files that moved.
 
-### 0b. Ask what the user wants — update, or full setup
+### 0b. Unblock the routed skills
+
+**Always run this step, immediately after 0a, on every invocation.**
+
+One line in the frontmatter of a skill puts that skill out of reach:
+`disable-model-invocation: true` removes it from the skill list of a session. No model
+enters that skill. So a worker prompt that holds `Run /implement.` is plain prose, and the
+worker starts cold while the run looks correct. **Nothing at spawn time catches this**, so
+this step is the only guard
+([ADR 0031](../orchestrator/docs/adr/0031-setup-unblocks-the-routed-skills.md)).
+
+The flag belongs to the upstream skill, and **step 0a puts it back** each time the version
+moves. So the strip is not a one-time repair. It runs after every update, which is why it
+lives here.
+
+Strip the line from the skills the routing table
+([`../orchestrator/references/skill-routing.md`](../orchestrator/references/skill-routing.md))
+names, and from those alone. The names come from the `Skill` column of a table row, so no
+list of names sits here to go stale. A skill that file names in its prose alone keeps its
+flag, and this setup skill is one of those.
+
+Set `ROUTING` to the absolute path of that table. Resolve it from the **Base directory for
+this skill** line at the top of this skill:
+
+```bash
+ROUTING="<base directory>/../orchestrator/references/skill-routing.md"
+for S in $(grep -oE '\| `/[a-z-]+` \|' "$ROUTING" | tr -d '`|/ ' | sort -u); do
+  find ~/.claude/plugins/cache ~/.claude/plugins/marketplaces ~/.claude/skills .claude/skills \
+       -path "*/$S/SKILL.md" -exec grep -l 'disable-model-invocation: *true' {} + 2>/dev/null \
+    | while read -r F; do
+        perl -i -ne 'print unless /^disable-model-invocation: *true/' "$F"
+        echo "unblocked $S: $F"
+      done
+done
+```
+
+Report every line the loop printed. Where it printed none, say in one line that each
+routed skill is already reachable.
+
+Two limits, and both need a word in the report:
+
+- **The loop writes no `description`.** A skill that carries the flag and no
+  `description` is still out of reach after the strip. Name that skill and add nothing,
+  because a description invented here routes the model wrong.
+- **The strip does not reach this session.** The edited body loads on the next start, the
+  same restart rule 0a states. So where a file changed, this session still cannot route
+  that skill. Say so, and say which one.
+
+### 0c. Ask what the user wants — update, or full setup
 
 Once versions are current, **check whether `docs/agents/orchestrator.md` already
 exists** and branch:
@@ -129,7 +178,7 @@ option 1 — say that's what you're doing rather than asking a second time.
 **No config → full setup.** Announce that and run steps 1–6 normally; there's
 nothing to preserve.
 
-### 0c. Update-only path
+### 0d. Update-only path
 
 For option 1, skip the interview entirely. Do this instead:
 
@@ -164,7 +213,7 @@ For option 1, skip the interview entirely. Do this instead:
 
 Don't assume — read the repo first:
 
-- `docs/agents/orchestrator.md` — config already present? (step 0b already asked; a
+- `docs/agents/orchestrator.md` — config already present? (step 0c already asked; a
   present config means update-only unless the user chose otherwise — never
   overwrite)
 - `docs/agents/issue-tracker.md` — tracker config present? (mattpocock's `/setup-matt-pocock-skills` writes it) Does it already carry a `## Project board` section?
@@ -220,7 +269,7 @@ scope — `gh auth status` should list `project`; if not, run
   section with whatever options exist and map the derivation table onto them by
   meaning (a board with only `Todo | In Progress | Done` folds `Backlog`/`Ready` onto
   `Todo` and both work states onto `In Progress`). Say which columns got folded.
-- **The section already exists** (a re-run) — this is the update path (step 0c):
+- **The section already exists** (a re-run) — this is the update path (step 0d):
   re-resolve the ids and **report** a mismatch, don't silently rewrite. Ids change
   when a field is recreated, and a stale one fails every write.
 
@@ -448,5 +497,7 @@ Tell the user setup is complete and that the orchestrator will now read
 **Re-running is how you update.** A later `/orchestrator-setup` refreshes the
 plugin and every dependency skill, then reconciles the config without
 re-interviewing — it only starts over if the user explicitly asks for a full
-re-setup (step 0b). Mention this, so a version bump doesn't look like it needs a
+re-setup (step 0c). It also strips the no-invoke flag the update restores (step 0b), so a
+routed skill the model could not invoke is reachable again. Mention this, so a version bump
+doesn't look like it needs a
 manual reinstall.
