@@ -210,6 +210,31 @@ _Avoid_: ticket, issue, task (pick one — prefer work item).
 **Ready queue**:
 The set of work items a worker can start now — labelled `ready-for-agent` with every `## Blocked by` edge closed. The orchestrator resolves this over whatever tracker `docs/agents/issue-tracker.md` names.
 
+**Merge queue**:
+The set of open work items that are ready to merge. Two entry conditions, and either one is
+enough: the item carries the `to-merge` label, or its card sits in the board's `To merge`
+column (**Board status**). The set is read fresh at the moment a **Merge train** starts,
+which is the rule the **Ready queue** already takes, so nothing holds it between reads.
+**It is a set and not a run**, because the order over it belongs to the train. An empty
+queue is the resting state. A repo with no board has the label as its only entry, and that
+is a supported configuration
+([`docs/adr/0038-the-to-merge-column-is-intent.md`](docs/adr/0038-the-to-merge-column-is-intent.md)).
+_Avoid_: merge backlog, ready-to-merge list, merge candidates, close queue.
+
+**Merge train**:
+One ordered run over a **Merge queue**. It resolves the order from a seam,
+`scripts/merge_train.py`, then runs one full **Close transaction** per item in that order,
+teardown included. So a merged item leaves no worktree and no schedule behind, because step
+8 of each transaction is that teardown. **A branch that conflicts is parked, and the train
+keeps moving**: the session drops that item back to the review state, comments the
+conflicting paths on the work item, and carries on with the next branch. Nothing unattended
+decides what a merged file means. The three ordering steps, the park rule and the seam's
+contract: [`references/merge-train.md`](references/merge-train.md). Rationale, the rejected
+alternatives and the accepted risk:
+[`docs/adr/0037-the-merge-queue-is-an-ordered-train.md`](docs/adr/0037-the-merge-queue-is-an-ordered-train.md).
+_Avoid_: merge queue (that names the set, not the run), batch merge, auto-merge, merge
+sequence.
+
 **Config**:
 The per-project orchestrator settings — tool, harness, model, adversarial-review policy, and tracker-setup pointer. Lives at `docs/agents/orchestrator.md` in the target repo (same pattern as `/setup-matt-pocock-skills`): human-editable markdown, seeded from a template in the skill folder, with a one-line summary block in `CLAUDE.md`. Per-project because different projects use different setups.
 
