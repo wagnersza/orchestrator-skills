@@ -57,8 +57,9 @@ so a maintainer raises coverage in one place and not in five tool configs
 
 Every tool in the `Tool` column has a row in
 [`requirements.md`](requirements.md), with the reason it is needed, a check command and
-an install command. So this matrix cannot promise a tool the repo has no install path
-for.
+an install command. A row that names a tool with no such row fails
+[`../../scripts/test_quality_gates.py`](../../scripts/test_quality_gates.py). So this
+matrix cannot promise a tool the repo has no install path for.
 
 Only the Python column lands here. The Go, TypeScript, Terraform and Kubernetes
 columns are each a work item of their own.
