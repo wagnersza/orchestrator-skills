@@ -35,6 +35,39 @@ Gate.
 The output of `make deep` becomes the Evidence block of the review note. So the gate
 output is the evidence, and the worker makes no claim a reviewer has to trust.
 
+## The gate record
+
+A gate run leaves work product behind. Each gate command appends one line to
+`.orchestrator/gates-<item>.jsonl` in the worker's own worktree, beside the **Checklist**
+it ticks. This file is the format's one home, and the **Gate record** entry of
+[`../CONTEXT.md`](../CONTEXT.md) holds the term:
+
+```json
+{"command": "make quick", "exit": 0, "utc": "2026-08-21T09:14:02Z", "head_sha": "1b9f0c2"}
+```
+
+| Key | What it holds |
+|---|---|
+| `command` | the gate command that ran, as the `gates:` block of config names it |
+| `exit` | the code that command returned |
+| `utc` | when the run ended, as `YYYY-MM-DDTHH:MM:SSZ` |
+| `head_sha` | the commit the run saw, from `git rev-parse HEAD`. A short sha reads as a prefix, so either form matches |
+
+**A gate command appends its line whatever the exit code is.** A red run that writes no
+line reads as a run that never happened. The `Makefile` and the `scripts/checks.sh` that
+`/orchestrator-setup` writes hold that append, so the record costs the worker no step of
+its own.
+
+**The record is the third fact the Completion signal reads.** A ticked checklist, plus a
+green line for every required layer at the current `HEAD`, is a finish. A missing line, a
+malformed line, a non-zero exit or a stale `head_sha` fires the `gates-unproven` outcome
+instead, and the item stops before review. Which layers are required is the spawn's
+answer, and it passes them to the watch as a repeatable flag.
+
+**The record is not a second enforcement mechanism.** No hook blocks a push, and no
+script rejects a commit. Rationale, and the risk that a line can be forged:
+[ADR 0036](../docs/adr/0036-a-gate-run-is-work-product.md).
+
 ## The application gate matrix — Python
 
 | Gate | Hard threshold | Layer | Tool |
