@@ -64,6 +64,11 @@ The eight steps that finish a **Work item**, in one fixed order, after the human
 The eight split in two, by whether the step needs judgement. **Steps 1 to 3 need judgement, so they belong to prose.** No script reads two versions of a change and decides what the merged file means. Step 1 invokes the **resolving-merge-conflicts** skill. **Steps 4 to 8 need no judgement, so they belong to the seam.** They are predicates, a pull, two tracker writes and a passed-in teardown command, which makes them an ordering and nothing else. One seam owns that ordering, because ordering is what code holds perfectly and prose holds poorly. That seam is `scripts/close_item.py`. This entry names it before it exists: the term is declared here, and the file lands with the flow change that consumes it.
 
 **The actor for all eight steps is the orchestrator session**, and never a **Worker**. A worker can be idle or out of context when the human asks, and its worktree is what step 8 removes. The seam refuses rather than warns. An unmerged PR and a dirty worktree each stop the transaction with a distinct exit code. A refused transaction leaves the item at the review state, with its card at `In review`. Nothing destructive happens by default. Rationale, the rejected alternatives, and the risk accepted for the actor: `docs/adr/0015-close-is-a-deterministic-transaction.md` and `docs/adr/0016-the-orchestrator-merges-when-asked.md`.
+
+**A Merge train loops this transaction, and changes no step of it.** The eight steps and
+their order are the same whether the maintainer typed the ask or moved the card, teardown
+included. So a train adds one caller and no second merge path
+([`docs/adr/0037-the-merge-queue-is-an-ordered-train.md`](docs/adr/0037-the-merge-queue-is-an-ordered-train.md)).
 _Avoid_: teardown (that names step 8 alone), close flow, closing sequence, wrap-up.
 
 **prompt-improver**:
@@ -244,8 +249,22 @@ The one-time interview that writes the Config — the user describes environment
 **Work-state labels**:
 The tracker labels that gate the queue and mark progress (`ready-for-agent`, `in-progress`, review, done). Owned by `docs/agents/issue-tracker.md` (`/setup-matt-pocock-skills`), not the orchestrator config — single source of truth. During an adversarial-review loop the item stays `in-progress` (a worker still owns it); it flips to the review label only when the loop concludes.
 
+**A fifth state sits between the review label and closed: `to-merge`.** It means a human
+reviewed the item, and the answer is merge. It joins the same family, so it is mutually
+exclusive with the other four — swap, never stack. It is also the standing authorisation a
+**Merge train** runs on, so no step of that train asks the maintainer a second time
+([`docs/adr/0037-the-merge-queue-is-an-ordered-train.md`](docs/adr/0037-the-merge-queue-is-an-ordered-train.md)).
+
 **Board status**:
 The `Status` field on a work item's card, where the tracker has a project board (GitHub Projects v2: `Backlog | Ready | In progress | In review | Done`). A **derived projection of the Work-state labels, not a second state machine** — labels are the source of truth, and `Status` is written wherever a label is written, plus recomputed for every open item when the **Ready queue** is read (which is where drift is repaired; there is no sync command). `Backlog` covers both never-triaged and ready-but-blocked; `Ready` is exactly the ready queue, which is why the split is only knowable at queue time. A human drag is drift, not intent — it is overwritten. The derivation table and the board coordinates live in `docs/agents/issue-tracker.md`, alongside the labels; a repo with no board omits the section and every board write becomes a no-op. Rationale: `docs/adr/0009-labels-drive-board-status.md`.
+
+**The `To merge` column is the one exception, and its direction is board to label.** A card
+the maintainer drags there is intent. The session reads that card once and writes the
+`to-merge` label, which is one entry to a **Merge queue**. The direction never reverses: the
+reconcile pass writes no `Status` for an item that carries `to-merge`, so the dragged card
+is not overwritten. Every other column stays a derived projection, and the drag rule in
+this entry holds for all five of them
+([`docs/adr/0038-the-to-merge-column-is-intent.md`](docs/adr/0038-the-to-merge-column-is-intent.md)).
 _Avoid_: board state, column, board label, project status (the field is `Status`; the layer is Board status).
 
 **Project recipe**:
@@ -266,6 +285,14 @@ One schedule per live **Work item**, owned by the **Tool** rather than by a sess
 **No agent runs on a tick.** The precheck exits non-zero on every path, so every run records as skipped at no token cost. The schedule's own prompt and provider stay inert. So the only tokens the loop spends are the ones the **Orchestrator** spends when it answers a wake (`docs/adr/0027-the-tick-delivers-its-own-wake.md`).
 
 **It never acts.** It writes no label, composes no prompt, spawns nothing and merges nothing. **Delivery is not action**: the line it sends is the line it printed, and every decision stays with the session that reads it. **The automation decides when, and the session decides what** — the same split as a **Close transaction** and a **Worker watch**, applied a third time. So every destructive act stays in a session a human can interrupt. One per item, so a leaked schedule names the item it leaked from, and five siblings are five observed items. **One per item also means the schedule follows the live worker.** The session repoints its precheck at each **Phase** transition. So a review round watches the reviewer's worktree, and a fix round watches the implementation worktree again (`docs/adr/0026-the-automation-follows-the-live-worker.md`). Removal folds into step 8 of a **Close transaction**, through the teardown command the session passes in, which means a refused transaction leaves the item observed. A tool with no automation surface skips the tick and the spawn works unchanged. Rationale, the schedule that replaces the blocking watch, the `dead` and `stalled` split, and the rejected alternatives: `docs/adr/0022-item-automation-replaces-the-blocking-watch.md`.
+
+**The `merge-requested` outcome answers a Merge queue.** It is reachable where the item
+wears the review state and no **Phase** label, which is the one branch of the tick that
+does nothing today. The fact behind it is the `to-merge` label, or a card that sits in the
+board's `To merge` column. It goes through the same `--back-off` window as every other
+outcome. **The tick still merges nothing, writes no label and spawns nothing**: the session
+that reads the wake writes the label and runs the **Merge train**
+([`docs/adr/0037-the-merge-queue-is-an-ordered-train.md`](docs/adr/0037-the-merge-queue-is-an-ordered-train.md)).
 _Avoid_: cron job, watcher, daemon, poller (each names a mechanism rather than the unit), run automation (`Run` is not a term this repo defines).
 
 **Worker watch**:
