@@ -1,0 +1,115 @@
+#!/bin/sh
+# Quality gates for a Python repo. /orchestrator-setup writes this file from
+# orchestrator-setup/templates/checks.sh.template.
+#
+# One argument, one gate layer:
+#   quick   layers 1 and 2 — format, lint, types, tests, complexity   under 10s
+#   full    layer 3 — coverage, import boundaries, secrets            under 30s
+#   deep    layer 4 — mutation score, SAST, dependency CVEs           1 to 5 min
+#
+# The Makefile calls this script, and CI calls it too. Both get the same steps in
+# the same order. Run the layers in this order: quick, then full, then deep. A
+# later layer does not repeat an earlier one.
+#
+# A step that exits non-zero stops the script, and no step warns. The layers, the
+# tools and the thresholds live in orchestrator/references/quality-gates.md of the
+# orchestrator-skills plugin.
+#
+# Each threshold lives in the tool config that reads it, so this script holds no
+# number. MUTATION_MIN below is the one exception, because the mutation runner
+# reads no threshold from a config file.
+#
+# Each tool reads its own paths and excludes from pyproject.toml. Narrow them
+# there, not here. Layer 3 reads its contracts from .importlinter, and layer 4
+# leaves a mutants/ directory behind, so add that directory to .gitignore.
+
+set -eu
+
+# The name of a tool. A machine without it is a stop, never a skipped step.
+need() {
+	command -v "$1" >/dev/null 2>&1 && return 0
+	echo "missing tool: $1" >&2
+	echo "install it from the Python gate tools table of the orchestrator requirements" >&2
+	exit 1
+}
+
+# A step name, then the command. The name reaches the log before the command runs.
+step() {
+	name=$1
+	shift
+	printf '\n==> %s\n' "$name"
+	need "$1"
+	"$@"
+}
+
+quick() {
+	step 'format · layer 1' ruff format --check .
+	step 'lint · layer 1' ruff check .
+	# --strict on the command line, so the gate holds where pyproject.toml sets
+	# nothing. A per-module section there still relaxes the modules it names.
+	step 'types · layer 1' mypy --strict .
+	step 'tests · layer 2' python3 -m pytest -q
+	# C901 is the complexity rule, and it reads max-complexity from pyproject.toml.
+	# --select on the command line, so the cap holds whatever the repo's own rule
+	# set selects.
+	step 'complexity · layer 2' ruff check --select C901 .
+}
+
+full() {
+	# The coverage tool runs the suite itself, so this layer needs no pytest plugin.
+	step 'coverage · layer 3' coverage run -m pytest -q
+	# fail_under in pyproject.toml is the threshold this step reads.
+	step 'coverage report · layer 3' coverage report
+	# The contracts live in .importlinter. Layer 3 stops until that file exists.
+	step 'import boundaries · layer 3' lint-imports
+	# (verify) — this is the only step no run confirmed, because the secrets tool
+	# installs onto the machine. Confirm it against the installed version once.
+	step 'secrets · layer 3' gitleaks detect --no-banner --redact
+}
+
+MUTATION_MIN=70 # percent of mutants the suite kills — gates.thresholds.mutation
+
+# Where the mutation runner writes its counts. The path is the runner's own, and
+# the `export-cicd-stats` command that writes it needs version 3 of the runner.
+MUTATION_STATS=mutants/mutmut-cicd-stats.json
+
+# The mutation runner reads no threshold from a config file, so the score check
+# lives here. It fails closed: counts it cannot read are a stop, never a pass.
+mutation_score() {
+	mutmut export-cicd-stats
+	python3 - "$MUTATION_STATS" "$MUTATION_MIN" <<-'PY'
+		import json
+		import sys
+
+		path, minimum = sys.argv[1], int(sys.argv[2])
+		with open(path, encoding="utf-8") as stats_file:
+		    stats = json.load(stats_file)
+		killed, total = stats["killed"], stats["total"]
+		score = 100 * killed / total if total else 0
+		print(f"mutation score: {score:.0f}% ({killed} of {total}, minimum {minimum}%)")
+		sys.exit(0 if total and score >= minimum else 1)
+	PY
+}
+
+deep() {
+	printf '\n==> mutation score · layer 4\n'
+	need mutmut
+	# A surviving mutant is not the stop, and the score against MUTATION_MIN is. So
+	# the run itself is tolerated. Last run's counts go first, or a crashed run
+	# reads as a pass.
+	rm -f "$MUTATION_STATS"
+	mutmut run || true
+	mutation_score
+	step 'SAST · layer 4' bandit --quiet --recursive --severity-level high .
+	step 'dependency CVEs · layer 4' pip-audit
+}
+
+case ${1:-} in
+quick) quick ;;
+full) full ;;
+deep) deep ;;
+*)
+	echo "usage: $0 quick|full|deep" >&2
+	exit 2
+	;;
+esac
