@@ -1,0 +1,29 @@
+# Quality gates. /orchestrator-setup writes this file from
+# orchestrator-setup/templates/Makefile.template.
+#
+# One target per gate layer. Each target runs one layer of scripts/checks.sh, and
+# CI runs that same script. So a step cannot be green here and red in CI for a
+# reason that is not the code. To change a step, edit the script. This file names
+# the layers and nothing else.
+#
+# Run the layers in this order: quick, then full, then deep. A later layer does
+# not repeat an earlier one.
+#
+# The layers, their budgets and their thresholds live in
+# orchestrator/references/quality-gates.md of the orchestrator-skills plugin.
+
+.PHONY: quick full deep
+
+# layers 1 and 2 — format, lint, types, tests, complexity. Under 10s.
+quick:
+	scripts/checks.sh quick
+
+# layer 3 — coverage, import boundaries, secrets. Under 30s.
+full:
+	scripts/checks.sh full
+
+# --- layer 4 · the `lite` profile drops this block ---
+# layer 4 — mutation score, SAST, dependency CVEs. 1 to 5 min.
+deep:
+	scripts/checks.sh deep
+# --- end layer 4 ---

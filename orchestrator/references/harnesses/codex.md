@@ -161,3 +161,4 @@ ignore the noise above.
 - Send the completion contract as **plain English** — spell out every checklist step in prose; no slash commands, no "TodoWrite" wording.
 - The worker maintains the checklist file itself (told to in the prompt); the orchestrator reads it to monitor.
 - **Preflight a fresh worktree for the dialogs above** before the first prompt. That is this harness's entry in the "preflight any harness-specific requirement the reference names" rule in the skill body's spawn step 2.
+- **Sub-agent surface:** unknown — this file records no sub-agent tool, so a worker on this harness delegates nothing and satisfies the **Delegation cap** ([`../../CONTEXT.md`](../../CONTEXT.md)).

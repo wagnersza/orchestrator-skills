@@ -519,8 +519,19 @@ Three things `prompt-improver` can't know, so state them in the draft:
 - **Whole spec, first turn.** A worker has no human to answer a follow-up, so
   "ask the user" is never an option — where something is genuinely unknown, name
   the assumption to take instead.
-- **Cap delegation.** A worker already inside a worktree shouldn't fan out;
-  `prompt-improver`'s subagent cap is the wording to use.
+- **Ask for delegation, under the cap.** When the work splits, the worker delegates.
+  It does not ask first. **At most 5 sub-agents run at once, per worktree.** The cap
+  counts concurrent sub-agents, so a worker can run 5, read the reports, and then run
+  5 more. **A sub-agent reads, searches and reports. It never writes the item's
+  source**, because the worker owns every edit, every **Commit slice** and every
+  **Gate**. **The worker delegates where its harness has a sub-agent surface.** A
+  harness with none reads the same sentence, delegates nothing, and satisfies the
+  instruction. Take the answer from the harness reference file under
+  `references/harnesses/`, not from a guess. Name the reads the item needs, because a
+  bare permission gets a worker that delegates nothing. Definition: the **Delegation
+  cap** entry in [`CONTEXT.md`](CONTEXT.md). Rationale, the sentence this reverses and
+  the accepted risk:
+  [`docs/adr/0035-workers-delegate-to-sub-agents-under-a-cap.md`](docs/adr/0035-workers-delegate-to-sub-agents-under-a-cap.md).
 - **Scope edges are the exception to positive-framing.** Name the neighbouring
   files, features, and refactors the worker must not touch — negatively, on
   purpose.
@@ -970,9 +981,9 @@ outcome that reports the bound spent.
    **The automation is repointed, and never restarted**, so the schedule and its run history
    both stay. The item's `phase:review` label is what makes the tick read a verdict
    rather than a checklist. A reviewer needs no flag of its own.
-2. **Prompt it to review** the diff/MR against the work item's acceptance
-   criteria — drafted, then run through `prompt-improver` for the review model's
-   profile, same as a spawn prompt. Say it's a **code-review prompt**:
+2. **Prompt it to review** the diff/MR and the `make deep` report against the work
+   item's acceptance criteria — drafted, then run through `prompt-improver` for the
+   review model's profile, same as a spawn prompt. Say it's a **code-review prompt**:
    `prompt-improver` has a specific rule for these — **ask for coverage, filter
    downstream** — and it's the one that matters most here. Never "only
    high-severity", "be conservative", or "don't nitpick": every model here obeys
@@ -990,18 +1001,38 @@ outcome that reports the bound spent.
    **Four substitutions this prompt needs, learned by running the flow.** Each closes a
    way a reviewer produces a plausible verdict that is not a review:
 
-   - **Run the suites yourself, rather than trusting the commit messages.** A worker's
-     own claim that a suite is green is the claim under review, not evidence for it.
+   - **Run the suites and the gate commands yourself, rather than trusting the commit
+     messages.** A worker's own claim that a suite or a **Gate** is green is the claim
+     under review, not evidence for it.
    - **Give every acceptance-criteria checkbox its own verdict.** One verdict per box,
      named. A summary over a group of boxes hides the one box that failed.
    - **Do not spawn sub-agents.** The reviewer is already the second opinion. A
-     sub-agent's findings arrive unattributed and cost a round.
+     sub-agent's findings arrive unattributed and cost a round. This rule is the one
+     exception to the **Delegation cap**:
+     [`docs/adr/0035-workers-delegate-to-sub-agents-under-a-cap.md`](docs/adr/0035-workers-delegate-to-sub-agents-under-a-cap.md).
    - **Report per axis, with a confidence and a severity on each finding.** The axes
      stay `/code-review`'s two. This adds only the two per-finding fields, which is
      what lets this session rank without re-reading the diff.
 
    These four are prompt *content*, so they go into the draft and through
    `prompt-improver` with the rest — they restate no rule of the two-axis contract.
+
+   **The layer 4 report is input next to the diff.** The output of `make deep` is the
+   Evidence block of the review note, so the reviewer reads gate output instead of a
+   worker's claim ([`references/quality-gates.md`](references/quality-gates.md),
+   [`docs/adr/0032-quality-gates-are-a-layered-contract.md`](docs/adr/0032-quality-gates-are-a-layered-contract.md)).
+   Three findings are each grounds for `request-changes`. They are a mutant that the
+   suite left alive, a SAST finding at high or critical severity, and a fired **Halt
+   condition**. The first two break a hard threshold in the layer 4 rows of the gate
+   matrix. The third stops an infra plan and not code, so it is not a **Gate**. Its rows
+   land with the Terraform column ([`CONTEXT.md`](CONTEXT.md)). Each one is one finding
+   in the verdict. The fix loop in step 3 then answers it as it answers every other
+   finding.
+
+   **A repo with a blank `deep` command has no report to read.** That Layer drops its
+   checklist box before this session sends the checklist
+   ([The prompt: checklist + completion contract](#the-prompt-checklist--completion-contract)).
+   The reviewer then reads the diff, and reviews it as it does today.
 3. **On request-changes:** reset the original impl worker's context
    ([Reset the worker's context before every re-prompt](#reset-the-workers-context-before-every-re-prompt)).
    Then re-prompt **that same worker** with the findings to fix, and re-review. **Repoint the
