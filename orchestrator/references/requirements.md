@@ -198,6 +198,29 @@ file (`references/tools/<tool>.md`) must be filled in for cmux/herdr before use.
 | **DB CLI** (e.g. `sqlite3`) | the recipe's `db_gate` verify step | `command -v sqlite3` | preinstalled on macOS / `brew install sqlite` |
 | **node/npm or uv** | the recipe's `setup_cmd` (`pnpm install`, `uv run …`) | `command -v npm` / `command -v uv` | <https://nodejs.org> / <https://docs.astral.sh/uv/> |
 
+## Python gate tools
+
+One row per tool the Python column of [`quality-gates.md`](quality-gates.md) names.
+These are conditional the same way as the rest of this file: a repo with no Python
+needs none of them.
+
+| Dep | Why | Check | Install |
+|-----|-----|-------|---------|
+| **ruff** | the layer 1 format and lint gates, plus the layer 2 complexity cap (`C901`) | `command -v ruff` | `uv tool install ruff` |
+| **mypy** | the layer 1 types gate, with strict on | `command -v mypy` | `uv add --dev mypy` — it reads the project's own dependencies, so a project install beats a tool install |
+| **pytest** | the layer 2 tests gate | `python3 -m pytest --version` | `uv add --dev pytest` |
+| **coverage** | the layer 3 coverage gate. It runs the suite itself (`coverage run -m pytest`), so no pytest plugin is needed | `command -v coverage` | `uv add --dev coverage` |
+| **import-linter** | the layer 3 import-boundaries gate. The binary is `lint-imports`, and the contracts live in `.importlinter` | `command -v lint-imports` | `uv add --dev import-linter` |
+| **gitleaks** | the layer 3 secrets gate | `command -v gitleaks` | `brew install gitleaks` |
+| **mutmut** | the layer 4 mutation-score gate | `command -v mutmut` | `uv add --dev mutmut` |
+| **bandit** | the layer 4 SAST gate | `command -v bandit` | `uv tool install bandit` |
+| **pip-audit** | the layer 4 dependency-CVE gate | `command -v pip-audit` | `uv tool install pip-audit` |
+
+Read every install command in this table as **(verify)**. None of them ran on this
+machine, because this repo has no gate config yet. Five of the nine install into the
+project rather than onto the machine, so their check command needs the project
+environment active.
+
 ## Vendor keys
 
 A worker needs the API access its harness/model uses (Anthropic for opus-5/
