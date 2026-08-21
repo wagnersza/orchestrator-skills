@@ -234,3 +234,17 @@ Both are **work product**: a worker writes them by doing the work. So neither on
 
 **Both shapes are read once per tick, rather than polled in a loop.** An **Item automation** asks the seam for a **Phase** transition every minute. So a signal is read at that moment, from disk or from the tracker, and nothing is held between reads. Shape 2 carries one fact more under the tick: **the count of `Verdict:` comments is the Review round number**. So *round 2 of 3* is read from the tracker rather than remembered by a session. Why the tick replaces the loop: `docs/adr/0022-item-automation-replaces-the-blocking-watch.md`.
 _Avoid_: done signal, exit signal, finish event, heartbeat (the last one names liveness, which is the signal this deliberately is not).
+
+**Gate**:
+One check with one command and one exit code. A non-zero exit stops the work, and no Gate has a warning state. **A check that reports and does not stop is not a Gate.** Each Gate belongs to one **Layer** and carries one hard threshold. The layer model, the threshold per Gate and the tool that holds it live in `references/quality-gates.md`. **Config is the source of truth for a threshold**, so the number in that file is the default this repo ships. Rationale, the rejected names and the accepted risk: `docs/adr/0032-quality-gates-are-a-layered-contract.md`.
+
+**A DB gate is not a Gate.** The `db_gate` field of a **Project recipe** names the data an item's evidence needs, so it holds no command and no exit code, and it keeps its own name and its own checklist box.
+_Avoid_: check, hook, step, quality check (each one is broader than a command with an exit code).
+
+**Layer**:
+One of the five bands a **Gate** runs in, numbered 1 to 5. Layers 1 to 4 each hold one command, and each one stops a push. Layer 5 is advisory: it runs once per user story, and it emits candidate work items instead of an exit code. The word is **Layer** everywhere, and never "tier", because `_Avoid_: tier` already stands on **Role** and on **Cost profile**. One word must not name three axes. The five, with a command and a budget for each: `references/quality-gates.md`.
+_Avoid_: tier, band, gate level, stage (the last one names a step of a run, and **Phase** owns that axis).
+
+**Halt condition**:
+A policy that stops an infra plan before it applies. It is not a **Gate**: a Gate reads code that exists, and a Halt condition reads a plan for a change that has not happened. The term is declared here so that no later item defines it twice. The Terraform column is where it gets its rows, and that column is a work item of its own.
+_Avoid_: guardrail, policy check, blast radius (none of the three says what stops).
