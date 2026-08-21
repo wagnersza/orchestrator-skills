@@ -99,6 +99,48 @@ number comes first, so a worktree name identifies its work item with no lookup. 
 the tool can hold a link to the work item, op 2 records it as well. The link then lives
 outside the name ([`references/tools/<tool>.md`](references/tools/_operations.md)).
 
+### Resolve the plugin root, and prove the seam runs
+
+**Two seams live in this plugin, and neither one is on the `PATH`.** They are
+`scripts/worker_state.py` (readiness and the tick) and `scripts/close_item.py` (steps 4
+to 8 of a **Close transaction**). Both sit in `scripts/` at the **plugin root**, and
+**that directory is never the working directory of a caller**. This session runs in the
+target repo, and a tick runs in a worker worktree. So the module form
+(`-m scripts.<module>`) finds no module there, and the seam is unreachable. The term is
+the **Plugin root** entry in [`CONTEXT.md`](CONTEXT.md).
+
+**Resolve the root once, here, with this command.** It covers both install shapes: a
+plugin-cache install, whose version segment changes on every update, and a clone. It
+prints nothing where the machine holds neither shape.
+
+```bash
+PLUGIN_ROOT=$(python3 -c "import pathlib;h=pathlib.Path.home()/'.claude/plugins';c=list(h.glob('cache/*/orchestrator-skills/*/scripts/worker_state.py'))or list(h.glob('marketplaces/*/scripts/worker_state.py'));print(max(c,key=lambda p:p.stat().st_mtime).parents[1] if c else '')")
+python3 "$PLUGIN_ROOT/scripts/worker_state.py" ready --help >/dev/null && echo "$PLUGIN_ROOT"
+```
+
+**The second line is the preflight, and a non-zero exit aborts the spawn.** It runs
+`--help`, so it mutates nothing. Run it before the first spawn of a session, which puts
+it before the first **Item automation** exists. Say which root it printed. Where it
+fails, say that the plugin is installed and its seams are not reachable. Then point the
+user at `/orchestrator-setup`, the same as any other missing dependency. Both seams sit
+in one directory, so one check answers for both.
+
+**Every later invocation carries the resolved value, and never the variable.** Each
+command you run opens its own shell, so that assignment does not survive to the next
+one. The precheck of an **Item automation** is worse: the **Tool** stores that string and
+runs it a minute later, in a shell that saw no assignment. So write the literal path in.
+Everywhere in this body, `<plugin root>` is that value. It is the same kind of
+placeholder as `<the path from op 2>`.
+
+**This is a fourth member of a named family: a failure mode that reports success.** This
+repo has its own `scripts/`, so the module form resolves inside a worktree of it and runs
+a copy this session never reads. It works, and it reads the wrong file. The other three
+are the `claude` effort typo, the `codex` model flag placed before its subcommand, and
+the terminal that reports its shell (see
+[Gate readiness before the first prompt](#gate-readiness-before-the-first-prompt)).
+Rationale, the three forms that run, and the two this repo rejected:
+[`docs/adr/0034-the-seam-invocation-carries-a-resolved-plugin-root.md`](docs/adr/0034-the-seam-invocation-carries-a-resolved-plugin-root.md).
+
 ## Resolve the verb before you act
 
 The user's phrase usually carries a **verb**, and an installed skill owns that job.
@@ -323,6 +365,13 @@ and when the user names work with no number at all. The phrases that reach it ar
    `/orchestrator-setup` installs the missing plugin. This is the one place a routed
    verb fails hard. So it fails before a worktree exists, and not inside a worker that
    cannot run its first instruction.
+
+   **The plugin root is a requirement of this spawn too.** Where this session has not
+   resolved it yet, run the preflight now
+   ([Resolve the plugin root, and prove the seam runs](#resolve-the-plugin-root-and-prove-the-seam-runs)).
+   A failed check aborts the spawn as well, because step 4 gates readiness on that seam
+   and step 8 writes it into a schedule. Both would then fail, and the schedule would
+   fail silently.
 3. **worktree-create** (op 2) — branch + checkout + run `setup_cmd` via the tool's
    setup hook, off the default branch (or stacked, if the item stacks). Capture
    the worktree id/path.
@@ -375,10 +424,13 @@ operation contract carries that as a prohibition
 [`docs/adr/0019-readiness-is-a-tool-agnostic-process-check.md`](docs/adr/0019-readiness-is-a-tool-agnostic-process-check.md).
 
 ```bash
-python3 -m scripts.worker_state ready \
+python3 <plugin root>/scripts/worker_state.py ready \
   --worktree <the path from op 2> \
   --process '<the pattern from references/harnesses/<harness>.md>'
 ```
+
+`<plugin root>` is the value the preflight resolved
+([Resolve the plugin root, and prove the seam runs](#resolve-the-plugin-root-and-prove-the-seam-runs)).
 
 **The gate is harness-shaped, and the seam names no harness.** Only the `--process` pattern
 varies, and each harness reference holds its own. Read it from there and never from memory.
@@ -386,8 +438,8 @@ Exit `0` is ready. Poll while it is not, and **abort the spawn** rather
 than send a prompt into a dead terminal. Say which harness, which worktree, and what the
 seam printed. Which dialogs a harness can sit behind belongs to that same reference
 ([`references/harnesses/<harness>.md`](references/harnesses/codex.md)). The argument
-surface is `python3 -m scripts.worker_state ready --help`, and the module docstring is the
-signal it reads. Never restate either here or in a report.
+surface is `python3 <plugin root>/scripts/worker_state.py ready --help`, and the module
+docstring is the signal it reads. Never restate either here or in a report.
 
 **Where the harness reference names a first-run dialog, send and submit are two
 steps:** type the prompt, confirm it reached the composer, then submit. One call that
@@ -606,7 +658,7 @@ skipped, no model loads and no agent runs on a tick. That command goes into op 1
 `<precheck-command>` placeholder:
 
 ```bash
-python3 -m scripts.worker_state wake --item <N> \
+python3 <plugin root>/scripts/worker_state.py wake --item <N> \
   --worktree <the path from op 2> \
   --process '<the pattern from references/harnesses/<harness>.md>' \
   --rounds <config's review.rounds> --stall-after <duration> \
@@ -616,6 +668,14 @@ python3 -m scripts.worker_state wake --item <N> \
   --handle <this session's terminal handle, from op 9> --title orchestrator \
   --send-command '<op 4, with {target} where the terminal goes and {text} where the line goes>'
 ```
+
+**`<plugin root>` is a literal path in this string, and never a shell variable.** The
+**Tool** stores the precheck and runs it a minute later, in a shell that saw no
+assignment, and with a working directory this session did not choose. So substitute the
+value the preflight resolved
+([Resolve the plugin root, and prove the seam runs](#resolve-the-plugin-root-and-prove-the-seam-runs)).
+A precheck that carries the module form still runs inside a worktree of *this* repo. It
+then runs that worktree's copy of the seam, and not the installed one.
 
 **Op 11's `--prompt` and `--provider` are inert.** The CLI requires both. Neither one runs.
 Exit 0 is what starts that agent, and no path through `wake` exits 0. Write a prompt that
@@ -628,6 +688,7 @@ names no harness, no tracker and no tool. So the spawn is the one place they are
 
 | Value | Where you read it | What it decides |
 |---|---|---|
+| the plugin root | the preflight in [Resolve the plugin root](#resolve-the-plugin-root-and-prove-the-seam-runs) | which copy of the seam a tick runs, and whether it runs at all |
 | the round bound | config's `review.rounds` (default 3) | when `rounds-exhausted` fires instead of `verdict-request-changes` |
 | the proof-phase gate | a non-blank `run_recipe`, or an `evidence` bar that asks for UI proof | whether this item can ever reach `phase:e2e` — see [The proof phase](#the-proof-phase) |
 | the harness process pattern | `references/harnesses/<harness>.md` | what the `dead` outcome looks for |
@@ -693,9 +754,9 @@ as unsupported. Skip the step and change nothing else about the spawn. **Then sa
 report that the tick is unavailable on this tool.** The maintainer then knows to monitor by
 hand ([Monitor workers](#monitor-workers)).
 
-The argument surface is `python3 -m scripts.worker_state wake --help`, and the module
-docstring is the outcome table. **Never restate either here or in a report.** What this
-session does when a tick wakes it is
+The argument surface is `python3 <plugin root>/scripts/worker_state.py wake --help`, and
+the module docstring is the outcome table. **Never restate either here or in a report.**
+What this session does when a tick wakes it is
 [On the wake](#on-the-wake--one-response-per-outcome).
 
 **A tick against a worktree that is gone is silent.** The seam exits 3, which is
@@ -1076,11 +1137,15 @@ checkout, which is why only the first two steps care where they run.
 `scripts/close_item.py` holds the ordering, the gates, the exit codes and the
 refusal reasons. **Never restate one of them here, in a prompt, or in a report.** A
 second copy is a second source of truth. Read the plan the seam emits.
-`python3 -m scripts.close_item --help` is the argument surface, and the module
-docstring is the step table.
+`python3 <plugin root>/scripts/close_item.py --help` is the argument surface, and the
+module docstring is the step table. `<plugin root>` is the value the preflight resolved
+([Resolve the plugin root, and prove the seam runs](#resolve-the-plugin-root-and-prove-the-seam-runs)).
+The path names the seam and it leaves the working directory alone, which matters here:
+`--repo` defaults to the working directory, so a form that moves there first would point
+the merge at the plugin.
 
 ```bash
-python3 -m scripts.close_item --issue <N> --pr <PR> \
+python3 <plugin root>/scripts/close_item.py --issue <N> --pr <PR> \
   --repo <config's repo> --worktree <the path from op 8> \
   --remove-label <the review label> \
   --project-number <n> --project-owner <owner> --project-id <id> \

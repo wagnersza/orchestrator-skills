@@ -10,14 +10,14 @@ tool and every harness (ADR 0019).
 **`ready`** — is a live agent process running with its working directory inside
 this worktree? Exit 0 ready, non-zero not:
 
-    python3 -m scripts.worker_state ready --worktree /path/to/worktree \\
+    python3 <plugin root>/scripts/worker_state.py ready --worktree /path/to/worktree \\
         --process '<the pattern the harness reference gives>'
 
 **`phase`** — read two facts on disk and two on the tracker, and answer one
 question: *is a **Phase** transition due for this work item?* This is the predicate
 an **Item automation** runs as its `--precheck`, so it blocks on nothing:
 
-    python3 -m scripts.worker_state phase --item 62 \\
+    python3 <plugin root>/scripts/worker_state.py phase --item 62 \\
         --worktree /path/to/worktree \\
         --process '<the pattern the harness reference gives>' \\
         --rounds 3 --stall-after 30m --back-off 15m --repo OWNER/NAME
@@ -99,7 +99,7 @@ wrapper script outside this repo.
 **`wake`** — the whole body of a tick. It asks the same `phase` predicate, and on a
 due transition it delivers that printed line itself:
 
-    python3 -m scripts.worker_state wake --item 62 \\
+    python3 <plugin root>/scripts/worker_state.py wake --item 62 \\
         <every phase flag above> \\
         --handle '<the orchestrator terminal, from operation 9>' \\
         --title orchestrator \\
@@ -933,7 +933,11 @@ def add_tick_arguments(parser):
 
 def main(argv=None):
     parser = UsageExitParser(
-        prog="python3 -m scripts.worker_state",
+        # The usage block prints the command that ran. So a reader copies a form
+        # that resolves from their own working directory. The module form resolves
+        # only at the plugin root
+        # (orchestrator/docs/adr/0034-the-seam-invocation-carries-a-resolved-plugin-root.md).
+        prog=f"python3 {Path(__file__).resolve()}",
         description=(
             "Answer what the Worker watch asks about one worker: is a live agent "
             "process at work in this worktree, and is a Phase transition due for its "

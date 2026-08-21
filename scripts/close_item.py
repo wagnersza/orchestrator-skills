@@ -11,18 +11,18 @@ and emits JSON: the five ordered steps, each marked `todo`, `done`, `refused`,
 `skipped` or `blocked`, the refusal reason, and the exit code an execute run
 would use:
 
-    python3 -m scripts.close_item --issue 32 --pr 48 \\
+    python3 <plugin root>/scripts/close_item.py --issue 32 --pr 48 \\
         --repo /path/to/main/checkout --worktree /path/to/worktree \\
         --remove-label to-review
 
 **Execute mode runs that same plan in order** and stops at the first refusal:
 
-    python3 -m scripts.close_item --issue 32 --pr 48 ... --execute
+    python3 <plugin root>/scripts/close_item.py --issue 32 --pr 48 ... --execute
 
 **Teardown needs `--execute --teardown` together**, so no single flag is
 destructive and a bare invocation can only read:
 
-    python3 -m scripts.close_item ... --execute --teardown \\
+    python3 <plugin root>/scripts/close_item.py ... --execute --teardown \\
         --teardown-command '<the command the tool reference gives, ids filled in>'
 
 The five steps, and what each one does:
@@ -585,7 +585,11 @@ def run_step(entry, tracker):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(
-        prog="python3 -m scripts.close_item",
+        # The usage block prints the command that ran. So a reader copies a form
+        # that resolves from their own working directory. The module form resolves
+        # only at the plugin root
+        # (orchestrator/docs/adr/0034-the-seam-invocation-carries-a-resolved-plugin-root.md).
+        prog=f"python3 {Path(__file__).resolve()}",
         description=(
             "Run steps 4 to 8 of the close transaction, in the one order they hold. "
             "The steps are the PR gate, the pull into the local default branch, the "
