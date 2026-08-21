@@ -42,11 +42,16 @@ ISSUE = 32
 PR = 48
 REVIEW_LABEL = "to-review"
 BOARD = [
-    "--project-number", "6",
-    "--project-owner", "wagnersza",
-    "--project-id", "PVT_fixture",
-    "--status-field-id", "PVTSSF_fixture",
-    "--done-option-id", "98236657",
+    "--project-number",
+    "6",
+    "--project-owner",
+    "wagnersza",
+    "--project-id",
+    "PVT_fixture",
+    "--status-field-id",
+    "PVTSSF_fixture",
+    "--done-option-id",
+    "98236657",
 ]
 
 EXIT_OK = 0
@@ -558,11 +563,16 @@ class CloseItemTestCase(unittest.TestCase):
         self.write_fixture(card="PVTI_second")
         second = self.part(
             self.close(
-                "--project-number", "9",
-                "--project-owner", "someone",
-                "--project-id", "PVT_second",
-                "--status-field-id", "PVTSSF_second",
-                "--done-option-id", "aaaaaaaa",
+                "--project-number",
+                "9",
+                "--project-owner",
+                "someone",
+                "--project-id",
+                "PVT_second",
+                "--status-field-id",
+                "PVTSSF_second",
+                "--done-option-id",
+                "aaaaaaaa",
                 board=False,
             ),
             "card",

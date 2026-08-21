@@ -210,9 +210,7 @@ TEXT_TOKEN = "{text}"
 # The literal the review prompt writes and this seam reads. It is quoted in both
 # places, so a writing pass leaves it byte-identical (ADR 0018).
 VERDICT_VALUES = ("approve", "request-changes")
-VERDICT = re.compile(
-    r"Verdict:\**\s*`?(" + "|".join(VERDICT_VALUES) + r")\b"
-)
+VERDICT = re.compile(r"Verdict:\**\s*`?(" + "|".join(VERDICT_VALUES) + r")\b")
 
 BOX = re.compile(r"^\s*[-*+]\s*\[([ xX])\]")
 
@@ -485,11 +483,7 @@ def verdicts_in(bodies):
     The length is the **Review round** number, because one round posts one verdict.
     So the count is read from the tracker and nothing stores a counter (ADR 0022).
     """
-    return [
-        match.group(1)
-        for body in bodies
-        if (match := VERDICT.search(body or ""))
-    ]
+    return [match.group(1) for body in bodies if (match := VERDICT.search(body or ""))]
 
 
 # --- the Gate record (ADR 0036) ---------------------------------------------
@@ -756,7 +750,9 @@ def transition(
                     f"{unproven}, and every box in {path} is ticked "
                     f"({ticked} of {total})"
                 )
-            outcome = "proof-complete" if current == PHASE_E2E else "implementation-complete"
+            outcome = (
+                "proof-complete" if current == PHASE_E2E else "implementation-complete"
+            )
             return outcome, f"every box in {path} is ticked ({ticked} of {total})"
         waiting = f"{ticked} of {total} boxes ticked"
 
