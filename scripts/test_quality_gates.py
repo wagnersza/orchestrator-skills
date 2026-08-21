@@ -77,7 +77,9 @@ CODE = re.compile(r"`([^`]+)`")
 
 def cells(line):
     """The cells of one table row, each one stripped of its outer spaces."""
-    return [cell.strip() for cell in ROW.match(line).group(1).split("|")]
+    row = ROW.match(line)
+    assert row, f"this line is not a table row: {line!r}"
+    return [cell.strip() for cell in row.group(1).split("|")]
 
 
 def tables(text):

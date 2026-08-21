@@ -203,7 +203,9 @@ class Tracker:
 
     def write(self, argv):
         """Run one tracker write, or record it where a fixture stands in."""
-        if self.fixture is not None:
+        # Both halves of the fixture arrive together, so the second test adds no case.
+        # This test says which attribute the next line reads.
+        if self.fixture is not None and self.path is not None:
             log = self.path.parent / (self.path.name + ".writes")
             with log.open("a") as handle:
                 handle.write(" ".join(argv) + "\n")

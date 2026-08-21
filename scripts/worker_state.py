@@ -171,6 +171,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
 EXIT_COMPLETE = 0
 EXIT_GONE = 3
@@ -248,7 +249,9 @@ def parse_duration(text):
             f"{text!r} is not a duration — write a number of seconds, or a number "
             f"with one of the units {', '.join(sorted(UNITS))}"
         )
-    return float(match.group(1)) * UNITS.get(match.group(2) or "s")
+    # An index and not `.get()`. The `re.fullmatch` pattern lets through only a unit
+    # this map holds. A default would hide a change to that pattern.
+    return float(match.group(1)) * UNITS[match.group(2) or "s"]
 
 
 def human(seconds):
@@ -506,7 +509,9 @@ def gate_runs(path):
     it is neither a run nor a fault. The walk stops at the first malformed line,
     because one unreadable line puts the lines around it in doubt as well.
     """
-    runs = []
+    # A line is whatever `json.loads` returns, so the value type is `Any`. The walk
+    # that follows narrows it to the four keys.
+    runs: list[dict[str, Any]] = []
     try:
         text = Path(path).read_text()
     except OSError:

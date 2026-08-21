@@ -431,7 +431,8 @@ class CloseItemTestCase(unittest.TestCase):
     def test_the_default_invocation_mutates_nothing_at_all(self):
         """No --execute, so this seam is a read whatever else it is given."""
         before = self.disk_state()
-        for extra in ([], ["--teardown"], ["--indent", "0"]):
+        variants: tuple[list[str], ...] = ([], ["--teardown"], ["--indent", "0"])
+        for extra in variants:
             self.close(*extra)
             self.assertNothingMutated(before)
 
