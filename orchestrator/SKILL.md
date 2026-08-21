@@ -416,7 +416,12 @@ file-based **checklist** (works across every harness, unlike claude-only
 - Seed `.orchestrator/checklist-<item>.md` at the worktree root from
   [`references/checklist.template.md`](references/checklist.template.md). Drop any
   step whose recipe field is blank in config (e.g. no `db_gate` → drop the DB
-  step). **The writing-pass box is unconditional** — it depends on no recipe field,
+  step). **A gate box drops on the same rule.** A **Layer** whose command is blank in
+  the `gates:` block loses its box before this session sends the checklist. That is a
+  supported configuration: a repo with no mutation runner ships no layer 4 box
+  ([`references/quality-gates.md`](references/quality-gates.md),
+  [`docs/adr/0032-quality-gates-are-a-layered-contract.md`](docs/adr/0032-quality-gates-are-a-layered-contract.md)).
+  **The writing-pass box is unconditional** — it depends on no recipe field,
   so it ships on every item, including a pure-code one.
 - The prompt tells the worker to **work the checklist top to bottom, ticking each
   box as it completes it, and not to end the turn while any box is unchecked.**
