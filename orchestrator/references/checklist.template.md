@@ -38,8 +38,8 @@ of the phase label. See ../docs/adr/0025-the-session-writes-the-review-state.md.
 - [ ] if a DB gate is configured, satisfy it (back up, migrate, verify schema)
 - [ ] gate layer 4, deep — when the PR/MR is open, run `make deep` (`gates.deep` in
       config). A non-zero exit is a stop, and there is no warning state.
-- [ ] capture evidence per the evidence bar (real-data proof + full suite passing).
-      Paste the `make deep` summary under Evidence in the review note.
+- [ ] capture evidence per the evidence bar (`make deep` green + real-data proof). Paste
+      the `make deep` summary under Evidence in the review note.
 - [ ] post the review note on the **work item** (What to review / Main changes / How to
       test / Evidence) — cover the substance, no filler sections or redundant summaries.
       **This is the last box. Stop here.** Write no work-state label. Move no board card.
