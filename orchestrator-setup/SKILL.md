@@ -222,6 +222,41 @@ Don't assume — read the repo first:
 - Setup/run signals — `package.json` scripts, a `scripts/run.sh`, `pnpm-workspace.yaml`, a migrations dir (`alembic/`, `migrations/`, `prisma/`) → hints for `setup_cmd`, `run_recipe`, `db_gate`.
 - Which harness CLIs are installed (`which claude codex pi copilot cursor-agent`) and which tools (`which orca cmux herdr`).
 
+### 1a. Detect the language family
+
+A language family is one column of the gate matrix in
+[`references/quality-gates.md`](../orchestrator/references/quality-gates.md). Each column
+names the tools that family needs. Only the Python column has landed.
+
+Read the repo root for a Python marker file:
+
+```bash
+for M in pyproject.toml setup.py setup.cfg requirements.txt; do
+  [ -f "$M" ] && echo "python: $M"
+done
+```
+
+**A marker turns the family on.** Report every marker the loop printed, and name the
+family beside it. More than one marker is still one family. Each family you turn on goes
+to `gates.langs` in the config ([orchestrator.template.md](orchestrator.template.md)). The
+value is the family name, so a repo with a Python marker gets `python`.
+
+**No marker turns no family on.** Leave `gates.langs` blank, say so in one line, and
+continue with setup. A repo with no marker file is a supported configuration, the same as
+a blank recipe field. **Never stop setup here.**
+
+**The Go, TypeScript, Terraform and Kubernetes families each wait for a work item of their
+own.** No column names their tools yet. So this step turns none of them on, even where a
+marker file for one of them sits in the repo. Name the marker you saw, and say that the
+column has not landed.
+
+**This condition is also the install condition.** Step 4 requires a family's gate tools
+where that family is on, and nowhere else. One condition, read in two steps, so the two
+cannot disagree about when a tool is required. The **Browser surface** gate in step 4 has
+the same shape. Requirements in that catalog are conditional on config already
+([`references/requirements.md`](../orchestrator/references/requirements.md)), and this gate
+obeys that rule.
+
 ## 2. Ensure the tracker config exists
 
 The orchestrator reads work-state labels and the tracker CLI from
@@ -356,6 +391,14 @@ Scope — only the chosen pieces apply:
   so the two cannot disagree about when the surface is required
   ([`../orchestrator/CONTEXT.md`](../orchestrator/CONTEXT.md), **Browser surface**;
   [ADR 0012](../orchestrator/docs/adr/0012-playwright-cli-is-the-only-browser-surface.md)).
+- **gate tools — conditional on the language family step 1a turned on.** Each family has
+  one table of tool rows in
+  [`references/requirements.md`](../orchestrator/references/requirements.md), and
+  `## Python gate tools` is the one that landed. Where `python` is on, that table is the
+  required set. Where no family is on, no row of it applies and setup checks nothing.
+  **This is the same condition step 1a used**, so the detection and the install cannot
+  disagree about when a tool is required. The gate profile then narrows that set, and it
+  never widens it — see the install loop below.
 - **tool:** the one in config (`orca` / `cmux` / `herdr`).
 - **harness(es):** the impl harness, **and** the review harness if
   `review.enabled` — a cross-vendor review setup (e.g. impl `claude`/opus-5,
@@ -397,6 +440,32 @@ by running the command from `requirements.md`:
   step 0a runs before the recipe is known, so it cannot apply this gate. Update a
   present CLI here, with the line the update block in `requirements.md` already
   carries for it.
+- **Gate tools specifically — one row at a time, and every name comes from the table.**
+  Run the check command of each row in `## Python gate tools`. Install each missing one
+  with that row's install command. **Never name a tool that has no row there.** The matrix
+  and the catalog are held together by
+  [`../scripts/test_quality_gates.py`](../scripts/test_quality_gates.py), and a name
+  invented here escapes that test. Every command in that table carries a **(verify)**
+  note, because none of them has run on this machine yet. That note is not the
+  **(verify)** of an unpinned installer, and these commands are exact. So run each one,
+  then run the row's check command again. Report the row as **installed** only where that
+  second check is green.
+  - **A row that installs into the project needs the project environment active.** The
+    install command says which: `uv add --dev` writes into the project, and
+    `uv tool install` or `brew install` writes onto the machine. Activate that environment
+    before the check. A check that runs outside it reports a present tool as missing.
+  - **The profile drops a layer, and a dropped layer drops its rows.** On `lite`, skip
+    every row whose gate sits in layer 4 of the matrix. The `Layer` column names them, so
+    no list of tools stands here to go stale. Those rows read **not needed by this
+    profile** in the table below, and never missing. On `strict`, every row applies.
+  - **A row that needs a credential is never installed.** If a row needs an API key, a
+    license or a login, report it as **needs the user**, with the exact remaining action.
+    A credential cannot arrive unattended, and a config that names such a tool present is
+    a config that lies. No Python row needs one today, so this rule waits for the family
+    that brings one. `## Vendor keys` in the same catalog holds the rule for a harness.
+  - **This step installs a tool and writes no file.** The gate script, the Makefile and
+    each tool config file are a work item of their own. So no threshold reaches a tool
+    config here.
 - **CLIs** — the documented installer (`brew install gh`/`glab`, `npm install -g @anthropic-ai/claude-code`, etc.).
 - **MCP** — `claude mcp add <name> <command/url>` once the server binary/endpoint is known.
 
@@ -438,6 +507,13 @@ machine with the CLI and no browsers is described as what it is. A "needs the us
 row on either one carries the exact remaining command from `requirements.md`. If the
 recipe names no browser-evidence need, both rows read **not needed by this recipe**
 rather than a gap. Nothing was checked, and nothing is missing.
+
+Give the gate tools **one row each**, on the same present / installed / needs-the-user
+terms. Name the language family and the marker that turned it on above the rows. Name the
+gate profile beside it. Then the table says which family setup found, which profile the
+user chose, and which tools are now present. Where no family is on, write one line in
+place of the rows: no family is on, so no gate tool applies. Nothing was checked, and
+nothing is missing.
 
 ## 5. Confirm and write
 
