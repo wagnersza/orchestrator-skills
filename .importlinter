@@ -1,0 +1,19 @@
+# Import contracts for the layer 3 import-boundaries gate. `lint-imports` reads this
+# file, and `make full` runs it. The layer model is in
+# orchestrator/references/quality-gates.md.
+#
+# This repo holds two seams under `scripts/`, and each one is a CLI process of its own.
+# `close_item.py` owns steps 4 to 8 of a Close transaction (ADR 0015), and
+# `worker_state.py` owns the Worker watch predicate (ADR 0018). Neither seam imports
+# the other. An import puts the exit code of one seam in the hands of the other, and
+# each seam is invoked on its own.
+
+[importlinter]
+root_package = scripts
+
+[importlinter:contract:seams-are-independent]
+name = The two seams do not import each other
+type = independence
+modules =
+    scripts.close_item
+    scripts.worker_state
