@@ -200,8 +200,9 @@ For option 1, skip the interview entirely. Do this instead:
      Offer to add it with the defaults of the template, plus the families step 1a
      found and `profile: strict`. **Ask no interview question here.** So a
      maintainer who answered the questions last month keeps every answer, and
-     still gains the block. Where the user declines it, the gate tools from point
-     1 stay installed and no layer command reaches a checklist.
+     still gains the block. Where the user takes the block, run step 5b too, so the
+     repo gains the gate files with it. Where the user declines it, the gate tools
+     from point 1 stay installed and no layer command reaches a checklist.
    - **Values now invalid** — a model no longer in the registry, an effort the
      chosen harness can't reach, a same-vendor review pair.
    - **Dead references** — a `references/` path the config or `CLAUDE.md` points at
@@ -487,9 +488,8 @@ it by running the command from `requirements.md`:
   - **A present gate tool stays as it is.** The update block in `requirements.md` carries
     no line for one, so step 0a did not update it and this loop does not either. A green
     check is the whole answer.
-  - **This step installs a tool and writes no file.** The gate script, the Makefile and
-    each tool config file are a work item of their own. So no threshold reaches a tool
-    config here.
+  - **This step installs a tool and writes no file.** The Makefile, the gate script and
+    each threshold key land in step 5b. So no threshold reaches a tool config here.
 - **CLIs** — the documented installer (`brew install gh`/`glab`, `npm install -g @anthropic-ai/claude-code`, etc.).
 - **MCP** — `claude mcp add <name> <command/url>` once the server binary/endpoint is known.
 
@@ -589,6 +589,78 @@ nobody reads. Where the tool records operation 11 as unsupported, there is no ti
 Skip this step and say so in one line. Where the title cannot be set, the handle is still
 target one and the comment is still the last fallback. Say which of the three the spawn
 will use. That is a supported configuration and not a gap.
+
+### 5b. Write the gate files
+
+Each layer command in `gates:` needs a file behind it. Write those files here, from the two
+templates beside this skill:
+
+- [`templates/Makefile.template`](templates/Makefile.template) → `Makefile`
+- [`templates/checks.sh.template`](templates/checks.sh.template) → `scripts/checks.sh`,
+  and make that file executable
+
+Each Makefile target runs one layer of the script, and CI runs the same script. So a step
+cannot be green here and red in CI for a reason that is not the code. The layers are in
+[`references/quality-gates.md`](../orchestrator/references/quality-gates.md), and the
+rationale is
+[ADR 0032](../orchestrator/docs/adr/0032-quality-gates-are-a-layered-contract.md).
+
+**Only where a language family is on.** Step 1a turns a family on, and `python` is the one
+family that landed. Where `gates.langs` is blank, write no gate file and say so in one
+line. That repo has no gate tool either, from the same condition step 4 read. It is a
+supported configuration and not a gap.
+
+**The `lite` profile drops layer 4.** A comment marks the layer 4 block of the Makefile
+template on each side. On `lite`, delete that block. Leave `gates.deep` blank, and the
+blank field then drops the layer 4 box from the checklist
+([`references/checklist.template.md`](../orchestrator/references/checklist.template.md)).
+The script keeps its `deep` case, because no target and no config field reaches it. So a
+later move to `strict` needs the Makefile block back, and nothing else. On `strict`, keep
+the block. Write `make deep` into `gates.deep`.
+
+**Each threshold goes to the file that reads it.** Config is the source of truth for a
+threshold. Write the number the config holds, and never a second number:
+
+| Threshold | File | Key |
+|---|---|---|
+| `complexity` | `pyproject.toml` | `max-complexity` under `[tool.ruff.lint.mccabe]` |
+| `coverage` | `pyproject.toml` | `fail_under` under `[tool.coverage.report]` |
+| `mutation` | `scripts/checks.sh` | `MUTATION_MIN` |
+| `cognitive`, `funlen`, `branch` | — | the Python column states no default, so these stay blank and nothing is written |
+
+A blank threshold writes no key at all. The tool's own default then stands, which is what
+the config template says a blank field means.
+
+**Setup never rewrites a file it did not create.** Where the target file already exists,
+read the value it holds. Where that value equals the config value, say so in one line and
+write nothing. Where the two differ, report both and ask which one is correct:
+
+> `pyproject.toml` sets `fail_under = 90`, and the config sets `coverage: 85`.
+> Which number is correct?
+>
+> 1. **Keep 90** — the config takes the value of the file.
+> 2. **Write 85** — the file takes the value of the config, and only that key changes.
+
+Then write only that one key, and touch no second key. This narrows the rule that opens
+step 5, and it narrows it to this extent alone. A hand-tuned rule set belongs to the
+maintainer
+([ADR 0032](../orchestrator/docs/adr/0032-quality-gates-are-a-layered-contract.md)).
+
+The same rule covers the Makefile and the script. Where a `Makefile` exists, add only the
+targets it lacks. Where it already holds a target of one of these names, report both
+recipes. Then ask which one is correct. Where `scripts/checks.sh` exists, do the same, one
+layer at a time.
+
+**Two more files belong to the maintainer, and both need a word in the report.** Layer 3
+reads its contracts from `.importlinter`, and the mutation runner reads which paths to
+mutate from `pyproject.toml`. Setup writes neither. So layer 3 stops until the contracts
+exist, and layer 4 stops until the runner knows what to mutate. Name each one as an action
+for the maintainer. Write no contract yourself, because a contract invented here describes
+a dependency graph nobody read.
+
+**Report one row per file**: written / already there / needs the user. Give each threshold
+its own row, with the key and the number. Then the report says which command is real, and
+which number reached the tool that reads it.
 
 ## 6. Done
 
