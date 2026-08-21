@@ -113,12 +113,7 @@ is one new row. The vocabulary is the **Skill routing** and **Lane** entries in
 **Lane `inline` — invoke the skill here.** Invoke it in this session, against the
 main checkout (config's `repo`), on the default branch. No worktree, no branch, no
 spawn. Hand it what the row's Notes column says it needs. Then name the skill you
-routed to in the report ([Reporting to the user](#reporting-to-the-user)). **Preflight
-the skill first, the same as a `worker` row does**
-([Preflight: can the model invoke this skill?](references/skill-routing.md#preflight-can-the-model-invoke-this-skill)).
-Where the model cannot invoke it, **claim nothing**: ask the maintainer to type the
-slash command, or answer the verb freehand and report the skill as unreachable. Never
-report a skill as having run here when nothing entered it. An
+routed to in the report ([Reporting to the user](#reporting-to-the-user)). An
 `inline` skill writes issues, docs or conversation, and never source, so "never do
 implementation work here" holds. A verb that writes source is a `worker` row, and
 that law is what puts it there.
@@ -126,8 +121,8 @@ that law is what puts it there.
 **Lane `worker` — hand the skill to the worker.** Invoke nothing here. The
 invocation goes into the spawn prompt, so the worker's first act inside its own
 worktree is to enter the skill. [Spawn a worker](#spawn-a-worker-implement-x)
-preflights the skill, then splices it or takes the prose fallback that preflight names.
-This section only resolves which skill it is. A worked trace of both lanes, end to end, is
+preflights the skill and splices it. This section only resolves which skill it is. A
+worked trace of both lanes, end to end, is
 [`references/examples/routed-run.md`](references/examples/routed-run.md).
 
 **A queue question is not a verb.** A bare `/orchestrator`, and *what next* / *what
@@ -315,34 +310,19 @@ and when the user names work with no number at all. The phrases that reach it ar
    requirements.** Where the verb resolved to a `worker` row
    ([Resolve the verb before you act](#resolve-the-verb-before-you-act)), confirm the
    skill is reachable by *this* harness, before you compose the prompt:
-   - **claude** — the skill is a plugin skill, so **two things must hold**. **The
-     plugin that ships it is installed:** every row in the routing table ships in
-     `mattpocock-skills`, so the check is the `mattpocock-skills` line of the plugin
-     check block in [`references/requirements.md`](references/requirements.md). **And
-     the model can invoke the skill**, which is the half an installed plugin does not
-     answer. Run
-     [Preflight: can the model invoke this skill?](references/skill-routing.md#preflight-can-the-model-invoke-this-skill).
-     Don't write a check of your own, and never write down which skills carry the flag.
+   - **claude** — the skill is a plugin skill, so confirm the plugin that ships it is
+     installed. Every row in the routing table ships in `mattpocock-skills`, so the
+     check is the `mattpocock-skills` line of the plugin check block in
+     [`references/requirements.md`](references/requirements.md). Don't write a check
+     of your own.
    - **any other harness** — there is no slash command to reach, so the reachable
      form is the row's Notes prose. Confirm the row has it. A `worker` row with no
      prose contract is not reachable on this harness.
 
-   **A missing plugin aborts the spawn.** Say which skill, which harness, and that
+   A failed check **aborts the spawn**. Say which skill, which harness, and that
    `/orchestrator-setup` installs the missing plugin. This is the one place a routed
    verb fails hard. So it fails before a worktree exists, and not inside a worker that
    cannot run its first instruction.
-
-   **A skill the model cannot invoke does not abort.** The plugin is installed and the
-   skill body is on disk, so the contract is reachable and only the slash command is not.
-   The draft prompt then carries no slash command. It carries the row's *Without slash
-   commands* prose, in the place the slash command holds on `claude` — the same fallback
-   a harness that parses no slash command takes, for the same reason
-   ([The prompt: checklist + completion contract](#the-prompt-checklist--completion-contract)).
-   Then **name that branch on the spawn line**
-   ([Reporting to the user](#reporting-to-the-user)), so a cold start is a fact the
-   maintainer reads at spawn. The definition is the **Skill reachability** entry in
-   [`CONTEXT.md`](CONTEXT.md). Rationale:
-   [`docs/adr/0030-preflight-skill-reachability-before-routing.md`](docs/adr/0030-preflight-skill-reachability-before-routing.md).
 3. **worktree-create** (op 2) — branch + checkout + run `setup_cmd` via the tool's
    setup hook, off the default branch (or stacked, if the item stacks). Capture
    the worktree id/path.
@@ -574,9 +554,9 @@ after it. A worker that removes its own phase label leaves the tick with an item
 human review. That worker's finish then wakes nothing
 ([On the wake](#on-the-wake--one-response-per-outcome)).
 
-**Harness shape:** a **claude** worker **does** enter the routed skill, where the model
-can invoke that skill — the invocation is a literal slash command in the prompt
-(`/implement`), and its other slash skills (`/ponytail:ponytail`) stay available on top. See
+**Harness shape:** a **claude** worker **does** enter the routed skill — the
+invocation is a literal slash command in the prompt (`/implement`), and its other
+slash skills (`/ponytail:ponytail`) stay available on top. See
 `references/harnesses/claude.md`. **Any other harness** gets the **same contract in
 plain English** — no slash commands, no "TodoWrite" wording; spell out the numbered
 checklist steps as prose. **The routed skill takes that same split.** A harness with
@@ -588,17 +568,6 @@ place the slash command takes on claude. **Never send a slash command to a harne
 that cannot parse one** — it reads as literal text and the worker starts cold, which
 is worse than the prose contract because it looks like it worked. This is the same
 plain-English rule as every other part of the contract, not a second mechanism.
-
-**Never send a slash command the model cannot invoke either.** A `claude` worker
-parses a slash command, and a skill whose frontmatter holds
-`disable-model-invocation: true` is still absent from its skill list. So the same
-sentence reads as literal text, the worker starts cold, and the run looks correct. The
-two branches are one branch: **both take the row's *Without slash commands* prose, in
-the place the slash command holds.** Spawn step 2 is where the branch is decided, and
-the check is
-[Preflight: can the model invoke this skill?](references/skill-routing.md#preflight-can-the-model-invoke-this-skill).
-Definition: the **Skill reachability** entry in [`CONTEXT.md`](CONTEXT.md). Rationale:
-[`docs/adr/0030-preflight-skill-reachability-before-routing.md`](docs/adr/0030-preflight-skill-reachability-before-routing.md).
 
 **Per-item ports.** Derive from the work-item number `N` per config's `ports`
 (e.g. `FE=3000+N`), so parallel workers never collide and the port reads back to
@@ -893,10 +862,8 @@ plain-English split every other part of the contract takes: never send a slash c
 a harness that cannot parse one.
 
 **The re-prompt is then self-contained.** A cleared worker has forgotten its spawn prompt.
-So the re-prompt re-carries four things. The routed skill, **in the form the spawn used**.
-That is the literal invocation, or the row's *Without slash commands* prose where the spawn
-took the prose fallback. Then the worker's own harness, model, effort and role. Then the
-acceptance criteria and the scope
+So the re-prompt re-carries four things. The routed skill, as a literal invocation. The
+worker's own harness, model, effort and role. Then the acceptance criteria and the scope
 edges. **That is the same list a fix prompt already carries** (step 3 of
 [Adversarial review](#adversarial-review-when-configs-reviewenabled)) — one contract
 reached from two directions, not two rules. A re-prompt is a worker prompt, so it goes
@@ -992,10 +959,7 @@ outcome that reports the bound spent.
      mentioning `/implement`. Same rule as a spawn prompt, for the same reason — a
      mention reads as a suggestion, and the worker then works freehand. **A fix prompt
      goes to a worker whose context this session has cleared**, so it re-states the
-     invocation instead of relying on the worker to remember entering it. **Where the
-     spawn took the prose fallback, the fix prompt takes it too**, because the model
-     still cannot invoke the skill
-     ([Spawn a worker](#spawn-a-worker-implement-x), step 2).
+     invocation instead of relying on the worker to remember entering it.
    - **The worker's own harness, model, effort and role.** Effort steps up each round,
      so the worker cannot infer its current setting from the last one it saw.
    - **The reviewer's model, effort and harness, with the cross-vendor fact stated.**
@@ -1148,14 +1112,6 @@ it. Shape output for acting on, not for completeness:
   A batch-spawn reports the four fields **per child**, so a mixed batch shows two
   different skills. A spawn with no routed skill drops the field and keeps the other
   three.
-- **Where the prompt took the prose fallback, the skill field says which branch.** The
-  worker got the row's *Without slash commands* prose and no slash command, so a field
-  that reads `/implement` claims the wrong thing. Two branches, one shape:
-  `#61 61-contacts-import spawned · prose fallback, the model cannot invoke /implement ·
-  heavy · opus-5 · xhigh`, and `· prose fallback, codex parses no slash command ·` for
-  the other. The other three fields are unchanged. The branch is decided at spawn step 2
-  ([Spawn a worker](#spawn-a-worker-implement-x)), and a cold start is then a fact the
-  user reads at spawn rather than one they find in a transcript later.
 - **Restate position every turn, and carry the phase with it.** A worker's progress is
   `phase:impl · checklist 4/7`, a review loop is `phase:review · round 2 of 3`. Every
   report of an owned item says which phase it is in, because that is the fact a fresh
