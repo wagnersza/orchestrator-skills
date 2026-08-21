@@ -933,7 +933,11 @@ def add_tick_arguments(parser):
 
 def main(argv=None):
     parser = UsageExitParser(
-        prog="python3 -m scripts.worker_state",
+        # The usage block prints the command that ran. So a reader copies a form
+        # that resolves from their own working directory. The module form resolves
+        # only at the plugin root
+        # (orchestrator/docs/adr/0034-the-seam-invocation-carries-a-resolved-plugin-root.md).
+        prog=f"python3 {Path(__file__).resolve()}",
         description=(
             "Answer what the Worker watch asks about one worker: is a live agent "
             "process at work in this worktree, and is a Phase transition due for its "

@@ -585,7 +585,11 @@ def run_step(entry, tracker):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(
-        prog="python3 -m scripts.close_item",
+        # The usage block prints the command that ran. So a reader copies a form
+        # that resolves from their own working directory. The module form resolves
+        # only at the plugin root
+        # (orchestrator/docs/adr/0034-the-seam-invocation-carries-a-resolved-plugin-root.md).
+        prog=f"python3 {Path(__file__).resolve()}",
         description=(
             "Run steps 4 to 8 of the close transaction, in the one order they hold. "
             "The steps are the PR gate, the pull into the local default branch, the "
