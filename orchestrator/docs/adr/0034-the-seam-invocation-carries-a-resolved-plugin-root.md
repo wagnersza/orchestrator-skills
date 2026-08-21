@@ -122,3 +122,7 @@ decision.
 - **Accepted risk: the ban is a test over Markdown, and not over a running command.** A
   skill body that prints the path form with a wrong root still passes. The preflight is
   the guard for that case, and it runs once per session rather than once per invocation.
+- **`scripts/test_worker_state.py` and `scripts/test_close_item.py` keep the module
+  form.** Each one runs the seam as a subprocess from the repo root, where the form
+  resolves, and the copy it must test is the one in this checkout. So the ban reaches
+  Markdown and leaves those two alone.
