@@ -194,9 +194,7 @@ class SeamInvocationTestCase(unittest.TestCase):
 
         if failures:
             self.fail(
-                "\n".join(
-                    [f"{len(failures)} seam invocations cannot run:", *failures]
-                )
+                "\n".join([f"{len(failures)} seam invocations cannot run:", *failures])
             )
 
     def test_the_walk_reaches_the_markdown_of_this_plugin(self):

@@ -352,7 +352,9 @@ class WorkerStateTestCase(unittest.TestCase):
         # Wait until the child is far enough into start-up that `ps` lists it.
         for _ in range(100):
             listing = subprocess.run(
-                ["ps", "-o", "pid=", "-p", str(proc.pid)], capture_output=True, text=True
+                ["ps", "-o", "pid=", "-p", str(proc.pid)],
+                capture_output=True,
+                text=True,
             )
             if listing.stdout.strip():
                 return proc
@@ -453,7 +455,9 @@ class WorkerStateTestCase(unittest.TestCase):
             )
             self.assertEqual(proc.returncode, EXIT_USAGE, f"{argv}: {proc.stderr}")
             self.assertEqual(proc.stdout, "", argv)
-            self.assertNotIn(proc.returncode, (EXIT_COMPLETE, EXIT_NOT_READY, EXIT_GONE))
+            self.assertNotIn(
+                proc.returncode, (EXIT_COMPLETE, EXIT_NOT_READY, EXIT_GONE)
+            )
 
     # --- phase: the predicate an Item automation runs -----------------------
 
@@ -519,7 +523,9 @@ class WorkerStateTestCase(unittest.TestCase):
         lines around it, so the line number goes in the diagnosis."""
         write(self.checklist, TICKED)
         self.write_fixture(labels=IMPL)
-        self.write_gates(self.gate_run(QUICK), "make full exited 0", self.gate_run(FULL))
+        self.write_gates(
+            self.gate_run(QUICK), "make full exited 0", self.gate_run(FULL)
+        )
 
         line = self.tick(*GATES, expect=EXIT_DUE)
 
@@ -595,7 +601,9 @@ class WorkerStateTestCase(unittest.TestCase):
         self.write_fixture(labels=IMPL)
         self.write_gates(self.gate_run(QUICK, code=1, sha="0" * 40))
 
-        self.assertTrue(self.tick(expect=EXIT_DUE).startswith("implementation-complete:"))
+        self.assertTrue(
+            self.tick(expect=EXIT_DUE).startswith("implementation-complete:")
+        )
 
     def test_gates_unproven_never_competes_with_dead_or_stalled(self):
         """It fires in place of the finish, so it needs a ticked checklist. An
@@ -604,7 +612,9 @@ class WorkerStateTestCase(unittest.TestCase):
         self.backdate(3600)
 
         # No live process and an unticked checklist: `dead` still owns this tick.
-        self.assertTrue(self.tick(*GATES, stall="30m", expect=EXIT_DUE).startswith("dead:"))
+        self.assertTrue(
+            self.tick(*GATES, stall="30m", expect=EXIT_DUE).startswith("dead:")
+        )
 
         # A live process and stale work product: `stalled` still owns it.
         self.child_in(self.worktree)
@@ -664,7 +674,9 @@ class WorkerStateTestCase(unittest.TestCase):
     def test_a_comment_with_no_verdict_line_does_not_fire(self):
         """The literal is the signal, so prose about a verdict is not one."""
         self.write_fixture(
-            comments=["I would approve this, but the verdict comes after the fix round"],
+            comments=[
+                "I would approve this, but the verdict comes after the fix round"
+            ],
             labels=REVIEW,
         )
         self.child_in(self.worktree)
@@ -710,7 +722,9 @@ class WorkerStateTestCase(unittest.TestCase):
     def test_an_approve_at_the_bound_reads_as_approve_and_not_as_exhausted(self):
         """Both hand the item to human review, and approve is the stronger fact:
         the reviewer said yes, so no loop was cut short."""
-        self.write_fixture(comments=[CHANGES, CHANGES, "Verdict: approve"], labels=REVIEW)
+        self.write_fixture(
+            comments=[CHANGES, CHANGES, "Verdict: approve"], labels=REVIEW
+        )
 
         line = self.tick(rounds=3, expect=EXIT_DUE)
 
@@ -754,7 +768,9 @@ class WorkerStateTestCase(unittest.TestCase):
 
         # The same live worker with fresh work product is neither outcome.
         self.checklist.write_text(UNTICKED + "- [ ] a step added just now\n")
-        self.assertTrue(self.tick(stall="30m", expect=EXIT_NOTHING).startswith("nothing:"))
+        self.assertTrue(
+            self.tick(stall="30m", expect=EXIT_NOTHING).startswith("nothing:")
+        )
 
     def test_dead_and_stalled_never_both_fire(self):
         """`dead` is the absence of the live process `stalled` needs, so stale work
@@ -887,7 +903,9 @@ class WorkerStateTestCase(unittest.TestCase):
         write(self.checklist, TICKED)
         self.write_fixture(labels=IMPL)
 
-        first = self.tick("--back-off", "1h", "--marker-dir", str(shared), expect=EXIT_DUE)
+        first = self.tick(
+            "--back-off", "1h", "--marker-dir", str(shared), expect=EXIT_DUE
+        )
 
         self.assertTrue(first.startswith("implementation-complete:"), first)
         self.assertTrue(self.marker("implementation-complete", shared).is_file())
@@ -984,7 +1002,9 @@ class WorkerStateTestCase(unittest.TestCase):
                 self.tick(stall=stall, expect=EXIT_DUE).startswith("stalled:"), stall
             )
         # The same fixture is not a stall under a window that has not passed.
-        self.assertTrue(self.tick(stall="1h", expect=EXIT_NOTHING).startswith("nothing:"))
+        self.assertTrue(
+            self.tick(stall="1h", expect=EXIT_NOTHING).startswith("nothing:")
+        )
 
     def test_a_removed_worktree_is_gone_for_the_predicate_too(self):
         """The existing ordering guarantee, held for this subcommand: a torn-down
@@ -1224,7 +1244,9 @@ class WorkerStateTestCase(unittest.TestCase):
         self.write_fixture(labels=IMPL)
 
         first = self.wake("--back-off", "1h", handle="H1", send=SEND)
-        held = self.wake("--back-off", "1h", handle="H1", send=SEND, expect=EXIT_NOTHING)
+        held = self.wake(
+            "--back-off", "1h", handle="H1", send=SEND, expect=EXIT_NOTHING
+        )
 
         self.assertTrue(first.startswith("delivered:"), first)
         self.assertTrue(held.startswith("suppressed:"), held)
@@ -1241,13 +1263,17 @@ class WorkerStateTestCase(unittest.TestCase):
         self.child_in(self.worktree)
         codes["nothing"] = EXIT_NOTHING
         self.assertTrue(
-            self.wake(handle="H1", send=SEND, expect=EXIT_NOTHING).startswith("nothing:")
+            self.wake(handle="H1", send=SEND, expect=EXIT_NOTHING).startswith(
+                "nothing:"
+            )
         )
 
         write(self.checklist, TICKED)
         codes["delivered"] = EXIT_DELIVERED
         self.assertTrue(
-            self.wake("--back-off", "1h", handle="H1", send=SEND).startswith("delivered:")
+            self.wake("--back-off", "1h", handle="H1", send=SEND).startswith(
+                "delivered:"
+            )
         )
 
         codes["suppressed"] = EXIT_NOTHING
@@ -1350,7 +1376,9 @@ class WorkerStateTestCase(unittest.TestCase):
         # And a fix reads as a fix, with no memory of the earlier answer.
         write(self.checklist, TICKED)
         self.assertTrue(
-            self.tick(stall="30m", expect=EXIT_DUE).startswith("implementation-complete:")
+            self.tick(stall="30m", expect=EXIT_DUE).startswith(
+                "implementation-complete:"
+            )
         )
 
     def test_the_seam_names_no_harness(self):
@@ -1362,9 +1390,10 @@ class WorkerStateTestCase(unittest.TestCase):
         # `pi` is a substring of ordinary words, so it is checked as a token.
         self.assertIsNone(re.search(r"\bpi\b", source), "'pi' is named in the seam")
         # --process is required, which is what leaves no room for a default.
-        self.assertIn("no-such-agent-process", self.ready(
-            pattern="no-such-agent-process", expect=EXIT_NOT_READY
-        ))
+        self.assertIn(
+            "no-such-agent-process",
+            self.ready(pattern="no-such-agent-process", expect=EXIT_NOT_READY),
+        )
 
     def test_the_seam_names_no_tool(self):
         """The send command is a template the spawn resolves from the tool file's

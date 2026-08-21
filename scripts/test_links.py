@@ -286,10 +286,7 @@ class LinkTestCase(unittest.TestCase):
         cross-references."""
         self.write(
             "info.md",
-            "```markdown\n"
-            "```js\n"
-            "[example output](no-such-file.md)\n"
-            "```\n",
+            "```markdown\n```js\n[example output](no-such-file.md)\n```\n",
         )
 
         self.assertEqual(self.reported_in("info.md"), [])

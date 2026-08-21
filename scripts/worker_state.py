@@ -171,6 +171,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
 EXIT_COMPLETE = 0
 EXIT_GONE = 3
@@ -210,9 +211,7 @@ TEXT_TOKEN = "{text}"
 # The literal the review prompt writes and this seam reads. It is quoted in both
 # places, so a writing pass leaves it byte-identical (ADR 0018).
 VERDICT_VALUES = ("approve", "request-changes")
-VERDICT = re.compile(
-    r"Verdict:\**\s*`?(" + "|".join(VERDICT_VALUES) + r")\b"
-)
+VERDICT = re.compile(r"Verdict:\**\s*`?(" + "|".join(VERDICT_VALUES) + r")\b")
 
 BOX = re.compile(r"^\s*[-*+]\s*\[([ xX])\]")
 
@@ -250,7 +249,9 @@ def parse_duration(text):
             f"{text!r} is not a duration — write a number of seconds, or a number "
             f"with one of the units {', '.join(sorted(UNITS))}"
         )
-    return float(match.group(1)) * UNITS.get(match.group(2) or "s")
+    # An index and not `.get()`. The `re.fullmatch` pattern lets through only a unit
+    # this map holds. A default would hide a change to that pattern.
+    return float(match.group(1)) * UNITS[match.group(2) or "s"]
 
 
 def human(seconds):
@@ -485,11 +486,7 @@ def verdicts_in(bodies):
     The length is the **Review round** number, because one round posts one verdict.
     So the count is read from the tracker and nothing stores a counter (ADR 0022).
     """
-    return [
-        match.group(1)
-        for body in bodies
-        if (match := VERDICT.search(body or ""))
-    ]
+    return [match.group(1) for body in bodies if (match := VERDICT.search(body or ""))]
 
 
 # --- the Gate record (ADR 0036) ---------------------------------------------
@@ -512,7 +509,9 @@ def gate_runs(path):
     it is neither a run nor a fault. The walk stops at the first malformed line,
     because one unreadable line puts the lines around it in doubt as well.
     """
-    runs = []
+    # A line is whatever `json.loads` returns, so the value type is `Any`. The walk
+    # that follows narrows it to the four keys.
+    runs: list[dict[str, Any]] = []
     try:
         text = Path(path).read_text()
     except OSError:
@@ -756,7 +755,9 @@ def transition(
                     f"{unproven}, and every box in {path} is ticked "
                     f"({ticked} of {total})"
                 )
-            outcome = "proof-complete" if current == PHASE_E2E else "implementation-complete"
+            outcome = (
+                "proof-complete" if current == PHASE_E2E else "implementation-complete"
+            )
             return outcome, f"every box in {path} is ticked ({ticked} of {total})"
         waiting = f"{ticked} of {total} boxes ticked"
 

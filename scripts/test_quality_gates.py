@@ -51,7 +51,16 @@ REQUIREMENTS = REPO_ROOT / "orchestrator" / "references" / "requirements.md"
 TEMPLATE = REPO_ROOT / "orchestrator-setup" / "orchestrator.template.md"
 
 # What the `gates:` block owes, one tuple per mapping.
-GATES_KEYS = ("profile", "langs", "quick", "full", "deep", "story", "thresholds", "infra")
+GATES_KEYS = (
+    "profile",
+    "langs",
+    "quick",
+    "full",
+    "deep",
+    "story",
+    "thresholds",
+    "infra",
+)
 COMMAND_KEYS = ("quick", "full", "deep", "story")
 THRESHOLD_KEYS = ("complexity", "cognitive", "funlen", "coverage", "branch", "mutation")
 INFRA_KEYS = ("plan_role", "policy_dir", "fixtures", "halt_on", "zero_changes")
@@ -68,7 +77,9 @@ CODE = re.compile(r"`([^`]+)`")
 
 def cells(line):
     """The cells of one table row, each one stripped of its outer spaces."""
-    return [cell.strip() for cell in ROW.match(line).group(1).split("|")]
+    row = ROW.match(line)
+    assert row, f"this line is not a table row: {line!r}"
+    return [cell.strip() for cell in row.group(1).split("|")]
 
 
 def tables(text):
@@ -280,7 +291,9 @@ def threshold_mismatches(template_path, matrix_path):
     """
     matrix = list(matrix_thresholds(matrix_path.read_text(encoding="utf-8")))
     reported = []
-    for _, key, value in mapping(template_path.read_text(encoding="utf-8"), "thresholds"):
+    for _, key, value in mapping(
+        template_path.read_text(encoding="utf-8"), "thresholds"
+    ):
         if not value:
             continue
         rows = [(number, cell) for number, gate, cell in matrix if gate.startswith(key)]
@@ -334,7 +347,9 @@ class GateMatrixTestCase(unittest.TestCase):
         self.root = Path(self.tmp.name)
         self.addCleanup(self.tmp.cleanup)
 
-        self.matrix = self.write("quality-gates.md", self.LAYER_TABLE + self.GATE_MATRIX)
+        self.matrix = self.write(
+            "quality-gates.md", self.LAYER_TABLE + self.GATE_MATRIX
+        )
         self.requirements = self.write("requirements.md", self.REQUIREMENTS_TEXT)
 
     # --- helpers ------------------------------------------------------------
@@ -376,8 +391,7 @@ class GateMatrixTestCase(unittest.TestCase):
         reports a tool no requirements row can ever declare."""
         self.write(
             "quality-gates.md",
-            self.LAYER_TABLE
-            + "| Gate | Hard threshold | Layer | Tool |\n"
+            self.LAYER_TABLE + "| Gate | Hard threshold | Layer | Tool |\n"
             "|---|---|---|---|\n"
             "| format | 0 files to reformat | 1 | `ruff format --check` |\n",
         )
@@ -411,7 +425,9 @@ class GateMatrixTestCase(unittest.TestCase):
 
         if reported:
             self.fail(
-                "\n".join(["a matrix row names a tool with no install path:", *reported])
+                "\n".join(
+                    ["a matrix row names a tool with no install path:", *reported]
+                )
             )
 
 

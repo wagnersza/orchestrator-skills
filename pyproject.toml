@@ -1,0 +1,36 @@
+# Tool config for the quality gates. Each gate tool reads its own paths, excludes and
+# thresholds from here, so `scripts/checks.sh` holds no number.
+#
+# `docs/agents/orchestrator.md` is the source of truth for a threshold. Change the
+# number there first. Then copy it into the key here that reads it. The layer model and
+# the default for each number are in orchestrator/references/quality-gates.md.
+#
+# This file declares no `[project]` table. The repo ships as a Claude Code plugin, so
+# there is no Python package to build and nothing to publish.
+
+[tool.ruff]
+target-version = "py311"
+
+[tool.ruff.lint]
+# The default rule set of `ruff`. This repo declares no rule set of its own, so the
+# default of the tool stands. A blank threshold leaves a tool default in place in the
+# same way.
+select = ["E4", "E7", "E9", "F"]
+
+[tool.ruff.lint.mccabe]
+# gates.thresholds.complexity — cyclomatic branches per function.
+max-complexity = 16
+
+[tool.mypy]
+python_version = "3.11"
+
+# The two seams and their suites carry no type annotations, and this item adds none.
+# `mypy --strict` on the command line holds every other check, so a real type fault
+# still stops the gate. The four keys that follow drop the demand for an annotation,
+# and nothing else.
+[[tool.mypy.overrides]]
+module = "scripts.*"
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+disallow_untyped_calls = false
+disallow_untyped_decorators = false

@@ -1,0 +1,14 @@
+# Config for the layer 3 secrets gate. `gitleaks` reads this file, and `make full` runs
+# it. The layer model is in orchestrator/references/quality-gates.md.
+#
+# The gate keeps the rule set of the tool. This repo holds markdown skills, JSON
+# manifests and two Python seams. It has no service credential of its own to describe,
+# and a rule invented here describes a secret nobody has.
+#
+# The threshold is 0 findings. The scan reads the whole history, so a secret that a
+# later commit deleted still stops the gate.
+
+title = "orchestrator-skills secrets gate"
+
+[extend]
+useDefault = true

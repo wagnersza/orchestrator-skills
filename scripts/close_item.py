@@ -203,7 +203,9 @@ class Tracker:
 
     def write(self, argv):
         """Run one tracker write, or record it where a fixture stands in."""
-        if self.fixture is not None:
+        # Both halves of the fixture arrive together, so the second test adds no case.
+        # This test says which attribute the next line reads.
+        if self.fixture is not None and self.path is not None:
             log = self.path.parent / (self.path.name + ".writes")
             with log.open("a") as handle:
                 handle.write(" ".join(argv) + "\n")
@@ -309,7 +311,9 @@ def build_plan(args, tracker):
     #        no reflog, so this is the one unrecoverable case in the flow.
     check_tree = f"git -C {worktree or '<worktree>'} status --porcelain"
     if refusal:
-        steps.append(step(6, "worktree clean", check_tree, STATUS_BLOCKED, not_reached(refusal)))
+        steps.append(
+            step(6, "worktree clean", check_tree, STATUS_BLOCKED, not_reached(refusal))
+        )
     elif worktree is None or not worktree.exists():
         steps.append(
             step(
@@ -352,7 +356,13 @@ def build_plan(args, tracker):
                 )
             else:
                 steps.append(
-                    step(6, "worktree clean", check_tree, STATUS_DONE, "the tree is clean")
+                    step(
+                        6,
+                        "worktree clean",
+                        check_tree,
+                        STATUS_DONE,
+                        "the tree is clean",
+                    )
                 )
 
     # --- 7. the label, the close and the card, as one step. A label that moves
@@ -363,8 +373,9 @@ def build_plan(args, tracker):
     elif all(part["status"] in (STATUS_DONE, STATUS_SKIPPED) for part in parts):
         status, note = STATUS_DONE, "the label, the item and the card are already set"
     else:
-        status, note = STATUS_TODO, (
-            "one step, so the label and the card always move together"
+        status, note = (
+            STATUS_TODO,
+            ("one step, so the label and the card always move together"),
         )
     steps.append(
         step(
@@ -382,20 +393,27 @@ def build_plan(args, tracker):
     if refusal:
         status, note = STATUS_BLOCKED, not_reached(refusal)
     elif not args.teardown_command:
-        status, note = STATUS_SKIPPED, (
-            "there is no --teardown-command, so nothing removes the worktree. The "
-            "caller reads that command from its tool reference and passes it in"
+        status, note = (
+            STATUS_SKIPPED,
+            (
+                "there is no --teardown-command, so nothing removes the worktree. The "
+                "caller reads that command from its tool reference and passes it in"
+            ),
         )
     elif not args.teardown:
-        status, note = STATUS_SKIPPED, (
-            "teardown needs --execute and --teardown together, and --teardown is "
-            "absent"
+        status, note = (
+            STATUS_SKIPPED,
+            (
+                "teardown needs --execute and --teardown together, and --teardown is "
+                "absent"
+            ),
         )
     elif worktree is not None and not worktree.exists():
         status, note = STATUS_SKIPPED, f"there is no worktree at {worktree} any more"
     else:
-        status, note = STATUS_TODO, (
-            "removes the worktree. This is the only step that destroys anything"
+        status, note = (
+            STATUS_TODO,
+            ("removes the worktree. This is the only step that destroys anything"),
         )
     steps.append(step(8, "teardown", command, status, note))
 
@@ -448,9 +466,7 @@ def tracker_parts(args, tracker):
 def card_part(args, tracker):
     """The board write, or a no-op where there is no board to write to."""
     missing = [
-        "--" + name.replace("_", "-")
-        for name in BOARD_ARGS
-        if not getattr(args, name)
+        "--" + name.replace("_", "-") for name in BOARD_ARGS if not getattr(args, name)
     ]
     if missing:
         return part(

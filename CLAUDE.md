@@ -74,3 +74,7 @@ Single-context — `orchestrator/CONTEXT.md` plus ADRs under `orchestrator/docs/
 ### Orchestrator
 
 Runs claude workers via orca — `opus-5` @ `xhigh` for heavy items, `sonnet-5` @ `medium` for light ones; adversarial review off (on demand only). See `docs/agents/orchestrator.md`.
+
+### Quality gates
+
+The `lite` profile: `make quick` runs layers 1 and 2, `make full` runs layer 3, and layer 4 is off. A non-zero exit is a stop, and each run appends one line to `.orchestrator/gates-<item>.jsonl`. See `orchestrator/references/quality-gates.md`.

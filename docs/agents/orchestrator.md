@@ -36,16 +36,42 @@ repo:     /Users/wagner.souza/git/wsza/orchestrator-skills   # main checkout; st
 tracker:  # read from docs/agents/issue-tracker.md (GitHub / gh); do NOT redefine labels here
 
 # --- project recipe (the completion contract's project-specific parts) ---
-setup_cmd:  "python3 --version"   # stdlib-only test suite; nothing to install. The tests
-                                  # for scripts/close_item.py and scripts/worker_state.py
-                                  # run under `python3 -m pytest scripts/ -q` if pytest is
-                                  # present, else `python3 -m unittest discover -s scripts -q`.
+setup_cmd:  "python3 --version"   # stdlib-only test suite; nothing to install in the
+                                  # worktree. The tests for scripts/close_item.py and
+                                  # scripts/worker_state.py run under
+                                  # `python3 -m pytest scripts/ -q`, which is what layer 2
+                                  # and layer 3 both call. `python3 -m unittest discover
+                                  # -s scripts -q` runs the same tests by hand.
                                   # No third-party runtime dependency: fixtures are local
                                   # git repos in a temp dir, no network, no agent runs.
 run_recipe: ""            # no app to boot
 ports:      ""            # no ports (nothing listens)
 db_gate:    ""            # no database
-evidence:   "run the test suite and quote the result (`python3 -m pytest scripts/ -q`, or unittest discover if pytest is absent) — a green run is part of the bar whenever a Python or a Markdown file is touched. When the run is skipped, the review note must state 'no Python and no Markdown file changed'. Plus: the changed skill/reference read end to end for internal consistency, every cross-reference resolved (`scripts/test_links.py` in that suite proves this half, not a reading), and any manifest edit validated as JSON. For a change to a skill body, quote the before/after of each edited block in the review note."
+evidence:   "`make quick` and `make full` green at the pushed HEAD, with the gate record line for each one. The two commands own the test suite now, so no separate run is quoted. `make deep` is blank on the `lite` profile, so it asks for nothing. Plus: the changed skill/reference read end to end for internal consistency, every cross-reference resolved (`scripts/test_links.py` runs inside both gate commands and proves this half, not a reading), and any manifest edit validated as JSON. For a change to a skill body, quote the before/after of each edited block in the review note."
+
+# --- quality gates (the layered completion bar) ---
+# The layer model and the Python gate matrix are in references/quality-gates.md.
+# Config is the source of truth for a threshold.
+gates:
+  profile: lite           # layers 1 to 3 run; `lite` drops layer 4
+  langs:   [python]       # plus Markdown, which has no gate matrix and no gate tool
+  quick:   "make quick"   # layers 1 + 2 — format, lint, types, tests, complexity
+  full:    "make full"    # layer 3 — the suite, import boundaries, secrets
+  deep:    ""             # blank on `lite`, so the checklist drops the layer 4 box
+  story:   "/improve-codebase-architecture"  # layer 5 — advisory, once per story
+  thresholds:             # blank = no cap, so the tool's own default stands
+    complexity: 16        # cyclomatic branches per function — pyproject.toml max-complexity
+    cognitive:  ""        # the Python matrix declares no default
+    funlen:     ""        # the Python matrix declares no default
+    coverage:   ""        # both seams run as subprocesses, so line coverage reads 0%
+    branch:     ""        # the Python matrix declares no default
+    mutation:   ""        # layer 4 is off, so no runner reads a score
+  infra:                  # every field blank; this repo provisions nothing
+    plan_role:    ""      # blank = no plan gate
+    policy_dir:   ""
+    fixtures:     ""
+    halt_on:      ""
+    zero_changes: ""
 ```
 
 ## Notes
@@ -74,6 +100,15 @@ evidence:   "run the test suite and quote the result (`python3 -m pytest scripts
   come from `docs/agents/issue-tracker.md`, not this file — single source of truth.
   They don't exist in the GitHub repo yet; that file carries the `gh label create`
   commands.
+- **gates** is the completion bar, and `references/quality-gates.md` holds the layer
+  model and every default. The profile is `lite`, so layers 1 to 3 run and layer 4 is
+  off. This repo is a documentation artifact plus two Python seams. A mutation score
+  over that buys less than it costs. `deep` is blank, so the checklist drops its
+  layer 4 box. Two thresholds are blank for a reason of their own, and this file
+  names each reason. `coverage` is blank because the suite drives both seams through
+  `subprocess`, and in-process line coverage reads 0%. `mutation` is blank because
+  layer 4 is off. Layer 5 runs in the orchestrator session, in the main checkout, at
+  the close of the last child of a story.
 
 ## Why the recipe is nearly empty
 
@@ -90,10 +125,13 @@ flows: `scripts/close_item.py` owns steps 4 to 8 of a **Close transaction** (ADR
 - `setup_cmd` is a Python availability check, not blank. The suite is
   **stdlib-only** — fixtures are local git repos built in a temp directory, with
   no network, no GitHub calls and no agent runs — so there is still nothing to
-  install. `pytest` is used if present purely for nicer output; `python3 -m
-  unittest discover -s scripts -q` is the fallback and the guaranteed path.
-- **Running the tests is part of the `evidence` bar** whenever a Python or a
-  Markdown file is touched. A review note that skips the run must say so and why.
+  install. `pytest` is a gate tool now. Layer 2 and layer 3 both run `python3 -m
+  pytest scripts/ -q`, and the gate stops on a machine without it. `python3 -m
+  unittest discover -s scripts -q` still runs the same tests by hand.
+- **The two gate commands own the test suite.** `make quick` runs it as layer 2 and
+  `make full` runs it as layer 3, so it runs on every item. No review note skips it.
+  The gate tools install onto the machine and not into the worktree, so `setup_cmd`
+  still installs nothing.
 
 The rest of the `evidence` bar replaces "boot the app and screenshot it" with what
 actually proves a skill edit is correct: cross-references resolve, the contract
