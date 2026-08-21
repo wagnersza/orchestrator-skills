@@ -156,6 +156,35 @@ _Avoid_: atomic commit (that names indivisibility, not one logical change),
 checkpoint, WIP commit (neither has to be self-consistent), granularity (that names
 the dial, not the unit).
 
+**Delegation cap**:
+The limit on how many sub-agents one **Worker** runs at the same time inside its
+worktree. The number is **5**. The cap counts **concurrent** sub-agents, and it applies
+**per worktree**, so it is not a total. A worker can run 5, collect their reports, and
+then run 5 more. Five batch-spawned siblings are five worktrees, so each sibling gets
+its own 5.
+
+A worker delegates when the work splits, and it does not ask first. A read-only search
+over six reference files is the case this exists for. The sub-agent spends its own
+context on the reads, and it returns the file and the line. So the worker keeps its
+context for the spec and the edit.
+
+**A sub-agent reads, searches and reports. It never writes the item's source.** The
+worker owns every edit, every **Commit slice** and every **Gate**, because those three
+are the worker's contract and a sub-agent has no branch.
+
+**The condition is a harness with a sub-agent surface.** `claude` has one. A harness
+with none reads the same instruction, delegates nothing, and satisfies it.
+
+**The adversarial reviewer is the one exception, and it keeps its own rule.** The
+review prompt tells the reviewer to spawn no sub-agents. The reviewer is already the
+second opinion, and an unattributed finding costs a **Review round**. Enforcement is
+documentary, the same as the **Browser surface** rule. Nothing counts the sub-agents a
+worker runs. Rationale, the sentence this reverses, why the number is not a config
+field, and the accepted risk:
+[`docs/adr/0035-workers-delegate-to-sub-agents-under-a-cap.md`](docs/adr/0035-workers-delegate-to-sub-agents-under-a-cap.md).
+_Avoid_: fan-out budget, parallelism, worker pool (the last one names workers, which a
+sub-agent is not), sub-worker.
+
 **Tuning profile**:
 Which of `prompt-improver`'s per-model rule sets a spawn prompt uses. Two: **Claude Opus 5** and **Claude Sonnet 5**. `references/models.md` maps each supported model to one — GPT-5.6's **sol** tier takes the Opus 5 profile, **terra** the Sonnet 5 profile.
 
