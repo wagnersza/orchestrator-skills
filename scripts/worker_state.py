@@ -13,14 +13,15 @@ this worktree? Exit 0 ready, non-zero not:
     python3 <plugin root>/scripts/worker_state.py ready --worktree /path/to/worktree \\
         --process '<the pattern the harness reference gives>'
 
-**`phase`** — read two facts on disk and two on the tracker, and answer one
+**`phase`** — read three facts on disk and two on the tracker, and answer one
 question: *is a **Phase** transition due for this work item?* This is the predicate
 an **Item automation** runs as its `--precheck`, so it blocks on nothing:
 
     python3 <plugin root>/scripts/worker_state.py phase --item 62 \\
         --worktree /path/to/worktree \\
         --process '<the pattern the harness reference gives>' \\
-        --rounds 3 --stall-after 30m --back-off 15m --repo OWNER/NAME
+        --rounds 3 --stall-after 30m --back-off 15m --repo OWNER/NAME \\
+        --require-gate '<one command per required layer, from the Config>'
 
 | Code | Meaning |
 |---|---|
@@ -30,13 +31,14 @@ an **Item automation** runs as its `--precheck`, so it blocks on nothing:
 
 **The code is the predicate and the line is the diagnosis.** Zero means a
 transition is due, whichever one it is, so a caller reads one bit. The line names
-one of eight outcomes, and the item's own `phase:*` label decides which of them a
+one of nine outcomes, and the item's own `phase:*` label decides which of them a
 tick can reach:
 
 | Outcome | Reachable in | The fact that fires it |
 |---|---|---|
-| `implementation-complete` | `phase:impl` | every box in the **Checklist** is ticked |
-| `proof-complete` | `phase:e2e` | the same fact, in the phase that proves the feature works |
+| `implementation-complete` | `phase:impl` | every box in the **Checklist** is ticked, and the **Gate record** proves every required layer green at `HEAD` |
+| `proof-complete` | `phase:e2e` | the same two facts, in the phase that proves the feature works |
+| `gates-unproven` | `phase:impl`, `phase:e2e` | the checklist reads complete, and the gate record does not prove it |
 | `verdict-approve` | `phase:review` | the newest `Verdict:` comment reads `approve` |
 | `verdict-request-changes` | `phase:review` | the newest one reads `request-changes`, inside the round bound |
 | `rounds-exhausted` | `phase:review` | `--rounds` `Verdict:` comments, and the newest one asks for changes |
@@ -57,6 +59,17 @@ the same back-off as every other outcome, so it reports once per window.
 process `stalled` needs. `dead` needs no stall window, so it reports in about a
 minute (ADR 0022).
 
+`gates-unproven` fires in place of `implementation-complete` or `proof-complete`, and
+only where `--require-gate` names a command. So it needs a ticked checklist, and it
+can never compete with `dead` or `stalled`: both of those need an unticked one before
+a tick reaches them. Four causes fire it, and the printed line names which — a missing
+file, a missing line, a non-zero exit and a stale `head_sha`. The four ask for four
+different repairs.
+
+**The record is a record, and not a second enforcement mechanism.** No hook blocks a
+push and no script rejects a commit. The item stops before review instead, and the
+session re-prompts the worker (ADR 0036).
+
 `--back-off` suppresses a repeat fire of the same outcome for the same work item.
 A marker file in the directory `--marker-dir` names holds that window. One marker
 per `(item, outcome)` pair, so a `dead` tick is never suppressed by a
@@ -76,9 +89,11 @@ The two signals are work product, so neither can report success for a dead worke
 worker's role:
 
 - **complete** — in `phase:impl` and `phase:e2e`, every box in
-  `.orchestrator/checklist-<item>.md` is ticked. In `phase:review`, a comment on
-  the work item carries a `Verdict:` line whose value is `approve` or
-  `request-changes`.
+  `.orchestrator/checklist-<item>.md` is ticked, **and** the **Gate record** in
+  `.orchestrator/gates-<item>.jsonl` holds a green line for every layer
+  `--require-gate` names, at the current `HEAD`. A ticked box is a claim, and the
+  record is the fact behind it (ADR 0036). In `phase:review`, a comment on the work
+  item carries a `Verdict:` line whose value is `approve` or `request-changes`.
 - **stalled** — in `phase:impl` and `phase:e2e`, the newer of the checklist file's
   write time and the branch's last commit time is older than `--stall-after`. This
   is the freshness of work product, not the liveness of a shell. In `phase:review`
@@ -172,7 +187,7 @@ EXIT_USAGE = 64
 EXIT_NOT_READY = 1
 
 # `phase` answers one bit too, because a `--precheck` reads one bit (ADR 0022).
-# Zero means a transition is due, whichever of the eight outcomes fired, and the
+# Zero means a transition is due, whichever of the nine outcomes fired, and the
 # printed line is what names it. Every quiet outcome shares code 1, so a tick that
 # has nothing to do records as a skipped automation run. A worktree that is gone
 # keeps code 3 here as well.
@@ -200,6 +215,16 @@ VERDICT = re.compile(
 )
 
 BOX = re.compile(r"^\s*[-*+]\s*\[([ xX])\]")
+
+# The four keys one line of the **Gate record** carries. A line that drops one of them
+# is malformed: a run nobody can date, or cannot tie to a commit, proves nothing. The
+# format has one home, `references/quality-gates.md` (ADR 0036).
+GATE_KEYS = ("command", "exit", "utc", "head_sha")
+
+# The shortest `head_sha` that counts as an identification of a commit. A gate command
+# can record a short sha, so the comparison is a prefix test. The floor is what stops a
+# one-character value from matching every commit there is.
+SHA_PREFIX = 7
 
 UNITS = {"s": 1, "m": 60, "h": 3600}
 
@@ -467,6 +492,120 @@ def verdicts_in(bodies):
     ]
 
 
+# --- the Gate record (ADR 0036) ---------------------------------------------
+
+
+def gate_record_path(worktree, item):
+    """Where a worker's **Gate record** lives, beside its **Checklist**."""
+    return Path(worktree) / ORCHESTRATOR_DIR / f"gates-{item}.jsonl"
+
+
+def gate_runs(path):
+    """`(runs, malformed)` for the **Gate record** at `path`.
+
+    `runs` holds one dict per readable line, in the order a gate command appended
+    them. So the newest run of a command is the last one in the list, and no line
+    has to be sorted by its `utc` value.
+
+    `malformed` is the number of the first line that is not one JSON object with the
+    four keys, or 0 where every line reads. A blank line is how a text file ends, so
+    it is neither a run nor a fault. The walk stops at the first malformed line,
+    because one unreadable line puts the lines around it in doubt as well.
+    """
+    runs = []
+    try:
+        text = Path(path).read_text()
+    except OSError:
+        return runs, 0
+    for number, line in enumerate(text.splitlines(), 1):
+        if not line.strip():
+            continue
+        try:
+            run = json.loads(line)
+        except ValueError:
+            return runs, number
+        if not isinstance(run, dict) or any(key not in run for key in GATE_KEYS):
+            return runs, number
+        try:
+            run["exit"] = int(run["exit"])
+        except (TypeError, ValueError):
+            return runs, number
+        run["command"] = str(run["command"])
+        run["head_sha"] = str(run["head_sha"])
+        runs.append(run)
+    return runs, 0
+
+
+def head_sha(worktree):
+    """The commit the worktree is on, or an empty string where there is none."""
+    proc = subprocess.run(
+        ["git", "-C", str(worktree), "rev-parse", "--verify", "--quiet", "HEAD"],
+        capture_output=True,
+        text=True,
+    )
+    return proc.stdout.strip() if proc.returncode == 0 else ""
+
+
+def at_head(recorded, head):
+    """Whether a recorded `head_sha` names the commit `head`.
+
+    A gate command can write a short sha, so this is a prefix test and never an
+    equality. `SHA_PREFIX` is the floor under it.
+    """
+    return bool(head) and len(recorded) >= SHA_PREFIX and head.startswith(recorded)
+
+
+def unproven_gates(worktree, item, required):
+    """Why the **Gate record** does not prove this finish, or an empty string.
+
+    Four causes, and the first one that holds is the answer, because the four ask for
+    four different repairs: a missing file, a missing line, a non-zero exit, and a
+    green run against a stale commit. The line names which one it was.
+
+    With no `--require-gate` there is nothing to prove, so nothing is read and this
+    returns nothing. A caller that names no layer keeps the behaviour it had before
+    the flag existed (ADR 0036).
+    """
+    if not required:
+        return ""
+    path = gate_record_path(worktree, item)
+    runs, malformed = gate_runs(path)
+    if malformed:
+        keys = ", ".join(GATE_KEYS)
+        return (
+            f"a malformed line — {path} line {malformed} is not one JSON object with "
+            f"the keys {keys}, so this tick cannot read the record"
+        )
+    if not path.is_file():
+        return (
+            f"a missing file — there is no gate record at {path}, so no gate run has "
+            f"left a trace at all"
+        )
+    head = head_sha(worktree)
+    if not head:
+        return (
+            f"a stale head_sha — {worktree} has no readable HEAD, so no run in {path} "
+            f"ties to a commit"
+        )
+    for command in required:
+        mine = [run for run in runs if run["command"] == command]
+        if not mine:
+            return f"a missing line — {path} holds no run of {command!r}"
+        at_this_commit = [run for run in mine if at_head(run["head_sha"], head)]
+        if not at_this_commit:
+            return (
+                f"a stale head_sha — the newest run of {command!r} in {path} names "
+                f"{mine[-1]['head_sha']}, and HEAD is {head[:SHA_PREFIX]}"
+            )
+        code = at_this_commit[-1]["exit"]
+        if code != 0:
+            return (
+                f"a non-zero exit — the newest run of {command!r} in {path} exited "
+                f"{code} at HEAD {head[:SHA_PREFIX]}"
+            )
+    return ""
+
+
 # --- the stall signal (ADR 0018) --------------------------------------------
 
 
@@ -574,13 +713,19 @@ def held_back(marker_dir, item, outcome, back_off):
     return None
 
 
-def transition(item, worktree, current, bodies, rounds, pattern, stall_after):
+def transition(
+    item, worktree, current, bodies, rounds, pattern, stall_after, required=()
+):
     """`(outcome, detail)` for the transition this tick is due, or `(None, detail)`.
 
     The order inside a phase is the contract. The **Completion signal** is read
     first, so a worker that finished and then exited reads as finished rather than
     as dead. `dead` comes next and needs no stall window. `stalled` comes last and
     needs the live process `dead` is the absence of, so the two never both fire.
+
+    The **Gate record** is read inside that first step, and only where the checklist
+    reads complete. So `gates-unproven` fires in place of the finish it cannot prove,
+    and it competes with neither of the other two (ADR 0036).
     """
     if current == PHASE_REVIEW:
         values = verdicts_in(bodies)
@@ -605,6 +750,12 @@ def transition(item, worktree, current, bodies, rounds, pattern, stall_after):
         path = checklist_path(worktree, item)
         ticked, total = boxes(path)
         if total and ticked == total:
+            unproven = unproven_gates(worktree, item, required)
+            if unproven:
+                return "gates-unproven", (
+                    f"{unproven}, and every box in {path} is ticked "
+                    f"({ticked} of {total})"
+                )
             outcome = "proof-complete" if current == PHASE_E2E else "implementation-complete"
             return outcome, f"every box in {path} is ticked ({ticked} of {total})"
         waiting = f"{ticked} of {total} boxes ticked"
@@ -650,6 +801,7 @@ def phase(
     marker_dir=None,
     tracker_cli=GH,
     tracker_host="",
+    required=(),
 ):
     """The `phase` answer: `(exit code, the one line to print)`.
 
@@ -694,7 +846,7 @@ def phase(
         )
 
     outcome, detail = transition(
-        item, worktree, current, bodies, rounds, pattern, stall_after
+        item, worktree, current, bodies, rounds, pattern, stall_after, required
     )
     if not outcome:
         return EXIT_NOTHING, f"nothing: {detail}"
@@ -802,13 +954,14 @@ def wake(
     marker_dir=None,
     tracker_cli=GH,
     tracker_host="",
+    required=(),
     handle="",
     title="",
     send_command="",
 ):
     """The `wake` answer: `(exit code, the lines to print)`.
 
-    The whole body of a tick. It asks `phase()`: the same predicate, the same eight
+    The whole body of a tick. It asks `phase()`: the same predicate, the same nine
     outcomes, the same order and the same `--back-off` window. Where a transition is
     due it delivers that line itself. Where nothing is due it delivers nothing, and it
     answers exactly what the predicate answered. No path exits 0, so no agent runs on
@@ -826,6 +979,7 @@ def wake(
         marker_dir,
         tracker_cli,
         tracker_host,
+        required,
     )
     if code != EXIT_DUE:
         return code, [line]
@@ -924,6 +1078,15 @@ def add_tick_arguments(parser):
         "worktree. Otherwise an answered wake fires again from a fresh directory",
     )
     parser.add_argument(
+        "--require-gate",
+        action="append",
+        metavar="COMMAND",
+        help="one gate command this item's finish must prove green at HEAD. "
+        "Repeat the flag once per required layer. The caller resolves the list from the "
+        "gates: block of the Config, so this seam names no command of its own. With no "
+        "--require-gate nothing is required, and gates-unproven can never fire",
+    )
+    parser.add_argument(
         "--gh-fixture",
         help="JSON that stands in for any tracker read, so a verdict and a phase "
         "need no network and no login (used by the tests). It keeps this name "
@@ -975,8 +1138,9 @@ def main(argv=None):
         description=(
             "The predicate an Item automation runs as its --precheck. Exit 0 means a "
             "transition is due, and the printed line names which one. There are "
-            "eight: implementation-complete, proof-complete, verdict-approve, "
-            "verdict-request-changes, rounds-exhausted, dead, stalled, unreadable. "
+            "nine: implementation-complete, proof-complete, gates-unproven, "
+            "verdict-approve, verdict-request-changes, rounds-exhausted, dead, "
+            "stalled, unreadable. "
             "Exit 1 means nothing to do, so the run records as skipped at no token "
             "cost. Exit 3 means the worktree is gone. The item's own phase:* label "
             "decides which outcomes a tick can reach. An item with no phase:* label "
@@ -1049,6 +1213,11 @@ def main(argv=None):
     except ValueError as exc:
         parser.error(str(exc))
 
+    # A repeatable flag with no value is `None`, and the required list is a tuple of
+    # every value it carried. So the seam holds no gate command of its own, and a
+    # caller that names no layer requires none (ADR 0036).
+    required = tuple(args.require_gate or ())
+
     if args.command == "phase":
         code, line = phase(
             args.item,
@@ -1062,6 +1231,7 @@ def main(argv=None):
             args.marker_dir,
             args.tracker_cli,
             args.tracker_host,
+            required,
         )
         print(line)
         return code
@@ -1089,6 +1259,7 @@ def main(argv=None):
         args.marker_dir,
         args.tracker_cli,
         args.tracker_host,
+        required,
         args.handle,
         args.title,
         args.send_command,

@@ -82,6 +82,12 @@ CHANGES = "Verdict: request-changes"
 # suite, which is the process the `ready` cases actually start.
 PROCESS_PATTERN = "[Pp]ython"
 
+# The gate commands a spawn resolves from the `gates:` block of the Config. They are
+# named here and passed in as a repeatable flag, because the seam holds none of its own.
+QUICK = "make quick"
+FULL = "make full"
+GATES = ("--require-gate", QUICK, "--require-gate", FULL)
+
 UNTICKED = """# Checklist — 54
 
 - [ ] implement + self-test
@@ -131,6 +137,9 @@ class WorkerStateTestCase(unittest.TestCase):
 
         self.checklist = self.worktree / ".orchestrator" / f"checklist-{ITEM}.md"
         write(self.checklist, UNTICKED)
+        # The Gate record sits beside the checklist. No case writes it in setUp: a
+        # worktree with no record is the state before the first gate run.
+        self.gates = self.worktree / ".orchestrator" / f"gates-{ITEM}.jsonl"
         self.write_fixture()
 
         # A stub CLI written here wins over an installed one, so no case can reach
@@ -152,6 +161,25 @@ class WorkerStateTestCase(unittest.TestCase):
                 }
             )
         )
+
+    def gate_run(self, command, code=0, sha=None):
+        """One line of the Gate record, as a gate command appends it.
+
+        The sha defaults to the commit the worktree is on, which is what a green run
+        records. A case that wants a stale line passes its own.
+        """
+        return json.dumps(
+            {
+                "command": command,
+                "exit": code,
+                "utc": "2026-08-21T09:14:02Z",
+                "head_sha": self.rev("HEAD") if sha is None else sha,
+            }
+        )
+
+    def write_gates(self, *lines):
+        """Write the whole Gate record, one appended line per argument."""
+        write(self.gates, "".join(f"{line}\n" for line in lines))
 
     def break_fixture(self):
         """Make the tracker read fail, the way a lost login or a broken CLI does."""
@@ -459,6 +487,163 @@ class WorkerStateTestCase(unittest.TestCase):
 
         self.assertTrue(line.startswith("nothing:"), line)
         self.assertIn("0 of 0 boxes ticked", line)
+
+    # --- the Gate record: the third fact of the Completion signal -----------
+
+    def test_a_ticked_checklist_with_a_green_record_is_a_finish(self):
+        """The pass path. Every required layer has a green line at HEAD, so the third
+        fact agrees with the ticked box and the finish stands."""
+        write(self.checklist, TICKED)
+        self.write_fixture(labels=IMPL)
+        self.write_gates(self.gate_run(QUICK), self.gate_run(FULL))
+
+        line = self.tick(*GATES, expect=EXIT_DUE)
+
+        self.assertTrue(line.startswith("implementation-complete:"), line)
+        self.assertNotIn("gates-unproven", line)
+
+    def test_a_missing_gate_record_is_unproven(self):
+        """Cause one of four. Nothing on disk says a gate ever ran, so a ticked
+        checklist proves nothing and the item stops before review."""
+        write(self.checklist, TICKED)
+        self.write_fixture(labels=IMPL)
+
+        line = self.tick(*GATES, expect=EXIT_DUE)
+
+        self.assertTrue(line.startswith("gates-unproven:"), line)
+        self.assertIn("a missing file", line)
+        self.assertIn(str(self.gates), line)
+
+    def test_a_malformed_line_is_unproven(self):
+        """Cause two. A record with an unreadable line cannot be trusted for the
+        lines around it, so the line number goes in the diagnosis."""
+        write(self.checklist, TICKED)
+        self.write_fixture(labels=IMPL)
+        self.write_gates(self.gate_run(QUICK), "make full exited 0", self.gate_run(FULL))
+
+        line = self.tick(*GATES, expect=EXIT_DUE)
+
+        self.assertTrue(line.startswith("gates-unproven:"), line)
+        self.assertIn("a malformed line", line)
+        self.assertIn("line 2", line)
+
+        # A line that is JSON and drops one of the four keys is malformed too.
+        self.write_gates(json.dumps({"command": QUICK, "exit": 0}))
+        self.assertIn("a malformed line", self.tick(*GATES, expect=EXIT_DUE))
+
+    def test_a_non_zero_exit_is_unproven(self):
+        """Cause three. The gate ran, at this commit, and it was red. So the record
+        is what says the work is not done."""
+        write(self.checklist, TICKED)
+        self.write_fixture(labels=IMPL)
+        self.write_gates(self.gate_run(QUICK, code=1), self.gate_run(FULL))
+
+        line = self.tick(*GATES, expect=EXIT_DUE)
+
+        self.assertIn("a non-zero exit", line)
+        self.assertIn(repr(QUICK), line)
+        self.assertIn("exited 1", line)
+
+        # A red run the worker then fixed at the same commit is a pass: the newest
+        # line for a command is the one that counts.
+        self.write_gates(
+            self.gate_run(QUICK, code=1), self.gate_run(QUICK), self.gate_run(FULL)
+        )
+        self.assertTrue(
+            self.tick(*GATES, expect=EXIT_DUE).startswith("implementation-complete:")
+        )
+
+    def test_a_stale_head_sha_is_unproven(self):
+        """Cause four. A green run against an older commit proves nothing about the
+        commit the worker is asking a reviewer to read."""
+        write(self.checklist, TICKED)
+        self.write_fixture(labels=IMPL)
+        stale = "0" * 40
+        self.write_gates(self.gate_run(QUICK, sha=stale), self.gate_run(FULL))
+
+        line = self.tick(*GATES, expect=EXIT_DUE)
+
+        self.assertIn("a stale head_sha", line)
+        self.assertIn(stale, line)
+        self.assertIn(self.rev("HEAD")[:7], line)
+
+        # The short sha a gate command can write matches the same commit.
+        self.write_gates(
+            self.gate_run(QUICK, sha=self.rev("HEAD")[:7]), self.gate_run(FULL)
+        )
+        self.assertTrue(
+            self.tick(*GATES, expect=EXIT_DUE).startswith("implementation-complete:")
+        )
+
+    def test_a_required_layer_with_no_line_is_unproven(self):
+        """One green layer does not prove the other. The line names the command it
+        wanted, because that is what a maintainer needs to correct one."""
+        write(self.checklist, TICKED)
+        self.write_fixture(labels=IMPL)
+        self.write_gates(self.gate_run(QUICK))
+
+        line = self.tick(*GATES, expect=EXIT_DUE)
+
+        self.assertIn("a missing line", line)
+        self.assertIn(repr(FULL), line)
+
+    def test_with_no_required_gate_the_record_is_never_read(self):
+        """The flag is the whole of the requirement, so a caller that names no layer
+        keeps the behaviour it had before the flag existed. A red record is then not
+        read at all, and the seam names no command that could stand in for it."""
+        write(self.checklist, TICKED)
+        self.write_fixture(labels=IMPL)
+        self.write_gates(self.gate_run(QUICK, code=1, sha="0" * 40))
+
+        self.assertTrue(self.tick(expect=EXIT_DUE).startswith("implementation-complete:"))
+
+    def test_gates_unproven_never_competes_with_dead_or_stalled(self):
+        """It fires in place of the finish, so it needs a ticked checklist. An
+        unticked one is what the other two need, and no tick can reach both."""
+        self.write_fixture(labels=IMPL)
+        self.backdate(3600)
+
+        # No live process and an unticked checklist: `dead` still owns this tick.
+        self.assertTrue(self.tick(*GATES, stall="30m", expect=EXIT_DUE).startswith("dead:"))
+
+        # A live process and stale work product: `stalled` still owns it.
+        self.child_in(self.worktree)
+        self.assertTrue(
+            self.tick(*GATES, stall="30m", expect=EXIT_DUE).startswith("stalled:")
+        )
+
+        # And the ticked checklist is what hands the tick to the record.
+        write(self.checklist, TICKED)
+        line = self.tick(*GATES, stall="30m", expect=EXIT_DUE)
+        self.assertTrue(line.startswith("gates-unproven:"), line)
+
+    def test_gates_unproven_shares_the_back_off_window(self):
+        """One marker per (item, outcome) pair, and this outcome is one more pair. So
+        an unanswered re-prompt does not repeat every minute."""
+        write(self.checklist, TICKED)
+        self.write_fixture(labels=IMPL)
+
+        first = self.tick(*GATES, "--back-off", "1h", expect=EXIT_DUE)
+        held = self.tick(*GATES, "--back-off", "1h", expect=EXIT_NOTHING)
+
+        self.assertTrue(first.startswith("gates-unproven:"), first)
+        self.assertTrue(held.startswith("suppressed:"), held)
+        self.assertIn("gates-unproven", held)
+        self.assertTrue(self.marker("gates-unproven").is_file())
+
+        # And a green record fires the finish on the next tick, which is a different
+        # pair and therefore a different marker.
+        self.write_gates(self.gate_run(QUICK), self.gate_run(FULL))
+        fixed = self.tick(*GATES, "--back-off", "1h", expect=EXIT_DUE)
+        self.assertTrue(fixed.startswith("implementation-complete:"), fixed)
+
+    def test_the_seam_names_no_gate_command(self):
+        """The required layers arrive as a repeatable flag, so the module holds no
+        gate command in a default, a help string or a docstring example."""
+        source = (REPO_ROOT / "scripts" / "worker_state.py").read_text()
+
+        for command in (QUICK, FULL, "make deep", "checks.sh"):
+            self.assertNotIn(command, source, f"{command!r} is named in the seam")
 
     def test_the_phase_label_picks_the_signal_and_the_two_never_substitute(self):
         """A reviewer ticks no boxes and an implementation worker posts no verdict,
@@ -814,7 +999,7 @@ class WorkerStateTestCase(unittest.TestCase):
         self.assertNotIn("stalled", line)
         self.assertNotEqual(EXIT_GONE, EXIT_DUE)
 
-    def test_the_eight_outcomes_exit_zero_and_every_quiet_one_does_not(self):
+    def test_the_nine_outcomes_exit_zero_and_every_quiet_one_does_not(self):
         """The whole exit-code contract in one place. A due transition is 0 whichever
         outcome fired, and the printed line names which one. No quiet outcome can
         read as a transition."""
@@ -826,6 +1011,10 @@ class WorkerStateTestCase(unittest.TestCase):
 
         self.write_fixture(labels=E2E)
         due["proof-complete"] = self.tick(expect=EXIT_DUE)
+
+        # The same ticked checklist, with a required layer nothing on disk proves.
+        self.write_fixture(labels=IMPL)
+        due["gates-unproven"] = self.tick(*GATES, expect=EXIT_DUE)
 
         self.write_fixture(comments=["Verdict: approve"], labels=REVIEW)
         due["verdict-approve"] = self.tick(expect=EXIT_DUE)
@@ -854,6 +1043,7 @@ class WorkerStateTestCase(unittest.TestCase):
                 [
                     "implementation-complete",
                     "proof-complete",
+                    "gates-unproven",
                     "verdict-approve",
                     "verdict-request-changes",
                     "rounds-exhausted",
