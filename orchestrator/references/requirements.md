@@ -62,6 +62,11 @@ claude plugin list 2>/dev/null | grep -o 'prompt-improver@[a-z-]*' || \
 ls ~/.agents/skills/simple-english/SKILL.md ~/.claude/skills/simple-english/SKILL.md \
    .agents/skills/simple-english/SKILL.md .claude/skills/simple-english/SKILL.md 2>/dev/null \
   | grep . || echo "simple-english: MISSING"
+# the plugin root — where this plugin's own two seams live. Both install shapes, newest
+# cache install first, then a clone. Prints the root, then proves the seam runs from here:
+PLUGIN_ROOT=$(python3 -c "import pathlib;h=pathlib.Path.home()/'.claude/plugins';c=list(h.glob('cache/*/orchestrator-skills/*/scripts/worker_state.py'))or list(h.glob('marketplaces/*/scripts/worker_state.py'));print(max(c,key=lambda p:p.stat().st_mtime).parents[1] if c else '')")
+python3 "$PLUGIN_ROOT/scripts/worker_state.py" ready --help >/dev/null \
+  && echo "plugin root: $PLUGIN_ROOT" || echo "plugin root: MISSING"
 # resolving-merge-conflicts — ships inside mattpocock-skills, plus two standalone
 # shapes. Print every hit:
 ls ~/.claude/plugins/cache/*/mattpocock-skills/*/skills/engineering/resolving-merge-conflicts/SKILL.md \

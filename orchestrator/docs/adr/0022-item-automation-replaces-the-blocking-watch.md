@@ -1,7 +1,7 @@
 # An Item automation replaces the blocking watch, and the seam becomes a predicate
 
 A **Worker watch** starts as a background process of the orchestrator session's own
-shell (`python3 -m scripts.worker_state watch ... &`). Close the session, restart the
+shell (`scripts/worker_state.py watch ... &`). Close the session, restart the
 harness, or reboot the machine, and every watch is gone. Nothing reports that. **A
 watch that dies with the session watches nothing**, which is the defect
 [ADR 0018](0018-the-worker-watch-is-a-stateless-seam.md) built the watch to close.

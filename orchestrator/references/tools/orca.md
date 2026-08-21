@@ -59,7 +59,7 @@ left.
 
 **No command lives here.** The skill body requires a **readiness gate** between
 `worker-create` and the first prompt. One seam answers it for every tool:
-`python3 -m scripts.worker_state ready`. The skill body holds the invocation, and
+`python3 <plugin root>/scripts/worker_state.py ready`. The skill body holds the invocation, and
 `../harnesses/<harness>.md` holds the process pattern it passes in. This section keeps only
 the measurements that chose that signal, because they are why the two signals `orca` does
 offer were rejected. Do not restore a shell pipeline here
@@ -208,10 +208,15 @@ fills the placeholder. Its send template is **operation 4** of this file, with `
 where `--terminal` goes and `{text}` where the line goes:
 
 ```bash
---precheck "python3 -m scripts.worker_state wake --item <N> <the other flags> \
+--precheck "python3 <plugin root>/scripts/worker_state.py wake --item <N> <the other flags> \
   --handle <handle> --title orchestrator \
   --send-command 'orca terminal send --terminal {target} --text {text} --enter'"
 ```
+
+`<plugin root>` is a **literal path** here, and never a shell variable. This schedule
+stores the string and runs it a minute later, in a shell that saw no assignment. The
+caller resolves the value and writes it in
+([`../../SKILL.md`](../../SKILL.md#resolve-the-plugin-root-and-prove-the-seam-runs)).
 
 **The provider never runs, by design.** The CLI requires `--prompt` and `--provider`, and
 exit 0 is the only code that starts that agent. No path through `wake` exits 0, so every

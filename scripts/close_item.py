@@ -11,18 +11,18 @@ and emits JSON: the five ordered steps, each marked `todo`, `done`, `refused`,
 `skipped` or `blocked`, the refusal reason, and the exit code an execute run
 would use:
 
-    python3 -m scripts.close_item --issue 32 --pr 48 \\
+    python3 <plugin root>/scripts/close_item.py --issue 32 --pr 48 \\
         --repo /path/to/main/checkout --worktree /path/to/worktree \\
         --remove-label to-review
 
 **Execute mode runs that same plan in order** and stops at the first refusal:
 
-    python3 -m scripts.close_item --issue 32 --pr 48 ... --execute
+    python3 <plugin root>/scripts/close_item.py --issue 32 --pr 48 ... --execute
 
 **Teardown needs `--execute --teardown` together**, so no single flag is
 destructive and a bare invocation can only read:
 
-    python3 -m scripts.close_item ... --execute --teardown \\
+    python3 <plugin root>/scripts/close_item.py ... --execute --teardown \\
         --teardown-command '<the command the tool reference gives, ids filled in>'
 
 The five steps, and what each one does:

@@ -10,14 +10,14 @@ tool and every harness (ADR 0019).
 **`ready`** — is a live agent process running with its working directory inside
 this worktree? Exit 0 ready, non-zero not:
 
-    python3 -m scripts.worker_state ready --worktree /path/to/worktree \\
+    python3 <plugin root>/scripts/worker_state.py ready --worktree /path/to/worktree \\
         --process '<the pattern the harness reference gives>'
 
 **`phase`** — read two facts on disk and two on the tracker, and answer one
 question: *is a **Phase** transition due for this work item?* This is the predicate
 an **Item automation** runs as its `--precheck`, so it blocks on nothing:
 
-    python3 -m scripts.worker_state phase --item 62 \\
+    python3 <plugin root>/scripts/worker_state.py phase --item 62 \\
         --worktree /path/to/worktree \\
         --process '<the pattern the harness reference gives>' \\
         --rounds 3 --stall-after 30m --back-off 15m --repo OWNER/NAME
@@ -99,7 +99,7 @@ wrapper script outside this repo.
 **`wake`** — the whole body of a tick. It asks the same `phase` predicate, and on a
 due transition it delivers that printed line itself:
 
-    python3 -m scripts.worker_state wake --item 62 \\
+    python3 <plugin root>/scripts/worker_state.py wake --item 62 \\
         <every phase flag above> \\
         --handle '<the orchestrator terminal, from operation 9>' \\
         --title orchestrator \\
