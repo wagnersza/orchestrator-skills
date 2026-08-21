@@ -1,6 +1,6 @@
 ---
 name: orchestrator-setup
-description: Zero-touch install, update, and config for the orchestrator skill — always updates the plugin and every dependency skill to the latest version first, then either reconciles an existing config (the default when one exists) or installs every missing dependency and writes a fresh per-project config after asking you to pick the workspace tool (orca/cmux/herdr), harness (claude/codex/pi/copilot/cursor) + models per role, adversarial-review policy, and project recipe. Use when the user says "set up the orchestrator", "configure orchestration for this repo", "orchestrator setup", "update the orchestrator", "update the orchestrator skills/plugin", "get the latest orchestrator", "re-run orchestrator setup", points Claude at a repo to get it orchestration-ready, or the orchestrator reports its config is missing or stale.
+description: Zero-touch install, update, and config for the orchestrator skill — always updates the plugin and every dependency skill to the latest version first, then either reconciles an existing config (the default when one exists) or installs every missing dependency and writes a fresh per-project config after asking you to pick the workspace tool (orca/cmux/herdr), harness (claude/codex/pi/copilot/cursor) + models per role, adversarial-review policy, project recipe, and gate profile. Use when the user says "set up the orchestrator", "configure orchestration for this repo", "orchestrator setup", "update the orchestrator", "update the orchestrator skills/plugin", "get the latest orchestrator", "re-run orchestrator setup", points Claude at a repo to get it orchestration-ready, or the orchestrator reports its config is missing or stale.
 disable-model-invocation: true
 ---
 
@@ -9,7 +9,7 @@ disable-model-invocation: true
 Take a repo from nothing to ready-to-orchestrate with **zero human touch beyond
 answering the option prompts**. Point Claude at the repo, run this skill, and it
 **installs every missing dependency itself** and writes the full config — the
-human only picks options (tool / harness / model / review / recipe). No manual
+human only picks options (tool / harness / model / review / recipe / gate profile). No manual
 install commands, no hand-edited files.
 
 Two modes, decided in step 0:
@@ -167,7 +167,7 @@ choices the user already made. Confirm before doing anything more:
 > 1. **Update only** (recommended) — keep the config as-is; just reconcile it
 >    against the new version and report anything that needs attention.
 > 2. **Change some choices** — say which (tool / harness / models / review /
->    recipe); everything else stays.
+>    recipe / gate profile); everything else stays.
 > 3. **Full re-setup** — re-interview from scratch and overwrite the config.
 
 **Default to 1.** Only run the full interview (step 3) if the user explicitly asks
@@ -361,7 +361,20 @@ Take these in order; each leads with a recommendation.
    no database), `evidence` bar. Pre-fill from what exploration found and let the
    user correct. Offer to clone `references/examples/fullstack-app.md` as a
    starting point if the repo resembles it.
-7. **repo** — the absolute path to the main checkout (stays on the default
+7. **Gate profile** — `strict` or `lite`. Recommend **strict**: it runs all four gate
+   layers, so a machine finds each fault before a human reads the diff. **`lite` drops
+   layer 4**, which is the mutation score, the SAST scan and the dependency CVE scan. So a
+   `lite` repo needs no mutation runner and no SAST tool, and step 4 skips those rows. It
+   also drops the layer 4 box from the checklist, even where `deep` holds a command. Take
+   `lite` for a small repo, or where layer 4 costs more minutes than the repo is worth.
+   The answer goes to `gates.profile` in the config
+   ([orchestrator.template.md](orchestrator.template.md)). The layers themselves are in
+   [`references/quality-gates.md`](../orchestrator/references/quality-gates.md), and the
+   rationale is
+   [ADR 0032](../orchestrator/docs/adr/0032-quality-gates-are-a-layered-contract.md).
+   **The families are not a question here.** Step 1a detected them, and they go to
+   `gates.langs`.
+8. **repo** — the absolute path to the main checkout (stays on the default
    branch).
 
 ## 4. Install the dependencies (zero-touch)
