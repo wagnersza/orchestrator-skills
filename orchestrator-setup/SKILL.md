@@ -187,13 +187,21 @@ For option 1, skip the interview entirely. Do this instead:
    `simple-english`, and `playwright-cli` plus its browsers where step 4's recipe
    gate applies. A repo configured before these dependencies existed has no
    install of them, so this path must install them for an existing user, not
-   merely report them missing.
+   merely report them missing. **It includes the gate tools of each language
+   family too, at the `strict` default.** Run step 1a first: this path asks no
+   interview question, so nothing else names a family.
 2. **Reconcile the existing config against the current template**
    ([orchestrator.template.md](orchestrator.template.md)) and
    `references/models.md` — report, don't silently rewrite:
    - **Fields the new version added** that the config lacks (e.g. a config still
      carrying a flat `model:` when roles now exist). Offer to add them with
      defaults.
+   - **A missing `gates:` block**, on a config written before the gates existed.
+     Offer to add it with the defaults of the template, plus the families step 1a
+     found and `profile: strict`. **Ask no interview question here.** So a
+     maintainer who answered the questions last month keeps every answer, and
+     still gains the block. Where the user declines it, the gate tools from point
+     1 stay installed and no layer command reaches a checklist.
    - **Values now invalid** — a model no longer in the registry, an effort the
      chosen harness can't reach, a same-vendor review pair.
    - **Dead references** — a `references/` path the config or `CLAUDE.md` points at
