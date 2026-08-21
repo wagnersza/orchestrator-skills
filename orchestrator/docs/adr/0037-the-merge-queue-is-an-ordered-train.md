@@ -49,7 +49,8 @@ holds perfectly and prose holds poorly. That is the reason
 [ADR 0015](0015-close-is-a-deterministic-transaction.md) gave the close transaction a
 seam. The new seam test-merges each queued branch in a throwaway checkout, then prints a
 plan. **It plans, and it merges nothing.** The three ordering steps, the park rule and
-the seam's contract live in `orchestrator/references/merge-train.md`.
+the seam's contract live in
+[`orchestrator/references/merge-train.md`](../../references/merge-train.md).
 
 The train then runs one full **Close transaction** per item in the planned order,
 teardown included. **None of the eight steps changes, and their order does not change.**

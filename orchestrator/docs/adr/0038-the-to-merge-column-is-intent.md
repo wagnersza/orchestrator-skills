@@ -9,7 +9,7 @@ carries that rule for a human who moves a card:
 
 A **Merge queue** needs an entry the maintainer reaches from the surface they already
 review in. A drag of a reviewed card to the board's `To merge` column is that act. Under
-the sentence above the drag is drift, and the next **Ready queue** read overwrites it.
+the quoted sentence the drag is drift, and the next **Ready queue** read overwrites it.
 
 ## The decision
 
