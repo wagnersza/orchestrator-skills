@@ -67,3 +67,4 @@ Why a re-prompt resets first:
 
 - Plain-English completion contract — no routed skill to invoke, no `TodoWrite`.
 - The worker maintains the checklist file; the orchestrator reads it.
+- **Sub-agent surface:** unknown — this file records no sub-agent tool, so a worker on this harness delegates nothing and satisfies the **Delegation cap** ([`../../CONTEXT.md`](../../CONTEXT.md)).
