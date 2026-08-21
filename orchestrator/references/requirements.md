@@ -18,7 +18,7 @@ optional maintenance:
 claude plugin list                        # read the exact plugin@marketplace ids
 claude plugin marketplace update          # all marketplaces
 claude plugin update orchestrator-skills@wsza        # then each installed plugin
-claude plugin update mattpocock-skills@mattpocock
+claude plugin update mattpocock-skills@claude-plugins-official
 claude plugin update ponytail@ponytail
 claude plugin update prompt-improver@prompt-improver
 # only if prompt-improver was installed the legacy way (git clone, no plugin entry)
@@ -48,7 +48,7 @@ for b in orca cmux herdr claude codex pi copilot cursor-agent gh glab playwright
   printf "%-14s " "$b"; command -v "$b" || echo "(missing)"
 done
 # claude plugins
-python3 -c "import json;p=json.load(open('$HOME/.claude/plugins/installed_plugins.json'))['plugins'];[print(k, 'OK' if k in p else 'MISSING') for k in ['mattpocock-skills@mattpocock','ponytail@ponytail','prompt-improver@prompt-improver']]"
+python3 -c "import json;p=json.load(open('$HOME/.claude/plugins/installed_plugins.json'))['plugins'];[print(k, 'OK' if k in p else 'MISSING') for k in ['mattpocock-skills@claude-plugins-official','ponytail@ponytail','prompt-improver@prompt-improver']]"
 # MCP servers configured for claude
 python3 -c "import json;d=json.load(open('$HOME/.claude.json'));print('mcp:', list(d.get('mcpServers',{}).keys()))"
 # playwright browser binaries — a separate requirement from the CLI above
@@ -76,11 +76,11 @@ ls ~/.claude/plugins/cache/*/mattpocock-skills/*/skills/engineering/resolving-me
 | Dep | Why | Check | Install |
 |-----|-----|-------|---------|
 | **git** | worktrees, branches | `command -v git` | preinstalled on macOS / `brew install git` |
-| **mattpocock-skills** (plugin) | tracker config (`/setup-matt-pocock-skills`) + `to-tickets`/`to-spec` conventions the resolver reads | plugin check above | `claude plugin marketplace add mattpocock/skills && claude plugin install mattpocock-skills@mattpocock` — repo <https://github.com/mattpocock/skills> |
+| **mattpocock-skills** (plugin) | tracker config (`/setup-matt-pocock-skills`) + `to-tickets`/`to-spec` conventions the resolver reads | plugin check above | `claude plugin install mattpocock-skills@claude-plugins-official` — the `claude-plugins-official` marketplace ships with Claude Code, so no `marketplace add` step comes first. Repo <https://github.com/mattpocock/skills> |
 | **prompt-improver** (plugin) | **owns all worker/review prompt composition** — the per-model tuning rules and the code-review coverage rule. The orchestrator drafts a prompt and runs it through this skill; it holds no prompting rules of its own | plugin check above, **or** the clone fallback in the check block | `claude plugin marketplace add wagnersza/prompt-improver && claude plugin install prompt-improver@prompt-improver` — repo <https://github.com/wagnersza/prompt-improver>. Auto-loads next session (`/reload-plugins` picks it up now). No dependencies of its own. |
 | **ponytail** (plugin) | keeps workers lazy/minimal; the completion contract references it | plugin check above | `claude plugin marketplace add DietrichGebert/ponytail && claude plugin install ponytail@ponytail` |
 | **simple-english** (skill) | **owns all writing rules for prose deliverables** — a worker runs the prose it changed through this skill before it commits, and the orchestrator applies the skill to its own reports. This repo restates no rule of the standard, only when to invoke it (see `../CONTEXT.md`) | `simple-english` check above | `npx skills add AminBlg/SimpleEnglish --global --all` — the [`skills` CLI](https://skills.sh), so it needs `node`/`npx` and network access. Repo <https://github.com/AminBlg/SimpleEnglish>, MIT, no dependencies of its own. Not a Claude plugin marketplace install, so it carries no pin (ADR 0011) |
-| **resolving-merge-conflicts** (skill) | **owns the merge-conflict procedure** for step 1 of the **Close transaction** — the orchestrator session invokes it before it merges, rather than resolving a conflict from memory. This repo states only *when* to invoke it (see `../CONTEXT.md`) | `resolving-merge-conflicts` check above | ships inside **mattpocock-skills**, so the plugin install above already provides it: `claude plugin install mattpocock-skills@mattpocock`. Nothing separate to install. Rationale: [`../docs/adr/0015-close-is-a-deterministic-transaction.md`](../docs/adr/0015-close-is-a-deterministic-transaction.md) |
+| **resolving-merge-conflicts** (skill) | **owns the merge-conflict procedure** for step 1 of the **Close transaction** — the orchestrator session invokes it before it merges, rather than resolving a conflict from memory. This repo states only *when* to invoke it (see `../CONTEXT.md`) | `resolving-merge-conflicts` check above | ships inside **mattpocock-skills**, so the plugin install above already provides it: `claude plugin install mattpocock-skills@claude-plugins-official`. Nothing separate to install. Rationale: [`../docs/adr/0015-close-is-a-deterministic-transaction.md`](../docs/adr/0015-close-is-a-deterministic-transaction.md) |
 | **playwright-cli** (CLI) | the **only sanctioned browser surface** for a worker — the UI proof the `evidence` bar asks for runs through it (see `../CONTEXT.md`) | `command -v playwright-cli` | `npm install -g @playwright/cli` — the npm global package, so the update command is `npm update -g @playwright/cli`, never brew. Steps, verification and failure modes: [`../../playwright-cli/references/installation.md`](../../playwright-cli/references/installation.md) |
 | **playwright browsers** | the browser builds the CLI drives — a second requirement, because a machine can have the CLI and no browsers | browser check above | `npx playwright install` (<https://playwright.dev>). Run it again after a CLI update. A new CLI can want a newer build than the cache holds |
 | **codebase-memory-mcp** | code discovery for workers (search_graph, trace_path) | MCP check above | **manual** — no public package resolved; if a binary exists (e.g. `~/.local/bin/codebase-memory-mcp`), register it: `claude mcp add codebase-memory-mcp <path-to-binary>`. Otherwise install per its own docs, then `claude mcp add`. |
@@ -133,7 +133,7 @@ separate install at all, because the skill ships inside the `mattpocock-skills` 
 
 | Shape | Where `SKILL.md` sits | Install with |
 |-------|-----------------------|--------------|
-| **Plugin cache** (what the plugin install writes) | `~/.claude/plugins/cache/<marketplace>/mattpocock-skills/<version>/skills/engineering/…` | `claude plugin install mattpocock-skills@mattpocock` |
+| **Plugin cache** (what the plugin install writes) | `~/.claude/plugins/cache/<marketplace>/mattpocock-skills/<version>/skills/engineering/…` | `claude plugin install mattpocock-skills@claude-plugins-official` |
 | **Marketplace clone** (the source the cache is built from) | `~/.claude/plugins/marketplaces/<marketplace>/skills/engineering/…` | `claude plugin marketplace add <owner>/skills` |
 | **Standalone clone, global** | `~/.claude/skills/resolving-merge-conflicts/` | copy the skill directory there, as with a `prompt-improver` clone |
 | **Standalone clone, project** | `<repo>/.claude/skills/resolving-merge-conflicts/` | the same copy, inside the repo |
@@ -141,7 +141,7 @@ separate install at all, because the skill ships inside the `mattpocock-skills` 
 On this machine on 2026-08-04 the first two shapes are both present and the check
 block exits 0 on them. The two standalone shapes are absent, which is the expected
 state where the plugin provides the skill — the check needs one hit, not four. The
-update command is the plugin's (`claude plugin update mattpocock-skills@mattpocock`),
+update command is the plugin's (`claude plugin update mattpocock-skills@claude-plugins-official`),
 so this dependency carries no update command of its own.
 
 **`playwright-cli` is two requirements, and the check must carry the suffix.** Both
