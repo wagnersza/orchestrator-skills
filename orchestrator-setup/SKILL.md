@@ -28,8 +28,8 @@ check-only setup: this one **runs the install commands**, it doesn't just print
 them.
 
 The vocabulary (Tool, Harness, Model, Vendor, Yolo mode, Adversarial review,
-Project recipe) is defined in the orchestrator skill's `CONTEXT.md` — use those
-terms.
+Project recipe, Gate, Layer) is defined in the orchestrator skill's `CONTEXT.md` —
+use those terms.
 
 ## 0. Update everything, then pick a mode
 
@@ -430,9 +430,9 @@ Scope — only the chosen pieces apply:
 ### Install loop
 
 For each needed dep, run its check command. **If present, it was already brought up
-to date in step 0a** — skip it. The browser surface is the one exception, because
-step 0a cannot apply the recipe gate: see its bullet below. If missing, install it
-by running the command from `requirements.md`:
+to date in step 0a** — skip it. The browser surface and the gate tools are the two
+exceptions, because step 0a updates neither: see each bullet below. If missing, install
+it by running the command from `requirements.md`:
 
 - **Plugins** — `claude plugin marketplace add <slug> && claude plugin install <name>@<marketplace>` (mattpocock, ponytail, prompt-improver). Verified shell commands. A plugin auto-loads next session, so mention a restart (or `/reload-plugins`) is needed before the first spawn.
 - **`prompt-improver` specifically** — install as a plugin (see `requirements.md`). If exploration found an existing clone at `~/.claude/skills/prompt-improver`, **it's already satisfied** — don't install the plugin on top, which would leave two copies shadowing each other. Report it as present.
@@ -484,6 +484,9 @@ by running the command from `requirements.md`:
     A credential cannot arrive unattended, and a config that names such a tool present is
     a config that lies. No Python row needs one today, so this rule waits for the family
     that brings one. `## Vendor keys` in the same catalog holds the rule for a harness.
+  - **A present gate tool stays as it is.** The update block in `requirements.md` carries
+    no line for one, so step 0a did not update it and this loop does not either. A green
+    check is the whole answer.
   - **This step installs a tool and writes no file.** The gate script, the Makefile and
     each tool config file are a work item of their own. So no threshold reaches a tool
     config here.
@@ -493,7 +496,8 @@ by running the command from `requirements.md`:
 **Only pause for a human when you genuinely can't proceed automatically:**
 
 - An install command is marked **(verify)** in `requirements.md` (tool/harness
-  installers not pinned) — show the doc link and ask the user to run/confirm it.
+  installers not pinned) — show the doc link and ask the user to run/confirm it. **A gate
+  tool row is not this case**, and the install loop above says why.
 - **`codebase-memory-mcp`** has no public package resolved. Detect a local binary
   (e.g. `~/.local/bin/codebase-memory-mcp`); if found, register it with
   `claude mcp add codebase-memory-mcp <path>`. If not found, tell the user it must
