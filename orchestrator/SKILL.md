@@ -467,8 +467,19 @@ Three things `prompt-improver` can't know, so state them in the draft:
 - **Whole spec, first turn.** A worker has no human to answer a follow-up, so
   "ask the user" is never an option — where something is genuinely unknown, name
   the assumption to take instead.
-- **Cap delegation.** A worker already inside a worktree shouldn't fan out;
-  `prompt-improver`'s subagent cap is the wording to use.
+- **Ask for delegation, under the cap.** When the work splits, the worker delegates.
+  It does not ask first. **At most 5 sub-agents run at once, per worktree.** The cap
+  counts concurrent sub-agents, so a worker can run 5, read the reports, and then run
+  5 more. **A sub-agent reads, searches and reports. It never writes the item's
+  source**, because the worker owns every edit, every **Commit slice** and every
+  **Gate**. **The worker delegates where its harness has a sub-agent surface.** A
+  harness with none reads the same sentence, delegates nothing, and satisfies the
+  instruction. Take the answer from the harness reference file under
+  `references/harnesses/`, not from a guess. Name the reads the item needs, because a
+  bare permission gets a worker that delegates nothing. Definition: the **Delegation
+  cap** entry in [`CONTEXT.md`](CONTEXT.md). Rationale, the sentence this reverses and
+  the accepted risk:
+  [`docs/adr/0035-workers-delegate-to-sub-agents-under-a-cap.md`](docs/adr/0035-workers-delegate-to-sub-agents-under-a-cap.md).
 - **Scope edges are the exception to positive-framing.** Name the neighbouring
   files, features, and refactors the worker must not touch — negatively, on
   purpose.
@@ -935,7 +946,9 @@ outcome that reports the bound spent.
    - **Give every acceptance-criteria checkbox its own verdict.** One verdict per box,
      named. A summary over a group of boxes hides the one box that failed.
    - **Do not spawn sub-agents.** The reviewer is already the second opinion. A
-     sub-agent's findings arrive unattributed and cost a round.
+     sub-agent's findings arrive unattributed and cost a round. This rule is the one
+     exception to the **Delegation cap**:
+     [`docs/adr/0035-workers-delegate-to-sub-agents-under-a-cap.md`](docs/adr/0035-workers-delegate-to-sub-agents-under-a-cap.md).
    - **Report per axis, with a confidence and a severity on each finding.** The axes
      stay `/code-review`'s two. This adds only the two per-finding fields, which is
      what lets this session rank without re-reading the diff.
