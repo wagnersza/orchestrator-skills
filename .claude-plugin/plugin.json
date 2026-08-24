@@ -1,6 +1,6 @@
 {
   "name": "orchestrator-skills",
-  "version": "0.32.0",
+  "version": "0.33.0",
   "description": "Orchestrate agent worker sessions across any workspace tool (orca/cmux/herdr), harness (claude/codex/pi/copilot/cursor), and frontier model. Zero-touch install + setup; optional cross-vendor adversarial review.",
   "author": {
     "name": "wagnersza",

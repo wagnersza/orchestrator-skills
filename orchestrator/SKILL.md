@@ -101,9 +101,10 @@ outside the name ([`references/tools/<tool>.md`](references/tools/_operations.md
 
 ### Resolve the plugin root, and prove the seam runs
 
-**Two seams live in this plugin, and neither one is on the `PATH`.** They are
-`scripts/worker_state.py` (readiness and the tick) and `scripts/close_item.py` (steps 4
-to 8 of a **Close transaction**). Both sit in `scripts/` at the **plugin root**, and
+**Three seams live in this plugin, and none of them is on the `PATH`.** They are
+`scripts/worker_state.py` (readiness and the tick), `scripts/close_item.py` (steps 4
+to 8 of a **Close transaction**) and `scripts/merge_train.py` (the order of a **Merge
+train**). All three sit in `scripts/` at the **plugin root**, and
 **that directory is never the working directory of a caller**. This session runs in the
 target repo, and a tick runs in a worker worktree. So the module form
 (`-m scripts.<module>`) finds no module there, and the seam is unreachable. The term is
@@ -122,8 +123,8 @@ python3 "$PLUGIN_ROOT/scripts/worker_state.py" ready --help >/dev/null && echo "
 `--help`, so it mutates nothing. Run it before the first spawn of a session, which puts
 it before the first **Item automation** exists. Say which root it printed. Where it
 fails, say that the plugin is installed and its seams are not reachable. Then point the
-user at `/orchestrator-setup`, the same as any other missing dependency. Both seams sit
-in one directory, so one check answers for both.
+user at `/orchestrator-setup`, the same as any other missing dependency. The three sit
+in one directory, so one check answers for all of them.
 
 **Every later invocation carries the resolved value, and never the variable.** Each
 command you run opens its own shell, so that assignment does not survive to the next
@@ -310,6 +311,20 @@ The reconcile covers **every open item**, not just the ready ones — an item si
 in `in-progress` or `to-review` still gets its card confirmed, and a closed item
 already reached `Done` at close. A `user-story` parent's card follows the same table
 against its own labels and state, per that section.
+
+**Report the Merge queue beside the ready queue.** This pass already holds every open
+item's labels, so the queue costs no second read: it is every open item that carries
+`to-merge`. **Promote a dragged card in this same pass.** This session writes the label for
+a card that sits in the board's `To merge` column with no label yet, and that promotion
+belongs to the pass which already reconciles the board
+([`docs/adr/0038-the-to-merge-column-is-intent.md`](docs/adr/0038-the-to-merge-column-is-intent.md)).
+Report the queue as its own capped list, under the ready queue. Then offer the train
+([Merge the queue](#merge-the-queue)).
+
+**This read is the whole fallback where the tool supports no automation surface.** `cmux`
+and `herdr` create no schedule, so no tick fires and no `merge-requested` wake ever arrives
+([Start the tick](#start-the-tick--one-item-automation-per-worker)). A maintainer who asks
+what next still sees the queue, and can still ask for the train.
 
 ## "Work a #N" — batch-spawn its unblocked children
 
@@ -651,7 +666,7 @@ Definitions: the **Item automation** and **Phase** entries in
 [`CONTEXT.md`](CONTEXT.md). Rationale:
 [`docs/adr/0022-item-automation-replaces-the-blocking-watch.md`](docs/adr/0022-item-automation-replaces-the-blocking-watch.md).
 
-**The precheck is the whole tick.** `wake` asks the same predicate as `phase`. The nine
+**The precheck is the whole tick.** `wake` asks the same predicate as `phase`. The
 outcomes, their order and the back-off window are unchanged. On a due transition it
 delivers the printed line itself. **No path through it exits 0**, so every run records as
 skipped, no model loads and no agent runs on a tick. That command goes into op 11's
@@ -790,7 +805,7 @@ are the whole of monitoring on a tool with no automation surface.
 ## On the wake — one response per outcome
 
 A tick wakes this session with the one line its precheck printed, and that line names one
-of nine outcomes. **The response is a lookup, not an interpretation.** Read the outcome,
+of its outcomes. **The response is a lookup, not an interpretation.** Read the outcome,
 run its row, and report per [Reporting to the user](#reporting-to-the-user).
 
 **Write the `phase:*` label as the first act of every transition.** That write is what
@@ -808,6 +823,12 @@ from the work-state label alone, so that half of the pair is what moves it
 none of them** — its last act is the review note. Rationale:
 [`docs/adr/0025-the-session-writes-the-review-state.md`](docs/adr/0025-the-session-writes-the-review-state.md).
 
+**One row writes a work-state label and no phase label.** `merge-requested` fires in
+human review, where the item wears no `phase:*` label to change. So its first act is that
+work-state swap itself: it adds `to-merge`, removes the review state in the same call, and
+moves the card. That write still acknowledges the wake, and it still stops a repeat fire on
+the same fact a minute later.
+
 | Outcome | Write first | Then |
 |---|---|---|
 | `implementation-complete` | `phase:impl` → `phase:e2e` where the proof-phase gate holds; else → `phase:review` where review is on; else remove it **and add `to-review` in the same call, and move the card to `In review`** | Proof: [The proof phase](#the-proof-phase). Review on: [Adversarial review](#adversarial-review-when-configs-reviewenabled) steps 1 and 2. Step 1 also **repoints the precheck** at the reviewer's worktree, with the review harness's process pattern — below. Review off: this wake is the hand-off to a human. Report the finish, the label pair you wrote, and the review you can still offer, in one line |
@@ -816,14 +837,15 @@ none of them** — its last act is the review note. Rationale:
 | `verdict-approve` | remove `phase:review` **and add `to-review` in the same call, and move the card to `In review`** | [Adversarial review](#adversarial-review-when-configs-reviewenabled) step 4 — gather evidence and hand the item to human review |
 | `verdict-request-changes` | nothing, because a fix round is inside `phase:review` | [Adversarial review](#adversarial-review-when-configs-reviewenabled) step 3, at the round the line names. That step also **repoints the precheck** back at the implementation worktree, with the implementation harness's pattern — below |
 | `rounds-exhausted` | remove `phase:review` **and add `to-review` in the same call, and move the card to `In review`** | Step 4 again — "after the last round regardless". The bound is spent, so offer no further round |
+| `merge-requested` | add `to-merge` **and remove the review state in the same call, and move the card to `To merge`** | [Merge the queue](#merge-the-queue). The item that woke this session is one entry to the queue, and the train resolves the whole set fresh |
 | `dead` | nothing, because the item stays in the phase it is in | Report, and **never re-prompt** — below |
 | `stalled` | nothing, for the same reason | Reset the context and re-prompt — below |
 | `unreadable` | nothing, because a read that failed cannot say which phase the item is in | Report in one line: the tracker read is broken, and the item is unobserved until that read works again |
 
 **The item's phase is what makes the response a lookup.** The seam reads that label to
-decide which of the eight gated outcomes a tick can reach. So `implementation-complete` and
-`verdict-approve` can never arrive for one item on the same minute. `unreadable` is the
-ninth, and no label gates it: the read that failed is the read that carries the label.
+decide which of the gated outcomes a tick can reach. So `implementation-complete` and
+`verdict-approve` can never arrive for one item on the same minute. `unreadable` is the one
+outcome no label gates: the read that failed is the read that carries the label.
 The on-demand door (`review #N adversarially`) is unchanged, and it writes `phase:review`
 itself.
 
@@ -858,7 +880,8 @@ history all stay, so step 8 of a **Close transaction** still removes one schedul
 name. The edit fails closed: a rejected repoint leaves the old precheck running, and the
 item keeps an observer. **A row that names no next worker repoints nothing.**
 `verdict-approve` and `rounds-exhausted` end the phase axis. `dead`, `stalled`,
-`gates-unproven` and `unreadable` say nothing about which worker is live. Rationale:
+`gates-unproven` and `unreadable` say nothing about which worker is live.
+`merge-requested` fires where no worker owns the item at all. Rationale:
 [`docs/adr/0026-the-automation-follows-the-live-worker.md`](docs/adr/0026-the-automation-follows-the-live-worker.md).
 
 **The repointed precheck is the same `wake` command, with two flags changed.** `--worktree`
@@ -1118,6 +1141,7 @@ before you touch anything:
 | "merge and close 20", "merge 20 and close it" | yes |
 | "close 20" | yes |
 | "wrap up 20" | yes |
+| the `to-merge` label, or a card in the `To merge` column | yes |
 | "flip 20 to review", "advance 20" | no |
 | ambiguous, or not said | ask first |
 
@@ -1126,6 +1150,12 @@ maintainer requested in the same turn. A **no** row is an advance and not a clos
 swap the label to the review state, move the card to `In review`
 ([Board status](#board-status)), and stop there. On the **ask first** row, ask in one
 line and wait.
+
+**The `to-merge` row is an ask too, recorded on the item instead of typed.** A maintainer
+who writes that label, or drags that card, decided for that one item after they read it.
+So a close inside a **Merge train** carries the same authority as a typed one
+([Merge the queue](#merge-the-queue),
+[`docs/adr/0037-the-merge-queue-is-an-ordered-train.md`](docs/adr/0037-the-merge-queue-is-an-ordered-train.md)).
 
 Then **find the worktree** (op 8) — display name = branch = slug. Keep its id and
 its path. If nothing matches, the item is probably closed already. Do the label steps
@@ -1247,6 +1277,64 @@ untriaged is work to report, and never a close this session refuses. Rationale, 
 threshold and the accepted risk:
 [`docs/adr/0033-the-story-gate-is-advisory.md`](docs/adr/0033-the-story-gate-is-advisory.md).
 
+## Merge the queue
+
+This flow runs at two moments. A tick that reports `merge-requested`
+([On the wake](#on-the-wake--one-response-per-outcome)) is the first. A maintainer who asks
+for the queue after a ["What next?"](#what-next--pick-the-next-work) read is the second. It
+runs one **Merge train**: one ordered run over the **Merge queue**, both defined in
+[`CONTEXT.md`](CONTEXT.md).
+
+**The ordering rule and the park rule live in
+[`references/merge-train.md`](references/merge-train.md).** Read them there at the moment
+you need them, and never from memory. This section restates neither one. Rationale:
+[`docs/adr/0037-the-merge-queue-is-an-ordered-train.md`](docs/adr/0037-the-merge-queue-is-an-ordered-train.md).
+
+1. **Resolve the Merge queue fresh.** Every open item that carries `to-merge` is in it. So
+   is every open item whose card sits in the board's `To merge` column. **Promote each
+   dragged card to the label**, then read labels alone from there. That direction is board
+   to label, once, for that one column
+   ([`docs/adr/0038-the-to-merge-column-is-intent.md`](docs/adr/0038-the-to-merge-column-is-intent.md)).
+   The column read is a board read, so a repo with no board keeps the label as its only
+   entry ([Board status](#board-status)).
+2. **Ask the seam for the order.** Rank nothing yourself. `scripts/merge_train.py` plans a
+   train, and it merges nothing.
+
+   ```bash
+   python3 <plugin root>/scripts/merge_train.py --repo <config's repo> \
+     --default-branch <the default branch> \
+     --item <N>:<the item's branch> --item <N>:<the item's branch>
+   ```
+
+   One `--item` per queued item, and the item's branch is its slug. `<plugin root>` is the
+   value the preflight resolved
+   ([Resolve the plugin root, and prove the seam runs](#resolve-the-plugin-root-and-prove-the-seam-runs)).
+   The plan is one JSON object on stdout, with an `order` and a `parked` list. Read it.
+   `python3 <plugin root>/scripts/merge_train.py --help` is the argument surface, and the
+   module docstring holds the JSON keys and one row per exit code. **Never restate one of
+   them here or in a report.**
+3. **Report the plan before the first merge.** The order and the parked list, capped at 5
+   rows like every other report ([Reporting to the user](#reporting-to-the-user)). That
+   report is what lets the maintainer stop a train they did not expect.
+4. **Park what the plan parked.**
+   [`references/merge-train.md`](references/merge-train.md) holds the park rule, and this
+   session performs it. **Move the card with the label**, to `In review`
+   ([Board status](#board-status)). The seam writes no label and comments nowhere, so this
+   session makes every tracker write a park needs.
+5. **Run one full Close transaction per item, in the printed order.** Steps 1 to 3 in
+   prose, and `resolving-merge-conflicts` where step 1 conflicts. Then steps 4 to 8 through
+   `scripts/close_item.py`, with `--execute --teardown`
+   ([Close a task](#close-a-task)). **No step of the transaction changes, and their order
+   does not change.** The `to-merge` label is the standing authorisation, so no close
+   inside a train asks a second time ([Safety](#safety)).
+6. **A late conflict parks the item, and the train continues.** Step 1 of the transaction
+   is where it appears, because an earlier merge of this same train moved the default
+   branch. Park it per step 4, then continue with the next item.
+7. **Apply the layer 5 story gate per item, and never once per train.** Where a merge
+   closed the last child of a user story, run
+   [The layer 5 story gate](#the-layer-5-story-gate) for that story. One train can close
+   two stories, so the check belongs to each item.
+
 ## Reporting to the user
 
 An orchestrator session runs long and the user reads it between other work. They
@@ -1278,8 +1366,8 @@ it. Shape output for acting on, not for completeness:
   user to remember any of the three.
 - **A wake report names the outcome and the transition that ran.** The outcome is the
   tick's own word: `implementation-complete`, `proof-complete`, `gates-unproven`,
-  `verdict-approve`, `verdict-request-changes`, `rounds-exhausted`, `dead`, `stalled` or
-  `unreadable`. Then
+  `verdict-approve`, `verdict-request-changes`, `rounds-exhausted`, `merge-requested`,
+  `dead`, `stalled` or `unreadable`. Then
   the phase label you wrote, then what you did. `#38 implementation-complete · phase:impl →
   phase:review. Reviewer spawned, gpt-5.6-terra @ high.` **Where the wake ended the phase
   axis, name the label pair you wrote.** That one call is the hand-off to a human:
@@ -1310,6 +1398,11 @@ it. Shape output for acting on, not for completeness:
   seam emitted ([Close a task](#close-a-task)), and ends with the one action left.
   `#20 closed: steps 1 to 7 ran, teardown refused. Cause: the worktree holds
   src/api.ts. Commit it or stash it, then say "close 20" again.`
+- **A train report names the order it ran**, what merged, what parked and why, and it ends
+  with the one action left. That is the close-report shape, once per train instead of once
+  per item ([Merge the queue](#merge-the-queue)). **A parked item is that action**, and it
+  carries the conflicting paths. `#152 #153 merged, in that order. #151 parked:
+  orchestrator/SKILL.md conflicts. Resolve it in 151-merge-train, then say "close 151".`
 - **Matter-of-fact failures.** Location, cause, fix — no "uh oh", no apology.
   `#38 idle with checklist 4/7 (evidence unchecked). Cause: port 3038 in use.
   Re-prompting with the remaining steps.`
@@ -1337,6 +1430,11 @@ refusal reason are spelled out, never compressed.
   explicit "merge and close" **is** that confirmation, so a second ask is friction
   rather than safety (the table in [Close a task](#close-a-task)). The data-loss case
   is a dirty tree, and step 6 of the transaction refuses it rather than warning.
+- **The `to-merge` label is the standing authorisation, so a Merge train asks no second
+  time.** The maintainer writes it per item, on an item they read, so it authorises one
+  transaction and never a whole session. Each close inside a train then runs all eight
+  steps, teardown included ([Merge the queue](#merge-the-queue),
+  [`docs/adr/0037-the-merge-queue-is-an-ordered-train.md`](docs/adr/0037-the-merge-queue-is-an-ordered-train.md)).
 - **A second stall is one of the ambiguous cases, so it asks. So is a `dead` worker.** The
   maintainer said nothing about a teardown in either case, and a tick cannot read intent in
   an uncommitted diff. The re-prompt on the first stall stays unconfirmed, because it
