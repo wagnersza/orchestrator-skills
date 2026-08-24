@@ -312,6 +312,20 @@ in `in-progress` or `to-review` still gets its card confirmed, and a closed item
 already reached `Done` at close. A `user-story` parent's card follows the same table
 against its own labels and state, per that section.
 
+**Report the Merge queue beside the ready queue.** This pass already holds every open
+item's labels, so the queue costs no second read: it is every open item that carries
+`to-merge`. **Promote a dragged card in this same pass.** This session writes the label for
+a card that sits in the board's `To merge` column with no label yet, and that promotion
+belongs to the pass which already reconciles the board
+([`docs/adr/0038-the-to-merge-column-is-intent.md`](docs/adr/0038-the-to-merge-column-is-intent.md)).
+Report the queue as its own capped list, under the ready queue. Then offer the train
+([Merge the queue](#merge-the-queue)).
+
+**This read is the whole fallback where the tool supports no automation surface.** `cmux`
+and `herdr` create no schedule, so no tick fires and no `merge-requested` wake ever arrives
+([Start the tick](#start-the-tick--one-item-automation-per-worker)). A maintainer who asks
+what next still sees the queue, and can still ask for the train.
+
 ## "Work a #N" — batch-spawn its unblocked children
 
 This flow runs when the item carries `user-story`
