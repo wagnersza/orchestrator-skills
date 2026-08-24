@@ -169,19 +169,15 @@ class WorkerStateTestCase(unittest.TestCase):
     def write_fixture(self, comments=(), labels=(), board=""):
         """Stand in for the tracker read a phase tick makes, and for the board read.
 
+        One record for this item, in the one format `scripts/tracker.py` documents.
         `board` is the `Status` option on this item's card. With nothing passed the
-        fixture carries no board key at all, which is how an item with no card reads.
+        record carries no board key at all, which is how an item with no card reads.
         """
         self.fixture = self.root / "gh.json"
-        self.fixture.write_text(
-            json.dumps(
-                {
-                    "comments": {str(ITEM): list(comments)},
-                    "labels": {str(ITEM): list(labels)},
-                    **({"board": {str(ITEM): board}} if board else {}),
-                }
-            )
-        )
+        record = {"comments": list(comments), "labels": list(labels)}
+        if board:
+            record["board"] = board
+        self.fixture.write_text(json.dumps({"items": {str(ITEM): record}}))
 
     def gate_run(self, command, code=0, sha=None):
         """One line of the Gate record, as a gate command appends it.

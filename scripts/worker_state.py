@@ -66,7 +66,7 @@ promotion as cheap as the one before it.
 absent, this seam skips the board read and raises no error, so the label stays the
 only entry. A repo with no board is a supported configuration, which is the rule the
 whole board layer already follows. A project board is one tracker's own surface, so
-the board read builds its own argv and `--tracker-cli` does not reach it.
+the **Tracker adapter** names that CLI and `--tracker-cli` does not reach it.
 
 **A board read that fails is not `unreadable`.** That outcome means no fact is
 available, and here the labels were read. So a failed board read falls back to the
@@ -130,8 +130,9 @@ worker's role:
 **The tracker CLI is an argument.** `--tracker-cli` picks which command reads the
 labels and the comments. `--tracker-host` names the server where the tracker is
 self-hosted. The caller resolves both from `docs/agents/issue-tracker.md`, the same
-way it resolves every other configuration value. So this seam names a tracker in its
-argv builders and nowhere else. A project on the other tracker then needs no
+way it resolves every other configuration value. This seam passes both values to the
+**Tracker adapter** in `scripts/tracker.py`, which holds every command, so this seam
+names no tracker at all (ADR 0040). A project on the other tracker then needs no
 wrapper script outside this repo.
 
 **`wake`** — the whole body of a tick. It asks the same `phase` predicate, and on a
@@ -196,6 +197,19 @@ import time
 from pathlib import Path
 from typing import Any
 
+# Both invocation forms reach the adapter: `python3 <plugin root>/scripts/worker_state.py`
+# puts `scripts/` on the path, and `python3 -m scripts.worker_state` puts the repo root
+# there (ADR 0034).
+try:
+    from .tracker import GH, GLAB, Tracker, TrackerError
+except ImportError:  # the type checker reads the package form above
+    from tracker import (  # type: ignore[no-redef, import-not-found]
+        GH,
+        GLAB,
+        Tracker,
+        TrackerError,
+    )
+
 EXIT_COMPLETE = 0
 EXIT_GONE = 3
 
@@ -254,14 +268,6 @@ UNITS = {"s": 1, "m": 60, "h": 3600}
 # **Checklist** a tick reads, and the back-off markers a fire writes. It is also
 # the default for `--marker-dir`.
 ORCHESTRATOR_DIR = ".orchestrator"
-
-# The two tracker CLIs a caller can pass to `--tracker-cli`. Each one has its own
-# argv builders below, and those three functions are the only place in this file that
-# knows one tracker from the other: two of them read the labels and the comments, and
-# the third posts one comment as the last wake target. Everything else reads two
-# lists.
-GH = "gh"
-GLAB = "glab"
 
 
 def parse_duration(text):
@@ -398,109 +404,6 @@ def boxes(path):
         return 0, 0
     marks = [match.group(1) for line in text.splitlines() if (match := BOX.match(line))]
     return sum(1 for mark in marks if mark != " "), len(marks)
-
-
-def item_facts(item, repo, fixture=None, cli=GH, host=""):
-    """The two tracker facts about a work item: `(labels, comment bodies)`.
-
-    One call, because a **Phase** tick needs both. `--tracker-cli` picks which
-    builder below runs, and a read that fails raises `TrackerError` for the
-    `unreadable` outcome to report.
-
-    A fixture file (`--gh-fixture`) stands in for the read itself, so the tests
-    fire a verdict and a phase with no network and no login. It stands in for
-    either tracker, because both builders answer with the same two lists.
-    `scripts/close_item.py` takes the same kind of file. It holds both facts keyed
-    by item number:
-
-        {"comments": {"54": ["Verdict: approve", "an earlier note"]},
-         "labels": {"54": ["in-progress", "phase:review"]}}
-
-    An item that is absent from a key reads as an item with none of that fact. A key
-    that is absent reads the same way.
-    """
-    if fixture:
-        data = json.loads(Path(fixture).read_text())
-        return (
-            list((data.get("labels") or {}).get(str(item)) or []),
-            list((data.get("comments") or {}).get(str(item)) or []),
-        )
-    if cli == GLAB:
-        return glab_facts(item, repo, host)
-    return gh_facts(item, repo)
-
-
-class TrackerError(RuntimeError):
-    """A tracker read failed — reported as the `unreadable` outcome, never raised
-    past `phase`."""
-
-
-def tracker_read(argv):
-    """The standard output of one tracker command, or `TrackerError`.
-
-    The part both builders share, so neither one repeats how a failure is
-    reported. The command is in the message, because the line a tick prints is
-    what a maintainer reads to fix a broken read.
-    """
-    proc = subprocess.run(argv, capture_output=True, text=True)
-    if proc.returncode != 0:
-        raise TrackerError(f"{' '.join(argv)} failed: {proc.stderr.strip()}")
-    return proc.stdout
-
-
-def gh_facts(item, repo):
-    """The two facts from `gh`, which reads both of them in one command."""
-    argv = [GH, "issue", "view", str(item), "--json", "comments,labels"]
-    if repo:
-        argv += ["--repo", repo]
-    data = json.loads(tracker_read(argv) or "{}")
-    return (
-        [entry.get("name") or "" for entry in data.get("labels") or []],
-        [entry.get("body") or "" for entry in data.get("comments") or []],
-    )
-
-
-def glab_facts(item, repo, host):
-    """The two facts from `glab`, which reads them in two commands.
-
-    The host goes in a different place in each command. That difference is why this
-    builder exists, and not one command with a flag:
-
-    - the labels come from `glab issue view <n> -F json -R <host>/<owner>/<name>`,
-      where the host is part of the repository argument.
-    - the comments come from
-      `glab api projects/<owner>%2F<name>/issues/<n>/notes --hostname <host>`,
-      where the host is a flag and the project path carries no host at all. A bare
-      `owner/name` in that path resolves against the CLI's default server, which
-      answers 404 or `Unauthenticated` for a project it does not hold.
-
-    With no `--tracker-host` neither command names a host, so both reads go to the
-    CLI's own default server.
-    """
-    if not repo:
-        raise TrackerError(
-            "a glab read needs --repo as OWNER/NAME, because the project path is "
-            "part of both commands"
-        )
-    labels_argv = [GLAB, "issue", "view", str(item), "-F", "json"]
-    labels_argv += ["-R", f"{host}/{repo}" if host else repo]
-    notes_argv = [
-        GLAB,
-        "api",
-        f"projects/{repo.replace('/', '%2F')}/issues/{item}/notes",
-    ]
-    if host:
-        notes_argv += ["--hostname", host]
-    issue = json.loads(tracker_read(labels_argv) or "{}")
-    notes = json.loads(tracker_read(notes_argv) or "[]")
-    return (
-        # A label is a plain string on this tracker, and an object on the other one.
-        [
-            entry if isinstance(entry, str) else entry.get("name") or ""
-            for entry in issue.get("labels") or []
-        ],
-        [entry.get("body") or "" for entry in notes or []],
-    )
 
 
 def verdicts_in(bodies):
@@ -684,61 +587,6 @@ def newest_work_product(worktree, item, current):
 # same as every other label this seam reads.
 TO_MERGE = "to-merge"
 
-# How many cards one board read asks for. The number is part of the recipe in
-# `docs/agents/issue-tracker.md`, so it is not a bound this seam chose.
-BOARD_LIMIT = 100
-
-
-def board_argv(project, owner):
-    """The argv of the one board read, which is the recipe in the tracker file.
-
-    That file holds it as this call plus a `jq` filter on the status name. The filter
-    is the walk in `board_status` instead, because this seam asks about one card and
-    not about the whole column.
-
-    A project board is one tracker's own surface, so this builder names that CLI and
-    `--tracker-cli` does not reach it. A repo on the other tracker has no such board,
-    so it passes no board flag and this read never runs there.
-    """
-    return [
-        GH,
-        "project",
-        "item-list",
-        str(project),
-        "--owner",
-        owner,
-        "--format",
-        "json",
-        "--limit",
-        str(BOARD_LIMIT),
-    ]
-
-
-def board_status(item, project, owner, fixture=None):
-    """The `Status` option name on this work item's card, or an empty string.
-
-    An empty string covers two facts: an item with no card, and a card with no status.
-    Neither one is the column that fires `merge-requested`. A read that fails raises
-    `TrackerError`, and the caller falls back to the label.
-
-    The fixture file (`--gh-fixture`) stands in for this read the same way it stands in
-    for the tracker read, under a third key. So a test fires the board path with no
-    network and no login:
-
-        {"board": {"54": "To merge"}}
-
-    An item that is absent from that key reads as an item with no card, and a key that
-    is absent reads the same way.
-    """
-    if fixture:
-        data = json.loads(Path(fixture).read_text())
-        return str((data.get("board") or {}).get(str(item)) or "")
-    data = json.loads(tracker_read(board_argv(project, owner)) or "{}")
-    for entry in data.get("items") or []:
-        if (entry.get("content") or {}).get("number") == item:
-            return str(entry.get("status") or "")
-    return ""
-
 
 def merge_requested(item, labels, project=0, owner="", option="", fixture=None):
     """`(outcome, detail)` where this item asks to be merged, or `(None, detail)`.
@@ -749,8 +597,9 @@ def merge_requested(item, labels, project=0, owner="", option="", fixture=None):
 
     1. **the `to-merge` label**, which the caller already read this tick, and which is
        the authoritative fact once a session writes it.
-    2. **the board column**, read through the three `--board-*` flags. It runs only
-       where the label answers nothing, because it is a command that can fail.
+    2. **the board column**, read through the three `--board-*` flags. The **Tracker
+       adapter** holds that command. It runs only where the label answers nothing,
+       because it is a command that can fail.
 
     So a repo with no board still reaches the outcome. The tick after a promotion costs
     no more than the one before it (ADR 0037, ADR 0038).
@@ -769,7 +618,7 @@ def merge_requested(item, labels, project=0, owner="", option="", fixture=None):
     if not (project and owner and option):
         return None, f"{quiet}, so it is in human review and no transition is due"
     try:
-        status = board_status(item, project, owner, fixture)
+        status = Tracker(fixture=fixture).board_status(item, project, owner)
     except (TrackerError, OSError, json.JSONDecodeError) as exc:
         # A tick prints one line, and the standard error of a failed command can hold
         # many, so the cause collapses to one.
@@ -970,7 +819,8 @@ def phase(
         return EXIT_DUE, f"{outcome}: {detail}"
 
     try:
-        labels, bodies = item_facts(item, repo, fixture, tracker_cli, tracker_host)
+        tracker = Tracker(tracker_cli, tracker_host, repo, fixture)
+        labels, bodies = tracker.item_facts(item)
     except (TrackerError, OSError, json.JSONDecodeError) as exc:
         # A tick prints one line. The standard error of a failed command can hold
         # many, so the cause collapses to one.
@@ -999,25 +849,6 @@ def phase(
 
 
 # --- the wake (ADR 0027) ----------------------------------------------------
-
-
-def comment_argv(item, body, repo, cli=GH, host=""):
-    """The argv that posts one comment on a work item, which is wake target three.
-
-    One builder per tracker, for the same reason the two reads above have one each:
-    the flag that carries the message differs, and so does the place the host goes.
-    One CLI takes an optional repository, and falls back to the one the working
-    directory holds. For the other CLI the repository is part of the command.
-    """
-    if cli == GLAB:
-        argv = [GLAB, "issue", "note", str(item), "--message", body]
-        if repo:
-            argv += ["-R", f"{host}/{repo}" if host else repo]
-        return argv
-    argv = [GH, "issue", "comment", str(item), "--body", body]
-    if repo:
-        argv += ["--repo", repo]
-    return argv
 
 
 def send_argv(template, target, text):
@@ -1063,7 +894,7 @@ def wake_targets(line, item, handle, title, send_command, repo, cli, host):
     found.append(
         (
             f"a comment on work item #{item}",
-            comment_argv(item, line, repo, cli, host),
+            Tracker(cli, host, repo).comment_argv(item, line),
         )
     )
     return found
@@ -1200,8 +1031,8 @@ def add_tick_arguments(parser):
         choices=(GH, GLAB),
         help="which CLI reads the labels and the comments, and posts the wake comment "
         "where no terminal takes it. The caller resolves it from "
-        "docs/agents/issue-tracker.md. So this seam names a tracker in its argv "
-        "builders and nowhere else",
+        "docs/agents/issue-tracker.md. This seam passes the name to the tracker "
+        "adapter, which holds every command, so this seam names no tracker",
     )
     parser.add_argument(
         "--tracker-host",
@@ -1267,7 +1098,7 @@ def add_tick_arguments(parser):
         "--gh-fixture",
         help="JSON that stands in for any tracker read, so a verdict and a phase "
         "need no network and no login (used by the tests). It keeps this name "
-        "because scripts/close_item.py takes the same kind of file",
+        "because scripts/close_item.py reads the same file in the same format",
     )
 
 
