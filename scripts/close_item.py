@@ -43,7 +43,9 @@ part into a coupled one:
   So a new tool stays a Markdown change and no `orca` command is written here.
 - **The project board.** The coordinates arrive as arguments. This seam reads no
   Markdown and holds no board.
-- **Any tracker but GitHub.** See the `ponytail:` comment on `GH` below.
+- **Which tracker it talks to.** Every command comes from the **Tracker adapter**
+  in `scripts/tracker.py`, so this seam holds no tracker command and no CLI name
+  (ADR 0040).
 
 The exit code carries the outcome, so the caller reports the cause and parses no
 prose: 0 clean, 2 the PR is not merged, 3 the worktree is dirty, 1 a step failed.
@@ -55,18 +57,18 @@ import subprocess
 import sys
 from pathlib import Path
 
+# Both invocation forms reach the adapter: `python3 <plugin root>/scripts/close_item.py`
+# puts `scripts/` on the path, and `python3 -m scripts.close_item` puts the repo root
+# there (ADR 0034).
+try:
+    from .tracker import Tracker, TrackerError
+except ImportError:  # the type checker reads the package form above
+    from tracker import Tracker, TrackerError  # type: ignore[no-redef, import-not-found]
+
 EXIT_OK = 0
 EXIT_ERROR = 1
 EXIT_PR_NOT_MERGED = 2
 EXIT_WORKTREE_DIRTY = 3
-
-# ponytail: `gh` is hardcoded, so this seam speaks to GitHub and to no other
-# tracker. One tracker does not pay for an abstraction. Whoever first needs
-# GitLab has two upgrade paths, and both stop at `Tracker`: swap the six command
-# builders in that class for their `glab` equivalents, or put a `--tracker-cli`
-# argument in front of them. The gates, the plan and the order above them do not
-# change, because none of them knows which CLI ran.
-GH = "gh"
 
 STATUS_DONE = "done"
 STATUS_TODO = "todo"
@@ -86,10 +88,6 @@ BOARD_ARGS = (
 
 class GitError(RuntimeError):
     """A git command failed — reported into the plan, never raised past the CLI."""
-
-
-class GhError(RuntimeError):
-    """A tracker command failed — reported into the plan, not raised past the CLI."""
 
 
 # --- git --------------------------------------------------------------------
@@ -134,100 +132,6 @@ def dirty_files(worktree):
     return [line.split(None, 1)[1] for line in lines if line.strip()]
 
 
-# --- the tracker ------------------------------------------------------------
-
-
-class Tracker:
-    """The tracker reads and writes this seam needs, or a fixture in their place.
-
-    A fixture file (`--gh-fixture`) is how the tests close an item with no
-    network and no `gh` login, the same way `fork_state.py` plans a bootstrap.
-    Each key holds what the matching `gh` read returns, keyed by number:
-
-        {"pull_requests": {"48": {"state": "MERGED", "mergeCommit": {"oid": "a1"}}},
-         "issues": {"32": {"state": "OPEN", "labels": ["to-review"]}},
-         "project_items": {"32": "PVTI_x"}}
-
-    A number absent from a key reads as an empty record, which is the same answer
-    a repo with no board card gives.
-
-    In fixture mode a write runs nothing. It appends its command to
-    `<fixture path>.writes`, one per line. That file is what a test reads to see
-    which tracker writes an execute run made.
-    """
-
-    def __init__(self, fixture_path=None):
-        self.path = Path(fixture_path) if fixture_path else None
-        self.fixture = json.loads(self.path.read_text()) if self.path else None
-
-    def _record(self, key, number):
-        return (self.fixture.get(key) or {}).get(str(number)) or {}
-
-    # --- reads
-
-    def pull_request(self, number):
-        """The PR's state and its merge commit."""
-        if self.fixture is not None:
-            return self._record("pull_requests", number)
-        return gh_json("pr", "view", str(number), "--json", "state,mergeCommit")
-
-    def issue(self, number):
-        """The issue's state and its label names."""
-        if self.fixture is not None:
-            return self._record("issues", number)
-        data = gh_json("issue", "view", str(number), "--json", "state,labels")
-        return {
-            "state": data.get("state"),
-            "labels": [label["name"] for label in data.get("labels") or []],
-        }
-
-    def board_item(self, number, project_number, owner):
-        """The board item id for an issue, or an empty string if it has no card."""
-        if self.fixture is not None:
-            return (self.fixture.get("project_items") or {}).get(str(number), "")
-        return gh_text(
-            "project",
-            "item-list",
-            str(project_number),
-            "--owner",
-            owner,
-            "--format",
-            "json",
-            "--limit",
-            "100",
-            "--jq",
-            f".items[] | select(.content.number=={number}) | .id",
-        )
-
-    # --- writes
-
-    def write(self, argv):
-        """Run one tracker write, or record it where a fixture stands in."""
-        # Both halves of the fixture arrive together, so the second test adds no case.
-        # This test says which attribute the next line reads.
-        if self.fixture is not None and self.path is not None:
-            log = self.path.parent / (self.path.name + ".writes")
-            with log.open("a") as handle:
-                handle.write(" ".join(argv) + "\n")
-            return
-        proc = subprocess.run(argv, capture_output=True, text=True)
-        if proc.returncode != 0:
-            raise GhError(f"{' '.join(argv)} failed: {proc.stderr.strip()}")
-
-
-def gh_json(*args):
-    """Run a `gh` read and parse its JSON."""
-    return json.loads(gh_text(*args) or "{}")
-
-
-def gh_text(*args):
-    """Run a `gh` read and return stdout stripped."""
-    proc = subprocess.run([GH, *args], capture_output=True, text=True)
-    if proc.returncode != 0:
-        raise GhError(f"{GH} {' '.join(args)} failed: {proc.stderr.strip()}")
-    return proc.stdout.strip()
-
-
 # --- the plan ---------------------------------------------------------------
 
 
@@ -262,8 +166,8 @@ def build_plan(args, tracker):
     # --- 4. the PR is merged, or nothing else happens.
     pr = tracker.pull_request(args.pr)
     pr_state = (pr.get("state") or "unknown").upper()
-    merge_commit = (pr.get("mergeCommit") or {}).get("oid") or ""
-    read_pr = f"{GH} pr view {args.pr} --json state,mergeCommit"
+    merge_commit = pr.get("merge_commit") or ""
+    read_pr = " ".join(tracker.pr_read_argv(args.pr))
     if pr_state == "MERGED":
         steps.append(
             step(
@@ -430,13 +334,8 @@ def tracker_parts(args, tracker):
     labels = issue.get("labels") or []
     closed = (issue.get("state") or "").upper() == "CLOSED"
 
-    flags = []
-    for name in args.remove_label:
-        flags += ["--remove-label", name]
-    for name in args.add_label:
-        flags += ["--add-label", name]
-    label_argv = [GH, "issue", "edit", str(args.issue), *flags]
-    if not flags:
+    label_argv = tracker.label_argv(args.issue, args.remove_label, args.add_label)
+    if not (args.remove_label or args.add_label):
         label = part("label", label_argv, STATUS_SKIPPED, "there is no label to move")
     elif not any(name in labels for name in args.remove_label) and all(
         name in labels for name in args.add_label
@@ -450,7 +349,7 @@ def tracker_parts(args, tracker):
             f"the item carries {', '.join(labels) or 'no work-state label'}",
         )
 
-    close_argv = [GH, "issue", "close", str(args.issue)]
+    close_argv = tracker.close_argv(args.issue)
     close = part(
         "close",
         close_argv,
@@ -476,27 +375,17 @@ def card_part(args, tracker):
             f"there is no board write, because {', '.join(missing)} is absent. A repo "
             f"with no board runs on labels alone",
         )
-    item = tracker.board_item(args.issue, args.project_number, args.project_owner)
-    if not item:
+    card = tracker.board_card(args.issue, args.project_number, args.project_owner)
+    if not card:
         return part(
             "card",
             [],
             STATUS_SKIPPED,
             f"issue #{args.issue} has no card on project {args.project_number}",
         )
-    argv = [
-        GH,
-        "project",
-        "item-edit",
-        "--id",
-        item,
-        "--project-id",
-        args.project_id,
-        "--field-id",
-        args.status_field_id,
-        "--single-select-option-id",
-        args.done_option_id,
-    ]
+    argv = tracker.card_argv(
+        card, args.project_id, args.status_field_id, args.done_option_id
+    )
     return part(
         "card",
         argv,
@@ -552,7 +441,7 @@ def execute(plan, tracker):
             continue
         try:
             plan["ran"] += run_step(entry, tracker)
-        except (GitError, GhError, TeardownError) as exc:
+        except (GitError, TrackerError, TeardownError) as exc:
             entry["status"] = STATUS_FAILED
             plan["error"] = str(exc)
             plan["exit_code"] = EXIT_ERROR
@@ -593,7 +482,7 @@ def run_step(entry, tracker):
                 f"the teardown command failed: {proc.stderr.strip() or proc.stdout.strip()}"
             )
         return [entry["command"]]
-    raise GhError(f"step {entry['step']} has no runner")
+    raise TrackerError(f"step {entry['step']} has no runner")
 
 
 # --- CLI --------------------------------------------------------------------
@@ -680,15 +569,16 @@ def main(argv=None):
     parser.add_argument(
         "--gh-fixture",
         help="JSON that stands in for the tracker reads, so a plan needs no network "
-        "(used by the tests)",
+        "(used by the tests). The format is the one scripts/tracker.py documents, and "
+        "scripts/worker_state.py reads the same one",
     )
     parser.add_argument("--indent", type=int, default=2)
     args = parser.parse_args(argv)
 
-    tracker = Tracker(args.gh_fixture)
+    tracker = Tracker(fixture=args.gh_fixture)
     try:
         plan = build(args, tracker)
-    except (GitError, GhError) as exc:
+    except (GitError, TrackerError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return EXIT_ERROR
 

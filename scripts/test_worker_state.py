@@ -30,6 +30,7 @@ stall window.
     python3 -m unittest discover -s scripts -t . -q     # fallback, no pytest
 """
 
+import ast
 import json
 import os
 import re
@@ -1598,6 +1599,23 @@ class WorkerStateTestCase(unittest.TestCase):
             "no-such-agent-process",
             self.ready(pattern="no-such-agent-process", expect=EXIT_NOT_READY),
         )
+
+    def test_the_seam_names_no_tracker_cli(self):
+        """Every tracker command comes from the adapter, so this seam writes no CLI
+        name. `--tracker-cli` carries the name in its argv, and its two values are
+        the adapter's own constants, so neither one is a literal in this file."""
+        source = (REPO_ROOT / "scripts" / "worker_state.py").read_text()
+        literals = [
+            node.value
+            for node in ast.walk(ast.parse(source))
+            if isinstance(node, ast.Constant) and isinstance(node.value, str)
+        ]
+        for cli in ("gh", "glab"):
+            self.assertNotIn(cli, literals, f"{cli!r} is a literal in the seam")
+
+        # And the flag still takes both of them, which is the argv this seam keeps.
+        help_text = " ".join(self.run_seam("phase", "--help", lines=400).split())
+        self.assertIn("--tracker-cli {gh,glab}", help_text)
 
     def test_the_seam_names_no_tool(self):
         """The send command is a template the spawn resolves from the tool file's

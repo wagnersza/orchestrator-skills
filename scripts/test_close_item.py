@@ -18,6 +18,7 @@ assertion in the file is that the marker is absent — see
     python3 -m unittest discover -s scripts -t . -q     # fallback, no pytest
 """
 
+import ast
 import json
 import os
 import subprocess
@@ -143,19 +144,23 @@ class CloseItemTestCase(unittest.TestCase):
         labels=(REVIEW_LABEL,),
         card="PVTI_fixture",
     ):
-        """Stand in for the three tracker reads: the PR, the issue, the card."""
+        """Stand in for the three tracker reads: the PR, the issue, the card.
+
+        One record for this item and one for its PR, in the one format
+        `scripts/tracker.py` documents. `scripts/worker_state.py` reads the same one.
+        """
         self.fixture = self.root / "gh.json"
+        item = {"state": issue_state, "labels": list(labels)}
+        if card:
+            item["card"] = card
         data = {
+            "items": {str(ISSUE): item},
             "pull_requests": {
                 str(PR): {
                     "state": pr_state,
-                    "mergeCommit": {"oid": self.merge_commit}
-                    if pr_state == "MERGED"
-                    else None,
+                    "merge_commit": self.merge_commit if pr_state == "MERGED" else "",
                 }
             },
-            "issues": {str(ISSUE): {"state": issue_state, "labels": list(labels)}},
-            "project_items": {str(ISSUE): card} if card else {},
         }
         self.fixture.write_text(json.dumps(data))
         self.writes = self.root / "gh.json.writes"
@@ -588,11 +593,18 @@ class CloseItemTestCase(unittest.TestCase):
         for coordinate in ("PVT_kwHO", "PVTSSF_lAHO", "issue-tracker"):
             self.assertNotIn(coordinate, source, f"{coordinate!r} is in the seam")
 
-    def test_gh_is_hardcoded_with_its_ceiling_named(self):
-        """The GitHub-only assumption is visible to whoever first needs GitLab."""
+    def test_the_seam_names_no_tracker_cli(self):
+        """Every tracker command comes from the adapter, so this seam writes no CLI
+        name. `--gh-fixture` keeps its own name, and that flag string is not a CLI
+        name, so it is not a hit."""
         source = (REPO_ROOT / "scripts" / "close_item.py").read_text()
-        self.assertIn("ponytail:", source)
-        self.assertIn("GitLab", source)
+        literals = [
+            node.value
+            for node in ast.walk(ast.parse(source))
+            if isinstance(node, ast.Constant) and isinstance(node.value, str)
+        ]
+        for cli in ("gh", "glab"):
+            self.assertNotIn(cli, literals, f"{cli!r} is a literal in the seam")
 
 
 if __name__ == "__main__":
