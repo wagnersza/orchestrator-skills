@@ -1127,6 +1127,7 @@ before you touch anything:
 | "merge and close 20", "merge 20 and close it" | yes |
 | "close 20" | yes |
 | "wrap up 20" | yes |
+| the `to-merge` label, or a card in the `To merge` column | yes |
 | "flip 20 to review", "advance 20" | no |
 | ambiguous, or not said | ask first |
 
@@ -1135,6 +1136,12 @@ maintainer requested in the same turn. A **no** row is an advance and not a clos
 swap the label to the review state, move the card to `In review`
 ([Board status](#board-status)), and stop there. On the **ask first** row, ask in one
 line and wait.
+
+**The `to-merge` row is an ask too, recorded on the item instead of typed.** A maintainer
+who writes that label, or drags that card, decided for that one item after they read it.
+So a close inside a **Merge train** carries the same authority as a typed one
+([Merge the queue](#merge-the-queue),
+[`docs/adr/0037-the-merge-queue-is-an-ordered-train.md`](docs/adr/0037-the-merge-queue-is-an-ordered-train.md)).
 
 Then **find the worktree** (op 8) — display name = branch = slug. Keep its id and
 its path. If nothing matches, the item is probably closed already. Do the label steps
@@ -1404,6 +1411,11 @@ refusal reason are spelled out, never compressed.
   explicit "merge and close" **is** that confirmation, so a second ask is friction
   rather than safety (the table in [Close a task](#close-a-task)). The data-loss case
   is a dirty tree, and step 6 of the transaction refuses it rather than warning.
+- **The `to-merge` label is the standing authorisation, so a Merge train asks no second
+  time.** The maintainer writes it per item, on an item they read, so it authorises one
+  transaction and never a whole session. Each close inside a train then runs all eight
+  steps, teardown included ([Merge the queue](#merge-the-queue),
+  [`docs/adr/0037-the-merge-queue-is-an-ordered-train.md`](docs/adr/0037-the-merge-queue-is-an-ordered-train.md)).
 - **A second stall is one of the ambiguous cases, so it asks. So is a `dead` worker.** The
   maintainer said nothing about a teardown in either case, and a tick cannot read intent in
   an uncommitted diff. The re-prompt on the first stall stays unconfirmed, because it
