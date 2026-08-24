@@ -273,6 +273,16 @@ The orchestrator reads work-state labels and the tracker CLI from
 `/setup-matt-pocock-skills` to create it before continuing — do not define labels
 in the orchestrator config. If present, note the tracker + labels and move on.
 
+**Then point that file at the verified reads.** Append one line to
+`docs/agents/issue-tracker.md` that names
+[`references/tracker-reads.md`](../orchestrator/references/tracker-reads.md) as the home
+of every read the flows make, with the command for `gh` and the command for `glab`.
+**Write no read command into the per-project file.** That file holds per-repo data: the
+CLI name, the host, the label vocabulary and the board coordinates. A read command is
+the same for every repo, so a copy in each one drifts from the maintained version
+([ADR 0039](../orchestrator/docs/adr/0039-a-tracker-read-has-a-verified-command-in-the-skill.md)).
+On a re-run (step 0d), leave an existing pointer alone.
+
 ### 2a. Detect a project board and resolve its ids
 
 The orchestrator writes a card's `Status` at every label transition, deriving it from
