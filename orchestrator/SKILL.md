@@ -680,10 +680,15 @@ python3 <plugin root>/scripts/worker_state.py wake --item <N> \
   --back-off <duration> --repo <owner>/<name> \
   --marker-dir <the implementation worktree from op 2>/.orchestrator \
   --tracker-cli <gh or glab> --tracker-host <host> \
+  --board-project <number> --board-owner <owner> --board-option <name> \
   --require-gate '<one per required layer, from config's gates: block>' \
   --handle <this session's terminal handle, from op 9> --title orchestrator \
   --send-command '<op 4, with {target} where the terminal goes and {text} where the line goes>'
 ```
+
+**Where the tracker config has no `## Project board` section, the spawn passes none of the
+three board flags.** That is a supported configuration, and the label path still fires
+`merge-requested` there.
 
 **`<plugin root>` is a literal path in this string, and never a shell variable.** The
 **Tool** stores the precheck and runs it a minute later, in a shell that saw no
@@ -713,6 +718,7 @@ names no harness, no tracker and no tool. So the spawn is the one place they are
 | the marker directory | the item's implementation worktree (op 2), plus `/.orchestrator` | where a back-off marker lives, and what it outlives |
 | the tracker CLI | `docs/agents/issue-tracker.md` | which command reads the labels and the comments, and which posts the wake comment |
 | the tracker host | `docs/agents/issue-tracker.md`, where the tracker is self-hosted | which server those reads go to |
+| the board project, owner and Status option | the [`## Project board`](../docs/agents/issue-tracker.md#project-board) section of `docs/agents/issue-tracker.md` | whether `merge-requested` can fire from a dragged card, not only from the `to-merge` label |
 | this session's handle and title | op 9, against this session's own worktree | where the wake is delivered, `--handle` first and `--title` second |
 | the send command | the tool file's operation 4 | how the tick delivers one line to a terminal |
 
