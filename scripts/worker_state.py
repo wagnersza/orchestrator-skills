@@ -31,8 +31,8 @@ an **Item automation** runs as its `--precheck`, so it blocks on nothing:
 
 **The code is the predicate and the line is the diagnosis.** Zero means a
 transition is due, whichever one it is, so a caller reads one bit. The line names
-one of nine outcomes, and the item's own `phase:*` label decides which of them a
-tick can reach:
+one outcome from the table that follows, and the item's own `phase:*` label decides
+which of them a tick can reach:
 
 | Outcome | Reachable in | The fact that fires it |
 |---|---|---|
@@ -42,13 +42,36 @@ tick can reach:
 | `verdict-approve` | `phase:review` | the newest `Verdict:` comment reads `approve` |
 | `verdict-request-changes` | `phase:review` | the newest one reads `request-changes`, inside the round bound |
 | `rounds-exhausted` | `phase:review` | `--rounds` `Verdict:` comments, and the newest one asks for changes |
+| `merge-requested` | no `phase:*` label | the item carries the `to-merge` label, or its card sits in the board column `--board-option` names |
 | `dead` | every phase | no live agent process with its working directory inside the worktree |
 | `stalled` | `phase:impl`, `phase:e2e` | a live process, and work product older than `--stall-after` |
 | `unreadable` | before the phase is read | the tracker read failed, so no fact is available |
 
 A **Review round** count is the number of `Verdict:` comments on the work item. So
-nothing stores a counter, and `--rounds` is the whole bound. A work item with no
-`phase:*` label is in human review, where nothing is due.
+nothing stores a counter, and `--rounds` is the whole bound.
+
+A work item with no `phase:*` label is in human review. One transition is due there,
+`merge-requested`, and every other read of that branch is a quiet tick. Either entry
+to a **Merge queue** fires it: the `to-merge` label, or the item's card in the board
+column that means a maintainer approved the merge (ADR 0037, ADR 0038).
+
+**The label is read first and the board second.** The label arrives with the tracker
+read this tick already made, so it costs nothing. It is also the authoritative fact,
+once a session writes it. The board read is a second command that can fail, so it
+runs only where the label answers nothing. This order keeps the tick after a
+promotion as cheap as the one before it.
+
+**Three flags carry the board read**, because this seam parses no configuration file:
+`--board-project`, `--board-owner` and `--board-option`. Where any of the three is
+absent, this seam skips the board read and raises no error, so the label stays the
+only entry. A repo with no board is a supported configuration, which is the rule the
+whole board layer already follows. A project board is one tracker's own surface, so
+the board read builds its own argv and `--tracker-cli` does not reach it.
+
+**A board read that fails is not `unreadable`.** That outcome means no fact is
+available, and here the labels were read. So a failed board read falls back to the
+label, the tick stays quiet, and the cause rides the printed line. The item stays
+where it already was, and the next tick reads the board again a minute later.
 
 `unreadable` is the one outcome no `phase:*` label gates, because a read that
 failed cannot say which phase the item is in. It is an outcome and not a silence:
@@ -188,7 +211,7 @@ EXIT_USAGE = 64
 EXIT_NOT_READY = 1
 
 # `phase` answers one bit too, because a `--precheck` reads one bit (ADR 0022).
-# Zero means a transition is due, whichever of the nine outcomes fired, and the
+# Zero means a transition is due, whichever outcome fired, and the
 # printed line is what names it. Every quiet outcome shares code 1, so a tick that
 # has nothing to do records as a skipped automation run. A worktree that is gone
 # keeps code 3 here as well.
@@ -653,6 +676,120 @@ def newest_work_product(worktree, item, current):
     return max(facts)
 
 
+# --- the Merge queue (ADR 0037, ADR 0038) -----------------------------------
+
+# The **Work-state label** that says a human read the item and approved the merge. It
+# is one of the two entries to a **Merge queue**, and the only one a repo with no board
+# has. Its string and its swap rule are owned by `docs/agents/issue-tracker.md`, the
+# same as every other label this seam reads.
+TO_MERGE = "to-merge"
+
+# How many cards one board read asks for. The number is part of the recipe in
+# `docs/agents/issue-tracker.md`, so it is not a bound this seam chose.
+BOARD_LIMIT = 100
+
+
+def board_argv(project, owner):
+    """The argv of the one board read, which is the recipe in the tracker file.
+
+    That file holds it as this call plus a `jq` filter on the status name. The filter
+    is the walk in `board_status` instead, because this seam asks about one card and
+    not about the whole column.
+
+    A project board is one tracker's own surface, so this builder names that CLI and
+    `--tracker-cli` does not reach it. A repo on the other tracker has no such board,
+    so it passes no board flag and this read never runs there.
+    """
+    return [
+        GH,
+        "project",
+        "item-list",
+        str(project),
+        "--owner",
+        owner,
+        "--format",
+        "json",
+        "--limit",
+        str(BOARD_LIMIT),
+    ]
+
+
+def board_status(item, project, owner, fixture=None):
+    """The `Status` option name on this work item's card, or an empty string.
+
+    An empty string covers two facts: an item with no card, and a card with no status.
+    Neither one is the column that fires `merge-requested`. A read that fails raises
+    `TrackerError`, and the caller falls back to the label.
+
+    The fixture file (`--gh-fixture`) stands in for this read the same way it stands in
+    for the tracker read, under a third key. So a test fires the board path with no
+    network and no login:
+
+        {"board": {"54": "To merge"}}
+
+    An item that is absent from that key reads as an item with no card, and a key that
+    is absent reads the same way.
+    """
+    if fixture:
+        data = json.loads(Path(fixture).read_text())
+        return str((data.get("board") or {}).get(str(item)) or "")
+    data = json.loads(tracker_read(board_argv(project, owner)) or "{}")
+    for entry in data.get("items") or []:
+        if (entry.get("content") or {}).get("number") == item:
+            return str(entry.get("status") or "")
+    return ""
+
+
+def merge_requested(item, labels, project=0, owner="", option="", fixture=None):
+    """`(outcome, detail)` where this item asks to be merged, or `(None, detail)`.
+
+    The one transition due in human review, and the branch that read as a quiet tick
+    before this outcome existed. Either entry to a **Merge queue** fires it, and the
+    order between the two is the contract:
+
+    1. **the `to-merge` label**, which the caller already read this tick, and which is
+       the authoritative fact once a session writes it.
+    2. **the board column**, read through the three `--board-*` flags. It runs only
+       where the label answers nothing, because it is a command that can fail.
+
+    So a repo with no board still reaches the outcome. The tick after a promotion costs
+    no more than the one before it (ADR 0037, ADR 0038).
+
+    A board read that fails returns `(None, detail)` and never `unreadable`: the labels
+    were read, so a fact is available and the item stays where it already was. The
+    cause rides the quiet line, because a board that answers nothing for an hour must
+    not read as sixty quiet minutes.
+    """
+    if TO_MERGE in labels:
+        return "merge-requested", (
+            f"work item #{item} carries the {TO_MERGE} label, so a human read the item "
+            f"and approved the merge"
+        )
+    quiet = f"work item #{item} wears no phase:* label and no {TO_MERGE} label"
+    if not (project and owner and option):
+        return None, f"{quiet}, so it is in human review and no transition is due"
+    try:
+        status = board_status(item, project, owner, fixture)
+    except (TrackerError, OSError, json.JSONDecodeError) as exc:
+        # A tick prints one line, and the standard error of a failed command can hold
+        # many, so the cause collapses to one.
+        cause = " ".join(str(exc).split())
+        return None, (
+            f"{quiet}, and the board read failed, so the label was the only fact this "
+            f"tick: {cause}"
+        )
+    if status == option:
+        return "merge-requested", (
+            f"the card for work item #{item} sits in the {option!r} column of project "
+            f"{project}, and the {TO_MERGE} label is not written yet"
+        )
+    where = repr(status) if status else "no column"
+    return None, (
+        f"{quiet}, and its card is in {where} rather than {option!r}, so no transition "
+        f"is due"
+    )
+
+
 # --- the phase predicate (ADR 0022) -----------------------------------------
 
 # The **Phase** label family. Its strings, their swap rule and their
@@ -803,6 +940,9 @@ def phase(
     tracker_cli=GH,
     tracker_host="",
     required=(),
+    board_project=0,
+    board_owner="",
+    board_option="",
 ):
     """The `phase` answer: `(exit code, the one line to print)`.
 
@@ -810,7 +950,9 @@ def phase(
     reported as a stall. A tracker read that fails comes next, and it is the
     `unreadable` outcome. No phase label gates that outcome, because a read that
     failed cannot say which phase the item is in. The **Phase** label follows,
-    because it decides which of the other outcomes this tick can reach.
+    because it decides which of the other outcomes this tick can reach. An item
+    that wears none of those labels is in human review, where `merge_requested` is
+    the one transition that can be due.
     """
     worktree = Path(os.path.realpath(worktree))
     if not worktree.is_dir():
@@ -841,10 +983,12 @@ def phase(
 
     current = phase_of(labels)
     if not current:
-        return EXIT_NOTHING, (
-            f"nothing: work item #{item} wears no phase:* label, so it is in human "
-            f"review and no transition is due"
+        outcome, detail = merge_requested(
+            item, labels, board_project, board_owner, board_option, fixture
         )
+        if not outcome:
+            return EXIT_NOTHING, f"nothing: {detail}"
+        return fire(outcome, detail)
 
     outcome, detail = transition(
         item, worktree, current, bodies, rounds, pattern, stall_after, required
@@ -956,13 +1100,16 @@ def wake(
     tracker_cli=GH,
     tracker_host="",
     required=(),
+    board_project=0,
+    board_owner="",
+    board_option="",
     handle="",
     title="",
     send_command="",
 ):
     """The `wake` answer: `(exit code, the lines to print)`.
 
-    The whole body of a tick. It asks `phase()`: the same predicate, the same nine
+    The whole body of a tick. It asks `phase()`: the same predicate, the same
     outcomes, the same order and the same `--back-off` window. Where a transition is
     due it delivers that line itself. Where nothing is due it delivers nothing, and it
     answers exactly what the predicate answered. No path exits 0, so no agent runs on
@@ -981,6 +1128,9 @@ def wake(
         tracker_cli,
         tracker_host,
         required,
+        board_project,
+        board_owner,
+        board_option,
     )
     if code != EXIT_DUE:
         return code, [line]
@@ -1062,6 +1212,32 @@ def add_tick_arguments(parser):
         "to the CLI's own default server",
     )
     parser.add_argument(
+        "--board-project",
+        default=0,
+        type=int,
+        metavar="NUMBER",
+        help="the number of the project board, which the caller resolves from the "
+        "board section of docs/agents/issue-tracker.md. It is one of the three flags "
+        "the merge-requested board read needs. With any of the three absent, that read "
+        "is skipped, and the to-merge label stays the only entry",
+    )
+    parser.add_argument(
+        "--board-owner",
+        default="",
+        metavar="OWNER",
+        help="who the project board belongs to, from the same section. A repo with no "
+        "board section passes no board flag at all, and that is a supported "
+        "configuration",
+    )
+    parser.add_argument(
+        "--board-option",
+        default="",
+        metavar="NAME",
+        help="the Status option that means a human approved the merge, which is the "
+        "column that a maintainer drags a reviewed card to. The caller resolves the "
+        "name from the same section, so this seam holds none of its own",
+    )
+    parser.add_argument(
         "--back-off",
         metavar="DURATION",
         help="how long one outcome stays suppressed after it fires, so an "
@@ -1138,16 +1314,16 @@ def main(argv=None):
         "nothing to do",
         description=(
             "The predicate an Item automation runs as its --precheck. Exit 0 means a "
-            "transition is due, and the printed line names which one. There are "
-            "nine: implementation-complete, proof-complete, gates-unproven, "
-            "verdict-approve, verdict-request-changes, rounds-exhausted, dead, "
-            "stalled, unreadable. "
+            "transition is due, and the printed line names which one: "
+            "implementation-complete, proof-complete, gates-unproven, "
+            "verdict-approve, verdict-request-changes, rounds-exhausted, "
+            "merge-requested, dead, stalled, unreadable. "
             "Exit 1 means nothing to do, so the run records as skipped at no token "
             "cost. Exit 3 means the worktree is gone. The item's own phase:* label "
             "decides which outcomes a tick can reach. An item with no phase:* label "
-            "is in human review, where nothing is due. The one outcome no label "
-            "gates is unreadable, because a read that failed cannot say which phase "
-            "the item is in."
+            "is in human review, where merge-requested is the one transition that can "
+            "be due. The one outcome no label gates is unreadable, because a read that "
+            "failed cannot say which phase the item is in."
         ),
     )
     add_tick_arguments(tick)
@@ -1233,6 +1409,9 @@ def main(argv=None):
             args.tracker_cli,
             args.tracker_host,
             required,
+            args.board_project,
+            args.board_owner,
+            args.board_option,
         )
         print(line)
         return code
@@ -1261,6 +1440,9 @@ def main(argv=None):
         args.tracker_cli,
         args.tracker_host,
         required,
+        args.board_project,
+        args.board_owner,
+        args.board_option,
         args.handle,
         args.title,
         args.send_command,
