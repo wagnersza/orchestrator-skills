@@ -74,7 +74,7 @@ read, and the board reconcile runs on the same answer. Where the flows need it:
 **"What next?"**, **"Work a #N"**, and **Board status**.
 
 **A blocker that is absent from this answer is closed**, because the read holds every
-open item. That is the ready predicate, with no second read
+open item up to the page cap. That is the ready predicate, with no second read
 ([`../CONTEXT.md`](../CONTEXT.md), **Ready queue**).
 
 ```bash
