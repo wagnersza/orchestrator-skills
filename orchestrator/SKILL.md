@@ -1366,8 +1366,8 @@ it. Shape output for acting on, not for completeness:
   user to remember any of the three.
 - **A wake report names the outcome and the transition that ran.** The outcome is the
   tick's own word: `implementation-complete`, `proof-complete`, `gates-unproven`,
-  `verdict-approve`, `verdict-request-changes`, `rounds-exhausted`, `dead`, `stalled` or
-  `unreadable`. Then
+  `verdict-approve`, `verdict-request-changes`, `rounds-exhausted`, `merge-requested`,
+  `dead`, `stalled` or `unreadable`. Then
   the phase label you wrote, then what you did. `#38 implementation-complete · phase:impl →
   phase:review. Reviewer spawned, gpt-5.6-terra @ high.` **Where the wake ended the phase
   axis, name the label pair you wrote.** That one call is the hand-off to a human:
@@ -1398,6 +1398,11 @@ it. Shape output for acting on, not for completeness:
   seam emitted ([Close a task](#close-a-task)), and ends with the one action left.
   `#20 closed: steps 1 to 7 ran, teardown refused. Cause: the worktree holds
   src/api.ts. Commit it or stash it, then say "close 20" again.`
+- **A train report names the order it ran**, what merged, what parked and why, and it ends
+  with the one action left. That is the close-report shape, once per train instead of once
+  per item ([Merge the queue](#merge-the-queue)). **A parked item is that action**, and it
+  carries the conflicting paths. `#152 #153 merged, in that order. #151 parked:
+  orchestrator/SKILL.md conflicts. Resolve it in 151-merge-train, then say "close 151".`
 - **Matter-of-fact failures.** Location, cause, fix — no "uh oh", no apology.
   `#38 idle with checklist 4/7 (evidence unchecked). Cause: port 3038 in use.
   Re-prompting with the remaining steps.`
