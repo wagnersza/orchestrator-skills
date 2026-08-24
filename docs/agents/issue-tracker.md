@@ -2,6 +2,12 @@
 
 Issues and PRDs for this repo live as GitHub issues. Use the `gh` CLI for all operations.
 
+**The reads the orchestrator flows make live in
+[`orchestrator/references/tracker-reads.md`](../../orchestrator/references/tracker-reads.md)**,
+with the command for `gh` and the command for `glab`. That file also holds the rule that
+an exit code is checked before a parse. The conventions in this file stay the generic
+surface every skill uses, and a flow read gets no second copy here.
+
 ## Conventions
 
 - **Create an issue**: `gh issue create --title "..." --body "..."`. Use a heredoc for multi-line bodies.
