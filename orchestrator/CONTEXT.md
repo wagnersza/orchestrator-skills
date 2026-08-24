@@ -205,8 +205,12 @@ Where a routed skill runs. Two values, and a **Skill routing** row carries exact
 _Avoid_: mode, channel, side, track, local/remote (none of them says where the skill runs).
 
 **Tracker**:
-Where work items live (GitHub / GitLab / local markdown). The orchestrator does not own a tracker abstraction — it reuses the mattpocock engineering skills' config, written to `docs/agents/issue-tracker.md` by `/setup-matt-pocock-skills`.
+Where work items live (GitHub / GitLab / local markdown). The orchestrator does not own a tracker abstraction — it reuses the mattpocock engineering skills' config, written to `docs/agents/issue-tracker.md` by `/setup-matt-pocock-skills`. The two Python seams do own a **Tracker adapter**, which is a different thing: it holds the commands, and it reads none of that configuration.
 _Avoid_: issue tracker, board (when the layer is meant).
+
+**Tracker adapter**:
+`scripts/tracker.py` — the one module that holds every tracker command the two Python seams run or print. One class, and a tracker is four values on it: the CLI name, the host, the repository and the fixture. Where two trackers disagree about a command, the branch is inside the one method that differs. So a new tracker lands here and in no seam. The commands are the verified ones `references/tracker-reads.md` holds as prose, and a read is checked before it is parsed in both places. It receives every per-repo value as an argument and reads no configuration file, which is what keeps it separate from the **Tracker** entry above. One fixture format serves every test under `scripts/`: one record per **Work item**, and one per pull request. Rationale, and the deferral it reverses: `docs/adr/0040-the-tracker-is-one-adapter-behind-both-seams.md`.
+_Avoid_: tracker client, tracker wrapper, tracker layer (each one suggests a stack this deliberately is not), CLI abstraction.
 
 **Work item**:
 One tracked unit of work (a ticket / issue) a worker implements. Carries `## Blocked by` and `## Parent` edges per the `to-tickets` template.
