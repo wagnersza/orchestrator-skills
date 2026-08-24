@@ -651,7 +651,7 @@ Definitions: the **Item automation** and **Phase** entries in
 [`CONTEXT.md`](CONTEXT.md). Rationale:
 [`docs/adr/0022-item-automation-replaces-the-blocking-watch.md`](docs/adr/0022-item-automation-replaces-the-blocking-watch.md).
 
-**The precheck is the whole tick.** `wake` asks the same predicate as `phase`. The nine
+**The precheck is the whole tick.** `wake` asks the same predicate as `phase`. The
 outcomes, their order and the back-off window are unchanged. On a due transition it
 delivers the printed line itself. **No path through it exits 0**, so every run records as
 skipped, no model loads and no agent runs on a tick. That command goes into op 11's
@@ -790,7 +790,7 @@ are the whole of monitoring on a tool with no automation surface.
 ## On the wake — one response per outcome
 
 A tick wakes this session with the one line its precheck printed, and that line names one
-of nine outcomes. **The response is a lookup, not an interpretation.** Read the outcome,
+of its outcomes. **The response is a lookup, not an interpretation.** Read the outcome,
 run its row, and report per [Reporting to the user](#reporting-to-the-user).
 
 **Write the `phase:*` label as the first act of every transition.** That write is what
@@ -821,9 +821,9 @@ none of them** — its last act is the review note. Rationale:
 | `unreadable` | nothing, because a read that failed cannot say which phase the item is in | Report in one line: the tracker read is broken, and the item is unobserved until that read works again |
 
 **The item's phase is what makes the response a lookup.** The seam reads that label to
-decide which of the eight gated outcomes a tick can reach. So `implementation-complete` and
-`verdict-approve` can never arrive for one item on the same minute. `unreadable` is the
-ninth, and no label gates it: the read that failed is the read that carries the label.
+decide which of the gated outcomes a tick can reach. So `implementation-complete` and
+`verdict-approve` can never arrive for one item on the same minute. `unreadable` is the one
+outcome no label gates: the read that failed is the read that carries the label.
 The on-demand door (`review #N adversarially`) is unchanged, and it writes `phase:review`
 itself.
 
