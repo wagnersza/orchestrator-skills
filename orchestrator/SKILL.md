@@ -38,6 +38,21 @@ Work-state labels and the tracker CLI come from `docs/agents/issue-tracker.md`
 file is missing, run `/setup-matt-pocock-skills` first. That file also owns the
 **project board** coordinates — see [Board status](#board-status).
 
+**The reads every flow makes come from
+[`references/tracker-reads.md`](references/tracker-reads.md).** That file holds one read
+per section, with the command for `gh` and the command for `glab`. So no flow step and
+no session invents a flag. Read the row you need at the moment you need it, never from
+memory.
+
+**Check a tracker read before you parse it.** The exit code is the check, and that file
+holds the one shape for it. A tracker CLI that fails writes prose rather than JSON, so
+an unchecked parse reports the parser and never the cause. Where a read fails, **report
+it in one line: the command that ran, and the tracker's own first line.** Then stop.
+Spawn nothing, write no label and move no card. That is the same answer a tick gives
+with its `unreadable` outcome
+([On the wake](#on-the-wake--one-response-per-outcome)). Rationale:
+[`docs/adr/0039-a-tracker-read-has-a-verified-command-in-the-skill.md`](docs/adr/0039-a-tracker-read-has-a-verified-command-in-the-skill.md).
+
 **Preflight the config's dependencies.** Before the first spawn of a session,
 confirm the tool binary, the harness binary (and the review harness if
 `review.enabled`), and the tracker CLI are present — `command -v <bin>` — plus the
@@ -1240,8 +1255,11 @@ exactly the one that must keep its observer.
 
 **Parent-close stays yours.** The seam closes one item. Where the tracker conventions
 define a parent close, apply it after the seam exits clean. That is the last child
-closed → close the parent, and the parent's card → `Done`. Then report per
-[Reporting to the user](#reporting-to-the-user).
+closed → close the parent, and the parent's card → `Done`. **The read is *Every child of
+a parent work item, closed children included***
+([`references/tracker-reads.md`](references/tracker-reads.md#every-child-of-a-parent-work-item-closed-children-included)).
+An open-item list cannot answer this step, because the child that closed last is not in
+it. Then report per [Reporting to the user](#reporting-to-the-user).
 
 ### The layer 5 story gate
 
