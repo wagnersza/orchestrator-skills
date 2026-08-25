@@ -205,4 +205,6 @@ reason it is needed, a check command and an install command. A row that names a 
 [`../../scripts/test_quality_gates.py`](../../scripts/test_quality_gates.py). So no
 column here can promise a tool the repo has no install path for.
 
-The Terraform and Kubernetes columns are each a work item of their own.
+The Kubernetes column is a work item of its own, and **the Terraform column lives in
+[`quality-gates-infra.md`](quality-gates-infra.md)**, because an infra Gate reads a plan
+and not code.

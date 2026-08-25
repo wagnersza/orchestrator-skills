@@ -1,15 +1,19 @@
 #!/usr/bin/env python3
 """Behaviour tests for the gate contract. Two halves, one question each.
 
-The first half reads the gate matrix: two reference files in, the list of tools the
+The first half reads the gate matrices: three reference files in, the list of tools a
 matrix promises and the requirements file does not declare out.
 
 A matrix row that names a tool with no install path is a rule with no home. A worker
 reads the row, runs the tool, and finds nothing on the machine. So the walk reads the
 `Tool` column of every gate matrix in
-`orchestrator/references/quality-gates.md`, then reads every dependency name
+`orchestrator/references/quality-gates.md` and in
+`orchestrator/references/quality-gates-infra.md`, then reads every dependency name
 `orchestrator/references/requirements.md` declares, and reports each tool that is
-absent from the second file.
+absent from the requirements file.
+
+The application matrix and the infra matrix are two files under one rule. So the walk
+runs over both, and each message names the file that holds the row.
 
 A gate matrix is a table with a `Gate` column and a `Tool` column. The layer table in
 the same file has neither, so `make quick` is a command and never a tool. That
@@ -47,8 +51,14 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 MATRIX = REPO_ROOT / "orchestrator" / "references" / "quality-gates.md"
+MATRIX_INFRA = REPO_ROOT / "orchestrator" / "references" / "quality-gates-infra.md"
 REQUIREMENTS = REPO_ROOT / "orchestrator" / "references" / "requirements.md"
 TEMPLATE = REPO_ROOT / "orchestrator-setup" / "orchestrator.template.md"
+
+# Every file that holds a gate matrix. An application Gate reads code and an infra Gate
+# reads a plan, so the two matrices live in two files. The tool rule is one rule, so a
+# later column joins this tuple and needs no other edit here.
+MATRICES = (MATRIX, MATRIX_INFRA)
 
 # What the `gates:` block owes, one tuple per mapping.
 GATES_KEYS = (
@@ -408,20 +418,42 @@ class GateMatrixTestCase(unittest.TestCase):
         self.assertEqual(self.reported(), [])
         self.assertEqual(list(matrix_tools(self.LAYER_TABLE)), [])
 
+    def test_the_message_names_the_matrix_file_that_holds_the_row(self):
+        """Two matrix files under one rule, so the message names the file it read. A
+        maintainer then knows which matrix to correct."""
+        infra = self.write(
+            "quality-gates-infra.md",
+            "| Gate | Hard threshold | Layer | Tool |\n"
+            "|---|---|---|---|\n"
+            "| plan diff | exit code 0 | 3 | `nosuchtool` |\n",
+        )
+
+        reported = undeclared(infra, self.requirements)
+
+        self.assertEqual(len(reported), 1, reported)
+        self.assertIn("quality-gates-infra.md:3", reported[0])
+        self.assertIn("nosuchtool", reported[0])
+
     # --- the real files -----------------------------------------------------
 
-    def test_the_real_matrix_names_more_than_a_few_tools(self):
+    def test_every_real_matrix_names_more_than_a_few_tools(self):
         """The guard against a quiet pass. A walk that finds no row reports no
         failure, so the test below would pass against an empty file."""
-        tools = {tool for _, tool in matrix_tools(MATRIX.read_text(encoding="utf-8"))}
+        for path in MATRICES:
+            with self.subTest(matrix=path.name):
+                tools = {
+                    tool for _, tool in matrix_tools(path.read_text(encoding="utf-8"))
+                }
 
-        self.assertGreaterEqual(len(tools), 5, sorted(tools))
-        self.assertNotIn("make", tools)
+                self.assertGreaterEqual(len(tools), 5, sorted(tools))
+                self.assertNotIn("make", tools)
 
-    def test_every_tool_in_the_real_matrix_has_a_requirements_row(self):
-        """The whole point. The message names each tool the matrix promises and the
-        requirements file does not declare."""
-        reported = undeclared(MATRIX, REQUIREMENTS)
+    def test_every_tool_in_every_real_matrix_has_a_requirements_row(self):
+        """The whole point. The message names each tool a matrix promises and the
+        requirements file does not declare, plus the file that holds the row."""
+        reported = [
+            message for path in MATRICES for message in undeclared(path, REQUIREMENTS)
+        ]
 
         if reported:
             self.fail(

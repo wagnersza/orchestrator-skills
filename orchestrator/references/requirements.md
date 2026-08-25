@@ -288,6 +288,30 @@ eleven install into the project rather than onto the machine, so their check com
 needs the project dependencies installed first. When a run proves them, record the
 target repo and the date here.
 
+## Infra gate tools
+
+One row per tool the Terraform column of
+[`quality-gates-infra.md`](quality-gates-infra.md) names. These are conditional the same
+way as the rest of this file: a repo that provisions nothing needs none of them. This
+repo is that case, so every field of `gates.infra` stays blank here.
+
+| Dep | Why | Check | Install |
+|-----|-----|-------|---------|
+| **tofu** | the layer 1 format and validate gates, and the layer 3 plan. The binary is the OpenTofu CLI, and a repo that runs `terraform` uses that binary for the same rows | `tofu version` | `brew install opentofu` |
+| **tflint** | the layer 1 lint gate, and the version-pin check in the same layer | `command -v tflint` | `brew install tflint` |
+| **trivy** | the layer 1 misconfiguration gate (`trivy config`), which reads the `.tf` files and not the plan | `command -v trivy` | `brew install trivy` |
+| **conftest** | the layer 2 fixture gate (`conftest verify`) and the layer 3 **Halt condition** gate (`conftest test`). It runs the rules and the tests for those rules, so one tool covers both | `command -v conftest` | `brew install conftest` |
+| **infracost** | the layer 3 cost-delta gate. It reads the plan JSON, so it needs no second plan run | `command -v infracost` | `brew install infracost` |
+
+Read every install command in this table as **(verify)**. None of them ran on this
+machine, because this repo carries no `.tf` file. All five install onto the machine
+rather than into the project, so their check command needs no project environment.
+
+Layer 3 also needs a credential, and it is the one requirement here that no install
+command can give. `gates.infra.plan_role` names a read-only plan role, and a blank
+`plan_role` means no plan gate. Then layers 1 and 2 still run
+([`quality-gates-infra.md`](quality-gates-infra.md)).
+
 ## Vendor keys
 
 A worker needs the API access its harness/model uses (Anthropic for opus-5/
