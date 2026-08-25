@@ -25,6 +25,14 @@ is what a worker runs after each edit, and layer 2 is what it runs before each c
 The three names read as one ladder: `make quick`, `make full`, `make deep`. A project
 maps each name to its own script through config, so no skill body names a tool.
 
+**The Story proof is not a Layer.** It runs once per user story, before layer 5, and the
+layer table keeps its five rows. There is no layer 6 row because the layer numbers read as
+a run order, and this step runs before layer 5. The **Commit slice** that adds the
+generated Playwright spec also wires that spec into the project's own test command. So the
+existing gate commands run that spec, and no new gate command exists. The term is the
+**Story proof** entry of [`../CONTEXT.md`](../CONTEXT.md), and the rationale is
+[ADR 0047](../docs/adr/0047-the-story-proof-runs-before-the-story-gate.md).
+
 ## A non-zero exit is a stop
 
 No layer has a warning state. A Gate exits 0, or it stops the work, and the worker
