@@ -853,7 +853,7 @@ the same fact a minute later.
 | Outcome | Write first | Then |
 |---|---|---|
 | `implementation-complete` | `phase:impl` → `phase:e2e` where the proof-phase gate holds; else → `phase:review` where review is on; else remove it **and add `to-review` in the same call, and move the card to `In review`** | Proof: [The proof phase](#the-proof-phase). Review on: [Adversarial review](#adversarial-review-when-configs-reviewenabled) steps 1 and 2. Step 1 also **repoints the precheck** at the reviewer's worktree, with the review harness's process pattern — below. Review off: this wake is the hand-off to a human. Report the finish, the label pair you wrote, and the review you can still offer, in one line |
-| `proof-complete` | `phase:e2e` → `phase:review` where review is on; else remove it **and add `to-review` in the same call, and move the card to `In review`** | The same two branches, with the proof already done |
+| `proof-complete` | **On a leaf item**: `phase:e2e` → `phase:review` where review is on; else remove it **and add `to-review` in the same call, and move the card to `In review`**. **On a `user-story` parent**: nothing yet, because the layer 5 story gate runs before that call. `--back-off` stops a repeat until it does | **Leaf**: the same two branches, with the proof already done. **Parent**: [The story proof](#the-story-proof), steps 4 to 7. Read the evidence note and the spec PR, run [The layer 5 story gate](#the-layer-5-story-gate), then end the phase axis in one call. **No adversarial review round runs on the parent** |
 | `gates-unproven` | nothing, because the item stays in the phase it is in | Reset the context and re-prompt — below. The line names one of four causes, so quote that cause and name the command to run again. Never move the item to review on this line |
 | `verdict-approve` | remove `phase:review` **and add `to-review` in the same call, and move the card to `In review`** | [Adversarial review](#adversarial-review-when-configs-reviewenabled) step 4 — gather evidence and hand the item to human review |
 | `verdict-request-changes` | nothing, because a fix round is inside `phase:review` | [Adversarial review](#adversarial-review-when-configs-reviewenabled) step 3, at the round the line names. That step also **repoints the precheck** back at the implementation worktree, with the implementation harness's pattern — below |
@@ -1267,11 +1267,83 @@ exactly the one that must keep its observer.
 
 **Parent-close stays yours.** The seam closes one item. Where the tracker conventions
 define a parent close, apply it after the seam exits clean. That is the last child
-closed → close the parent, and the parent's card → `Done`. **The read is *Every child of
-a parent work item, closed children included***
+closed → close the parent, and the parent's card → `Done`. **Two steps run before that close,
+in this order**: [The story proof](#the-story-proof), then
+[The layer 5 story gate](#the-layer-5-story-gate). A proof that failed stops there, and the
+parent stays open.
+
+**The read is *Every child of a parent work item, closed children included***
 ([`references/tracker-reads.md`](references/tracker-reads.md#every-child-of-a-parent-work-item-closed-children-included)).
 An open-item list cannot answer this step, because the child that closed last is not in
 it. Then report per [Reporting to the user](#reporting-to-the-user).
+
+### The story proof
+
+**Prove the whole user story before the parent closes.** The trigger is two facts: the last
+child's **Close transaction** completed, and the parent carries `user-story`. The term
+is the **Story proof** entry in [`CONTEXT.md`](CONTEXT.md). Rationale, what it narrows and
+the accepted risks:
+[`docs/adr/0047-the-story-proof-runs-before-the-story-gate.md`](docs/adr/0047-the-story-proof-runs-before-the-story-gate.md).
+
+**The reachability gate is the one the proof phase already uses**: a non-blank `run_recipe`,
+or an `evidence` bar that asks for UI proof ([The proof phase](#the-proof-phase)). This step
+defines no second gate, so the two can never disagree. Where neither half holds, no story
+proof runs, and the parent goes to the layer 5 story gate. **This repo is the blank case.**
+Its `run_recipe` is blank, so no story here ever reaches a story proof.
+
+Where the gate does hold:
+
+1. **Write `in-progress` and `phase:e2e` on the parent, in one call**, and move its card to
+   `In progress` ([Board status](#board-status)). The card derives from the work-state label
+   alone, so the phase label moves no card.
+2. **Spawn the proof worker**, and start or repoint the **Item automation** — below.
+3. **The tick reports `proof-complete`**
+   ([On the wake](#on-the-wake--one-response-per-outcome)).
+4. **Read the evidence note and the spec PR.**
+5. **Run [The layer 5 story gate](#the-layer-5-story-gate)**, and triage every candidate it
+   reports.
+6. **Remove `phase:e2e` and add `to-review` on the parent, in one call**, and move the card
+   to `In review`. Those two labels name one moment, the same as every other transition that
+   ends the phase axis ([On the wake](#on-the-wake--one-response-per-outcome)).
+7. **The maintainer reads the spec PR, then asks for the close.** No session merges that PR
+   unasked ([Close a task](#close-a-task)).
+
+**The worker is fresh, in its own worktree cut from the default branch.** That tree is the
+first place every child's merged code sits together, and no child's worktree ever held it.
+**This is the one difference from [The proof phase](#the-proof-phase) on a leaf item**, which
+re-prompts the worker that is already there. **The role is `heavy`.** Resolve its
+`(model, effort)` pair from [`references/models.md`](references/models.md), the same as any
+other spawn ([Right model for the job](#right-model-for-the-job)). Everything else is
+[Spawn a worker](#spawn-a-worker-implement-x) unchanged.
+
+**The worker leaves two artifacts, and they are the whole record of the run:**
+
+- **An evidence note on the parent work item.** It holds one line per user story of the
+  parent spec, and each line says which criteria that story exercised.
+- **The generated Playwright spec.** The worker wires it into the project's own test command,
+  commits it on its own branch, and opens a PR for it.
+
+**This prompt carries the Browser surface scope edge too.** The proof drives the declared
+surface, `playwright-cli`. A browser MCP the worker's session happens to expose is out of
+bounds, whichever one it is. It is the same edge every spawn prompt already carries, so never
+restate its reason here
+([The prompt: checklist + completion contract](#the-prompt-checklist--completion-contract),
+[`docs/adr/0012-playwright-cli-is-the-only-browser-surface.md`](docs/adr/0012-playwright-cli-is-the-only-browser-surface.md)).
+
+**The Item automation is `orchestrator-item-<parent N>`, and one item never holds two
+schedules.** Where the parent already carries one, repoint its precheck at the proof worktree
+(op 13), the same way a review round does
+([On the wake](#on-the-wake--one-response-per-outcome)). Where it carries none, create one at
+this spawn ([Start the tick](#start-the-tick--one-item-automation-per-worker)). Step 8 of the
+parent's own **Close transaction** removes it.
+
+**A failed proof stops the parent close.** The worker posts the finding on the parent as its
+evidence note, and it ticks no last box. So a real defect is not a stalled worker. This
+session then files each failure through `/to-tickets`, and it leaves the parent open with
+`phase:e2e` in place. It runs **no** layer 5 story gate, and it reports the pending human
+decision ([Reporting to the user](#reporting-to-the-user)). `gates-unproven`, `stalled` and
+`dead` keep the answers they already have
+([On the wake](#on-the-wake--one-response-per-outcome)).
 
 ### The layer 5 story gate
 
@@ -1281,6 +1353,9 @@ close of its last child, in the same turn that bumps the version in
 `docs/agents/orchestrator.md`, and this step performs no bump. The lane is `inline`, so
 this session invokes the skill here, in the main checkout, on the default branch
 ([Resolve the verb before you act](#resolve-the-verb-before-you-act)).
+
+**It runs after the story proof, and it does not run where that proof failed**
+([The story proof](#the-story-proof)).
 
 Layers 1 to 4 each read one work item, inside one worker worktree. This layer is the one
 that reads what ten green items left behind. The five layers are in
@@ -1408,6 +1483,10 @@ it. Shape output for acting on, not for completeness:
   phase:review. Reviewer spawned, gpt-5.6-terra @ high.` **Where the wake ended the phase
   axis, name the label pair you wrote.** That one call is the hand-off to a human:
   `#38 verdict-approve · phase:review removed · to-review · card In review.`
+- **A story-proof line names the parent, the phase and the two artifacts.**
+  `#57 story proof · phase:e2e · evidence note on #57 · spec PR #64.` The parent number is
+  the fact a fresh session cannot infer, because the item that woke this session was the last
+  child ([The story proof](#the-story-proof)).
 - **Both counts come from the tracker, so restate both.**
   [On the wake](#on-the-wake--one-response-per-outcome) says how to read each one.
   `#38 stalled at phase:impl ·
