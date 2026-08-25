@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Architecture review — story #143, the tracker adapter</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script>
+  tailwind.config = { darkMode: 'media' };
+</script>
+<style>
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .card { break-inside: avoid; }
+  .beam { background: radial-gradient(circle at 20% 0%, rgba(59,130,246,.18), transparent 60%); }
+  .mass { transition: all .3s ease; }
+  code { font-size: .85em; }
+</style>
+</head>
+<body class="bg-slate-50 text-slate-800 antialiased">
+
+<header class="beam border-b border-slate-200 bg-white">
+  <div class="mx-auto max-w-5xl px-6 py-10">
+    <p class="mono text-xs uppercase tracking-widest text-blue-600">Layer 5 story gate &middot; advisory, stops nothing</p>
+    <h1 class="mt-2 text-3xl font-bold text-slate-900">The tracker is one verified adapter behind both seams</h1>
+    <p class="mt-2 text-slate-600">User story <span class="mono">#143</span>, closed 2026-08-25. Children <span class="mono">#132</span>, <span class="mono">#86</span>, <span class="mono">#134</span>. Plugin version <span class="mono">0.34.0</span>.</p>
+    <div class="mt-6 grid gap-3 sm:grid-cols-4">
+      <div class="rounded-lg border border-slate-200 bg-slate-50 p-3">
+        <p class="mono text-2xl font-bold text-slate-900">3</p>
+        <p class="text-xs text-slate-500">Python seams</p>
+      </div>
+      <div class="rounded-lg border border-slate-200 bg-slate-50 p-3">
+        <p class="mono text-2xl font-bold text-slate-900">112</p>
+        <p class="text-xs text-slate-500">tests, 61.75s</p>
+      </div>
+      <div class="rounded-lg border border-slate-200 bg-slate-50 p-3">
+        <p class="mono text-2xl font-bold text-amber-600">0%</p>
+        <p class="text-xs text-slate-500">measurable line coverage</p>
+      </div>
+      <div class="rounded-lg border border-slate-200 bg-slate-50 p-3">
+        <p class="mono text-2xl font-bold text-slate-900">5</p>
+        <p class="text-xs text-slate-500">candidates below</p>
+      </div>
+    </div>
+  </div>
+</header>
+
+<main class="mx-auto max-w-5xl px-6 py-10 space-y-10">
+
+<section class="rounded-xl border border-slate-200 bg-white p-6">
+  <h2 class="text-lg font-semibold text-slate-900">What the story left behind</h2>
+  <p class="mt-3 text-slate-600">Story <span class="mono">#143</span> did what it set out to do. <span class="mono">scripts/tracker.py</span> is a <strong>deep module</strong>: one class, four values, and every place two trackers disagree is a branch inside the one method that differs. The <strong>deletion test</strong> passes cleanly on it. Delete the adapter and the difference does not move, it multiplies back into both seams.</p>
+  <p class="mt-3 text-slate-600">The friction is not in the adapter. It is in the <strong>interface</strong> the two older seams present to it, and to their own tests. <span class="mono">scripts/tracker.py</span> arrived with an in-process test suite that imports it. <span class="mono">scripts/worker_state.py</span> and <span class="mono">scripts/close_item.py</span> still have only one test surface each: their own command line.</p>
+  <div class="mt-5 rounded-lg bg-slate-900 p-5">
+    <pre class="mono text-xs leading-relaxed text-slate-300">scripts/test_tracker.py       from scripts import tracker      <span class="text-emerald-400">in-process, 19 cases</span>
+scripts/test_close_item.py    subprocess.run([sys.executable...]) <span class="text-amber-400">argv only, 28 cases</span>
+scripts/test_worker_state.py  subprocess.run([sys.executable...]) <span class="text-amber-400">argv only, 65 cases</span></pre>
+  </div>
+  <p class="mt-4 text-slate-600">That asymmetry is what this report is about. It is also why <span class="mono">thresholds.coverage</span> in <span class="mono">docs/agents/orchestrator.md</span> is blank, with the reason written next to it: <em>&ldquo;both seams drive through <span class="mono">subprocess</span>, and in-process line coverage reads 0%&rdquo;</em>. That is a real note about a real limit, and one candidate below is the way to stop it being permanent.</p>
+</section>
+
+<!-- CANDIDATE 1 -->
+<article class="card rounded-xl border-2 border-emerald-300 bg-white p-6 shadow-sm">
+  <div class="flex flex-wrap items-start justify-between gap-3">
+    <div>
+      <p class="mono text-xs uppercase tracking-widest text-slate-400">Candidate 1</p>
+      <h2 class="mt-1 text-2xl font-bold text-slate-900">The tick predicate has no callable interface</h2>
+    </div>
+    <span class="rounded-full bg-emerald-600 px-4 py-1.5 text-sm font-semibold text-white">Strong</span>
+  </div>
+
+  <h3 class="mt-6 text-sm font-semibold uppercase tracking-wide text-slate-500">Files</h3>
+  <ul class="mono mt-2 space-y-1 text-sm text-slate-700">
+    <li>scripts/worker_state.py &mdash; <span class="text-slate-500">lines 591, 701, 779, 878, 903, 921</span></li>
+    <li>scripts/test_worker_state.py &mdash; <span class="text-slate-500">line 273, <code>run_seam</code></span></li>
+  </ul>
+
+  <h3 class="mt-6 text-sm font-semibold uppercase tracking-wide text-slate-500">Problem</h3>
+  <p class="mt-2 text-slate-600">Four values &mdash; <span class="mono">repo</span>, <span class="mono">fixture</span>, <span class="mono">tracker_cli</span>, <span class="mono">tracker_host</span> &mdash; exist for one purpose: to construct a <strong>Tracker adapter</strong>. The seam threads all four down five levels and then constructs that adapter <strong>three separate times</strong>, at three different depths, each from a different subset of the four.</p>
+
+  <div class="mt-4 grid gap-3 sm:grid-cols-3">
+    <div class="rounded-lg border border-amber-200 bg-amber-50 p-3">
+      <p class="mono text-xs text-amber-800">line 822</p>
+      <p class="mono mt-1 text-xs text-slate-700">Tracker(cli, host, repo, fixture)</p>
+      <p class="mt-1 text-xs text-slate-500">all four</p>
+    </div>
+    <div class="rounded-lg border border-amber-200 bg-amber-50 p-3">
+      <p class="mono text-xs text-amber-800">line 897</p>
+      <p class="mono mt-1 text-xs text-slate-700">Tracker(cli, host, repo)</p>
+      <p class="mt-1 text-xs text-slate-500">three, no fixture</p>
+    </div>
+    <div class="rounded-lg border border-rose-200 bg-rose-50 p-3">
+      <p class="mono text-xs text-rose-800">line 621</p>
+      <p class="mono mt-1 text-xs text-slate-700">Tracker(fixture=fixture)</p>
+      <p class="mt-1 text-xs text-slate-500">one, and it drops the other three</p>
+    </div>
+  </div>
+
+  <p class="mt-4 text-slate-600">The parameter count is the measurement:</p>
+  <div class="mt-3 overflow-hidden rounded-lg border border-slate-200">
+    <table class="w-full text-sm">
+      <thead class="bg-slate-100 text-left text-xs uppercase tracking-wide text-slate-500">
+        <tr><th class="px-4 py-2">Function</th><th class="px-4 py-2">Parameters</th><th class="px-4 py-2">Bar</th></tr>
+      </thead>
+      <tbody class="mono divide-y divide-slate-100 bg-white text-slate-700">
+        <tr><td class="px-4 py-2">wake</td><td class="px-4 py-2">18</td><td class="px-4 py-2"><div class="h-2 rounded bg-rose-500" style="width:100%"></div></td></tr>
+        <tr><td class="px-4 py-2">phase</td><td class="px-4 py-2">15</td><td class="px-4 py-2"><div class="h-2 rounded bg-rose-400" style="width:83%"></div></td></tr>
+        <tr><td class="px-4 py-2">transition</td><td class="px-4 py-2">8</td><td class="px-4 py-2"><div class="h-2 rounded bg-amber-400" style="width:44%"></div></td></tr>
+        <tr><td class="px-4 py-2">deliver</td><td class="px-4 py-2">8</td><td class="px-4 py-2"><div class="h-2 rounded bg-amber-400" style="width:44%"></div></td></tr>
+        <tr><td class="px-4 py-2">wake_targets</td><td class="px-4 py-2">8</td><td class="px-4 py-2"><div class="h-2 rounded bg-amber-400" style="width:44%"></div></td></tr>
+        <tr><td class="px-4 py-2">merge_requested</td><td class="px-4 py-2">6</td><td class="px-4 py-2"><div class="h-2 rounded bg-emerald-400" style="width:33%"></div></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p class="mt-4 text-slate-600"><span class="mono">wake()</span> forwards <strong>15 arguments positionally</strong> into <span class="mono">phase()</span> in one call (line 949). Nothing names them at the call site. A reordered parameter type-checks, runs, and prints a plausible line. That is exactly this repo&rsquo;s own named family &mdash; <em>a failure mode that reports success</em> &mdash; whose three members are recorded in <span class="mono">orchestrator/SKILL.md</span>: the <span class="mono">claude</span> effort typo, the <span class="mono">codex</span> model flag before its subcommand, and the terminal that reports its shell.</p>
+
+  <div class="mt-4 rounded-lg border-l-4 border-amber-400 bg-amber-50 p-4 text-sm text-amber-900">
+    <p class="font-semibold">The latent hazard is already in the code, not hypothetical.</p>
+    <p class="mt-1">Line 621 builds a board reader with the fixture alone. It works today only because the one tracker that has a board is also the one whose board read needs no repository. Nothing in the signature says so, and nothing fails if that stops being true.</p>
+  </div>
+
+  <h3 class="mt-6 text-sm font-semibold uppercase tracking-wide text-slate-500">Solution</h3>
+  <p class="mt-2 text-slate-600">Pass the <strong>adapter</strong>, not the four values it is made of. <span class="mono">main()</span> constructs one <span class="mono">Tracker</span> and hands it to <span class="mono">wake()</span>. <span class="mono">wake()</span> hands it to <span class="mono">phase()</span>, which hands it to <span class="mono">merge_requested()</span> and to <span class="mono">deliver()</span>. Four parameters collapse into one at every level, three constructions collapse into one, and the <strong>seam</strong> between the tick and its tracker becomes a single object rather than a convention repeated at three depths.</p>
+
+  <h3 class="mt-6 text-sm font-semibold uppercase tracking-wide text-slate-500">Before / After</h3>
+  <div class="mt-3 grid gap-4 lg:grid-cols-2">
+    <div class="rounded-lg border border-rose-200 bg-rose-50 p-4">
+      <p class="mono mb-3 text-xs font-semibold uppercase tracking-wide text-rose-700">Before &mdash; four values, five levels, three adapters</p>
+      <div class="mermaid">graph TD
+  M["main()"] -->|"cli, host, repo, fixture"| W["wake() &middot; 18 params"]
+  W -->|"15 positional"| P["phase() &middot; 15 params"]
+  P -->|"fixture only"| MR["merge_requested()"]
+  P -->|"cli, host, repo, fixture"| T1["Tracker #1"]
+  MR -->|"fixture"| T2["Tracker #2"]
+  W -->|"cli, host, repo"| D["deliver()"]
+  D --> WT["wake_targets()"]
+  WT --> T3["Tracker #3"]
+  style T1 fill:#fecdd3,stroke:#e11d48
+  style T2 fill:#fecdd3,stroke:#e11d48
+  style T3 fill:#fecdd3,stroke:#e11d48
+  style P fill:#fee2e2,stroke:#dc2626</div>
+    </div>
+    <div class="rounded-lg border border-emerald-200 bg-emerald-50 p-4">
+      <p class="mono mb-3 text-xs font-semibold uppercase tracking-wide text-emerald-700">After &mdash; one adapter, passed down</p>
+      <div class="mermaid">graph TD
+  M2["main()"] --> T["Tracker &middot; built once"]
+  T --> W2["wake(&hellip;, tracker)"]
+  W2 --> P2["phase(&hellip;, tracker)"]
+  P2 --> MR2["merge_requested(&hellip;, tracker)"]
+  P2 --> D2["deliver(&hellip;, tracker)"]
+  D2 --> WT2["wake_targets(&hellip;, tracker)"]
+  style T fill:#a7f3d0,stroke:#059669
+  style P2 fill:#d1fae5,stroke:#059669</div>
+    </div>
+  </div>
+
+  <h3 class="mt-6 text-sm font-semibold uppercase tracking-wide text-slate-500">Benefits</h3>
+  <div class="mt-2 space-y-3 text-slate-600">
+    <p><strong>Locality.</strong> Which tracker a tick talks to becomes one fact in one place. Today it is four facts restated at six call sites, and one of those sites restates only one of the four.</p>
+    <p><strong>Leverage.</strong> A fifth tracker value &mdash; a token, a timeout, a retry count &mdash; is one field on the adapter. Today it is a new parameter on <span class="mono">wake</span>, on <span class="mono">phase</span>, on <span class="mono">deliver</span>, on <span class="mono">wake_targets</span> and on three constructor calls.</p>
+    <p><strong>The interface becomes the test surface.</strong> This is the part that pays for the change. <span class="mono">phase()</span> today is unreachable from a test except through <span class="mono">argv</span>, because assembling its 15 arguments in the right order is worse than shelling out. Give it a <span class="mono">Tracker</span> and it becomes a plain function a test calls directly, with a fixture-backed adapter passed in. The <strong>65 subprocess cases</strong> that cover the predicate can then cover it in-process, and <span class="mono">thresholds.coverage</span> in config stops being permanently blank.</p>
+  </div>
+
+  <div class="mt-4 rounded-lg border-l-4 border-blue-400 bg-blue-50 p-4 text-sm text-blue-900">
+    <p class="font-semibold">No ADR conflict.</p>
+    <p class="mt-1">ADR 0040 says the tracker is one adapter behind both seams. This candidate uses that adapter more, not less. ADR 0018 says the watch is a stateless seam, and passing an adapter adds no state to it. Nothing here reopens a decision.</p>
+  </div>
+</article>
+
+<!-- CANDIDATE 2 -->
+<article class="card rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+  <div class="flex flex-wrap items-start justify-between gap-3">
+    <div>
+      <p class="mono text-xs uppercase tracking-widest text-slate-400">Candidate 2</p>
+      <h2 class="mt-1 text-2xl font-bold text-slate-900">The close is two writes the caller must order</h2>
+    </div>
+    <span class="rounded-full bg-amber-500 px-4 py-1.5 text-sm font-semibold text-white">Worth exploring</span>
+  </div>
+
+  <h3 class="mt-6 text-sm font-semibold uppercase tracking-wide text-slate-500">Files</h3>
+  <ul class="mono mt-2 space-y-1 text-sm text-slate-700">
+    <li>scripts/tracker.py &mdash; <span class="text-slate-500"><code>close_argv</code> line 319, <code>closing_note_argv</code> line 333</span></li>
+    <li>scripts/close_item.py &mdash; <span class="text-slate-500"><code>tracker_parts</code> line 336, <code>note_part</code> line 379</span></li>
+  </ul>
+
+  <h3 class="mt-6 text-sm font-semibold uppercase tracking-wide text-slate-500">Problem</h3>
+  <p class="mt-2 text-slate-600">One tracker records a closing reason inside the close command. The other has no such flag, so the reason is its own write and it <strong>must go first</strong>. The adapter holds both halves, and it holds neither the ordering rule nor the fact that the two are one operation. The caller does: <span class="mono">note_part()</span> asks for the note argv, tests whether it came back empty, and <span class="mono">tracker_parts()</span> then splices it in front of the close by hand at line 376.</p>
+  <div class="mt-3 rounded-lg bg-slate-900 p-4">
+    <pre class="mono text-xs leading-relaxed text-slate-300">return [label, *([note] if note else []), close, card_part(args, tracker)]
+<span class="text-amber-400">                ^ the ordering rule, living in the caller</span></pre>
+  </div>
+  <p class="mt-3 text-slate-600">Apply the <strong>deletion test</strong> to <span class="mono">closing_note_argv</span>. Deleting it does not move the complexity, it deletes a method whose whole job is to answer <em>&ldquo;does this tracker need a second write?&rdquo;</em> &mdash; a question the caller should never have to ask.</p>
+
+  <h3 class="mt-6 text-sm font-semibold uppercase tracking-wide text-slate-500">Solution</h3>
+  <p class="mt-2 text-slate-600">One method returns the ordered writes: <span class="mono">close_writes(item, comment)</span> gives <span class="mono">[note, close]</span> on one tracker and <span class="mono">[close]</span> on the other. The caller iterates. It never learns that one tracker needs two writes, and the order cannot be got wrong because there is no order to assemble.</p>
+
+  <h3 class="mt-6 text-sm font-semibold uppercase tracking-wide text-slate-500">Before / After</h3>
+  <div class="mt-3 grid gap-4 lg:grid-cols-2">
+    <div class="rounded-lg border border-rose-200 bg-rose-50 p-4">
+      <p class="mono mb-3 text-xs font-semibold uppercase tracking-wide text-rose-700">Before</p>
+      <svg viewBox="0 0 260 170" class="w-full"><g class="mono" font-size="9" fill="#475569">
+        <rect x="10" y="10" width="110" height="50" rx="6" fill="#fff" stroke="#e11d48"/>
+        <text x="20" y="28">close_item.py</text><text x="20" y="42" font-size="8">knows: note first</text><text x="20" y="53" font-size="8">knows: maybe no note</text>
+        <rect x="150" y="10" width="100" height="26" rx="6" fill="#fff" stroke="#94a3b8"/><text x="158" y="27">close_argv</text>
+        <rect x="150" y="46" width="100" height="26" rx="6" fill="#fff" stroke="#94a3b8"/><text x="158" y="63">closing_note_argv</text>
+        <path d="M120 30 L150 23" stroke="#e11d48" fill="none" marker-end="url(#a1)"/>
+        <path d="M120 42 L150 59" stroke="#e11d48" fill="none" marker-end="url(#a1)"/>
+        <rect x="10" y="95" width="240" height="60" rx="6" fill="#fff1f2" stroke="#fda4af"/>
+        <text x="20" y="112" font-size="8">[label, *([note] if note else []), close, card]</text>
+        <text x="20" y="128" font-size="8" fill="#be123c">the caller splices, so the caller can mis-splice</text>
+        <text x="20" y="144" font-size="8" fill="#be123c">2 branches in the caller for 1 tracker difference</text>
+      </g><defs><marker id="a1" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6" fill="#e11d48"/></marker></defs></svg>
+    </div>
+    <div class="rounded-lg border border-emerald-200 bg-emerald-50 p-4">
+      <p class="mono mb-3 text-xs font-semibold uppercase tracking-wide text-emerald-700">After</p>
+      <svg viewBox="0 0 260 170" class="w-full"><g class="mono" font-size="9" fill="#475569">
+        <rect x="10" y="10" width="110" height="50" rx="6" fill="#fff" stroke="#059669"/>
+        <text x="20" y="30">close_item.py</text><text x="20" y="46" font-size="8">knows: iterate</text>
+        <rect x="150" y="22" width="100" height="26" rx="6" fill="#fff" stroke="#059669"/><text x="158" y="39">close_writes</text>
+        <path d="M120 35 L150 35" stroke="#059669" fill="none" marker-end="url(#a2)"/>
+        <rect x="10" y="95" width="240" height="60" rx="6" fill="#ecfdf5" stroke="#6ee7b7"/>
+        <text x="20" y="112" font-size="8">[label, *tracker.close_writes(&hellip;), card]</text>
+        <text x="20" y="128" font-size="8" fill="#047857">the order is inside the adapter</text>
+        <text x="20" y="144" font-size="8" fill="#047857">0 branches in the caller</text>
+      </g><defs><marker id="a2" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6" fill="#059669"/></marker></defs></svg>
+    </div>
+  </div>
+
+  <h3 class="mt-6 text-sm font-semibold uppercase tracking-wide text-slate-500">Benefits</h3>
+  <p class="mt-2 text-slate-600"><strong>Locality:</strong> the ordering rule sits next to the two commands it orders. <strong>Testability:</strong> one case asserts the returned list per tracker, and no case has to build a plan to prove the order.</p>
+  <div class="mt-4 rounded-lg border-l-4 border-slate-300 bg-slate-50 p-4 text-sm text-slate-600">
+    <p class="font-semibold text-slate-700">The honest limit, and why this is not Strong.</p>
+    <p class="mt-1">Step 7 needs each write as its own resumable <span class="mono">part</span>, with its own status and its own idempotency read. <span class="mono">note_part()</span> reads the comments to see whether the reason is already posted, and only the seam knows what a <span class="mono">part</span> is. So the branch shrinks, and it does not vanish.</p>
+  </div>
+</article>
+
+<!-- CANDIDATE 3 -->
+<article class="card rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+  <div class="flex flex-wrap items-start justify-between gap-3">
+    <div>
+      <p class="mono text-xs uppercase tracking-widest text-slate-400">Candidate 3</p>
+      <h2 class="mt-1 text-2xl font-bold text-slate-900">One board recipe, two implementations of it</h2>
+    </div>
+    <span class="rounded-full bg-amber-500 px-4 py-1.5 text-sm font-semibold text-white">Worth exploring</span>
+  </div>
+
+  <h3 class="mt-6 text-sm font-semibold uppercase tracking-wide text-slate-500">Files</h3>
+  <ul class="mono mt-2 space-y-1 text-sm text-slate-700">
+    <li>scripts/tracker.py &mdash; <span class="text-slate-500"><code>board_status</code> line 246, <code>board_card</code> line 260, <code>_board_list_argv</code> line 392</span></li>
+  </ul>
+
+  <h3 class="mt-6 text-sm font-semibold uppercase tracking-wide text-slate-500">Problem</h3>
+  <p class="mt-2 text-slate-600">Two methods ask the same board read for two facts that arrive in the same answer, and they extract them two different ways. <span class="mono">board_status</span> reads the JSON and walks the items in Python. <span class="mono">board_card</span> pushes a <span class="mono">--jq</span> filter into the CLI and reads a bare string. Same recipe, two extraction styles, and the <span class="mono">jq</span> selector is a second copy of the match rule that the Python walk already implements.</p>
+  <div class="mt-3 rounded-lg bg-slate-900 p-4">
+    <pre class="mono text-xs leading-relaxed text-slate-300">board_status  read_json(&hellip;) then <span class="text-amber-400">for entry in data["items"]: if number == item</span>
+board_card    run(&hellip;, jq=<span class="text-amber-400">".items[] | select(.content.number==&lt;item&gt;) | .id"</span>)</pre>
+  </div>
+  <p class="mt-3 text-slate-600">The match rule is <em>&ldquo;the card whose content number is this item&rdquo;</em>. It is written twice, in two languages. A change to the board recipe in <span class="mono">docs/agents/issue-tracker.md</span> has to land in both, and only one of them is covered by a test that reads real JSON.</p>
+
+  <h3 class="mt-6 text-sm font-semibold uppercase tracking-wide text-slate-500">Solution</h3>
+  <p class="mt-2 text-slate-600">One method, <span class="mono">board_item(item, project, owner)</span>, returns the pair <span class="mono">(status, card_id)</span> from one read and one walk. The two existing methods become one-line readers of that pair, or they go away and their callers take the pair.</p>
+
+  <h3 class="mt-6 text-sm font-semibold uppercase tracking-wide text-slate-500">Before / After</h3>
+  <div class="mt-3 grid gap-4 lg:grid-cols-2">
+    <div class="rounded-lg border border-rose-200 bg-rose-50 p-4">
+      <p class="mono mb-3 text-xs font-semibold uppercase tracking-wide text-rose-700">Before &mdash; two paths out of one read</p>
+      <div class="mermaid">graph LR
+  R["_board_list_argv"] --> A["board_status<br/>python walk"]
+  R --> B["board_card<br/>jq selector"]
+  A --> S["status"]
+  B --> C["card id"]
+  style A fill:#fecdd3,stroke:#e11d48
+  style B fill:#fecdd3,stroke:#e11d48</div>
+    </div>
+    <div class="rounded-lg border border-emerald-200 bg-emerald-50 p-4">
+      <p class="mono mb-3 text-xs font-semibold uppercase tracking-wide text-emerald-700">After &mdash; one path, one match rule</p>
+      <div class="mermaid">graph LR
+  R2["_board_list_argv"] --> BI["board_item<br/>one walk"]
+  BI --> S2["status"]
+  BI --> C2["card id"]
+  style BI fill:#a7f3d0,stroke:#059669</div>
+    </div>
+  </div>
+
+  <h3 class="mt-6 text-sm font-semibold uppercase tracking-wide text-slate-500">Benefits</h3>
+  <p class="mt-2 text-slate-600"><strong>Locality:</strong> the match rule exists once. <strong>Testability:</strong> one fixture answer proves both facts, and the <span class="mono">jq</span> string stops being an untested second parser. The saving is consistency, not calls: the two facts are wanted by two different seams at two different moments, so nothing merges into one network round trip.</p>
+</article>
+
+<!-- CANDIDATE 4 -->
+<article class="card rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+  <div class="flex flex-wrap items-start justify-between gap-3">
+    <div>
+      <p class="mono text-xs uppercase tracking-widest text-slate-400">Candidate 4</p>
+      <h2 class="mt-1 text-2xl font-bold text-slate-900">The test double lives inside the production class</h2>
+    </div>
+    <span class="rounded-full bg-amber-500 px-4 py-1.5 text-sm font-semibold text-white">Worth exploring</span>
+  </div>
+
+  <h3 class="mt-6 text-sm font-semibold uppercase tracking-wide text-slate-500">Files</h3>
+  <ul class="mono mt-2 space-y-1 text-sm text-slate-700">
+    <li>scripts/tracker.py &mdash; <span class="text-slate-500">5 <code>if self.fixture is not None</code> branches, plus <code>write</code> line 418</span></li>
+  </ul>
+
+  <h3 class="mt-6 text-sm font-semibold uppercase tracking-wide text-slate-500">Problem</h3>
+  <p class="mt-2 text-slate-600">Five of the adapter&rsquo;s six fact methods open with a fixture branch, and <span class="mono">write()</span> opens with a sixth that appends to a <span class="mono">.writes</span> log instead of running. So every read has two implementations in one method, and a reader of <span class="mono">item_facts</span> has to hold three code paths at once: the fixture, one CLI and the other.</p>
+  <div class="mt-3 rounded-lg bg-slate-900 p-4">
+    <pre class="mono text-xs leading-relaxed text-slate-300">def item_facts(self, item):
+    <span class="text-amber-400">if self.fixture is not None:  # path 1, tests only</span>
+        &hellip;
+    if self.cli == GLAB:          # path 2
+        return self._glab_facts(item)
+    return self._gh_facts(item)   # path 3</pre>
+  </div>
+
+  <h3 class="mt-6 text-sm font-semibold uppercase tracking-wide text-slate-500">Solution</h3>
+  <p class="mt-2 text-slate-600">Split the reads from the argv builders. A <span class="mono">FixtureTracker</span> satisfies the same interface and answers from the file. The production class holds no test branch. The argv builders &mdash; the half that has no fixture branch already &mdash; stay shared, so nothing is duplicated to buy this.</p>
+
+  <h3 class="mt-6 text-sm font-semibold uppercase tracking-wide text-slate-500">Before / After</h3>
+  <div class="mt-3 grid gap-4 lg:grid-cols-2">
+    <div class="rounded-lg border border-rose-200 bg-rose-50 p-4">
+      <p class="mono mb-3 text-xs font-semibold uppercase tracking-wide text-rose-700">Before &mdash; 3 paths per read</p>
+      <svg viewBox="0 0 250 150" class="w-full"><g class="mono" font-size="8" fill="#475569">
+        <rect x="70" y="8" width="110" height="24" rx="5" fill="#fff" stroke="#e11d48"/><text x="88" y="24">Tracker</text>
+        <rect x="10" y="60" width="70" height="22" rx="4" fill="#fff1f2" stroke="#fda4af"/><text x="20" y="75">fixture</text>
+        <rect x="90" y="60" width="70" height="22" rx="4" fill="#fff" stroke="#94a3b8"/><text x="112" y="75">gh</text>
+        <rect x="170" y="60" width="70" height="22" rx="4" fill="#fff" stroke="#94a3b8"/><text x="190" y="75">glab</text>
+        <path d="M110 32 L45 60" stroke="#e11d48" fill="none"/><path d="M125 32 L125 60" stroke="#94a3b8" fill="none"/><path d="M140 32 L205 60" stroke="#94a3b8" fill="none"/>
+        <text x="10" y="110" fill="#be123c">5 fact methods x 3 paths</text>
+        <text x="10" y="124" fill="#be123c">the test double ships in production</text>
+      </g></svg>
+    </div>
+    <div class="rounded-lg border border-emerald-200 bg-emerald-50 p-4">
+      <p class="mono mb-3 text-xs font-semibold uppercase tracking-wide text-emerald-700">After &mdash; 2 paths, one interface</p>
+      <svg viewBox="0 0 250 150" class="w-full"><g class="mono" font-size="8" fill="#475569">
+        <rect x="70" y="8" width="110" height="24" rx="5" fill="#ecfdf5" stroke="#059669"/><text x="80" y="24">one interface</text>
+        <rect x="20" y="60" width="90" height="22" rx="4" fill="#fff" stroke="#059669"/><text x="32" y="75">Tracker (gh|glab)</text>
+        <rect x="140" y="60" width="90" height="22" rx="4" fill="#fff" stroke="#059669"/><text x="152" y="75">FixtureTracker</text>
+        <path d="M110 32 L70 60" stroke="#059669" fill="none"/><path d="M140 32 L180 60" stroke="#059669" fill="none"/>
+        <text x="20" y="110" fill="#047857">5 fact methods x 2 paths</text>
+        <text x="20" y="124" fill="#047857">production holds no test branch</text>
+      </g></svg>
+    </div>
+  </div>
+
+  <h3 class="mt-6 text-sm font-semibold uppercase tracking-wide text-slate-500">Benefits</h3>
+  <p class="mt-2 text-slate-600"><strong>Depth:</strong> the interface stays the same size and the implementation behind it gets simpler, which is the definition. <strong>Locality:</strong> the fixture format is documented in one docstring and would then also be implemented in one place.</p>
+
+  <div class="mt-4 rounded-lg border-l-4 border-amber-500 bg-amber-50 p-4 text-sm text-amber-900">
+    <p class="font-semibold">Contradicts ADR 0040, and only just worth reopening.</p>
+    <p class="mt-1">ADR 0040 chose <em>&ldquo;one class, and the tracker is four values on it&rdquo;</em>, and the fixture is one of those four. Two children of story <span class="mono">#143</span> then built on that choice, and <span class="mono">CLAUDE.md</span> requires a new ADR to narrow it. Reopen only if a third tracker arrives, because that is the point where five branches per method becomes seven. Until then this is a real smell with a load-bearing decision behind it.</p>
+  </div>
+</article>
+
+<!-- CANDIDATE 5 -->
+<article class="card rounded-xl border border-slate-200 bg-white p-6 opacity-90 shadow-sm">
+  <div class="flex flex-wrap items-start justify-between gap-3">
+    <div>
+      <p class="mono text-xs uppercase tracking-widest text-slate-400">Candidate 5</p>
+      <h2 class="mt-1 text-2xl font-bold text-slate-900"><code class="text-xl">write()</code> re-implements <code class="text-xl">run()</code></h2>
+    </div>
+    <span class="rounded-full bg-slate-400 px-4 py-1.5 text-sm font-semibold text-white">Speculative</span>
+  </div>
+
+  <h3 class="mt-6 text-sm font-semibold uppercase tracking-wide text-slate-500">Files</h3>
+  <ul class="mono mt-2 space-y-1 text-sm text-slate-700">
+    <li>scripts/tracker.py &mdash; <span class="text-slate-500"><code>run</code> line 62, <code>write</code> line 418</span></li>
+  </ul>
+
+  <h3 class="mt-6 text-sm font-semibold uppercase tracking-wide text-slate-500">Problem</h3>
+  <p class="mt-2 text-slate-600">Both hold the same four lines: run the command, check the exit code, raise <span class="mono">TrackerError</span> with the same message format. <span class="mono">run()</span>&rsquo;s own docstring says it is <em>&ldquo;the one place that reports a failed command, so no builder repeats it&rdquo;</em>, and <span class="mono">write()</span> repeats it 350 lines later.</p>
+  <div class="mt-3 rounded-lg bg-slate-900 p-4">
+    <pre class="mono text-xs leading-relaxed text-slate-300">raise TrackerError(f"{' '.join(argv)} failed: {proc.stderr.strip()}")   <span class="text-amber-400"># line 71</span>
+raise TrackerError(f"{' '.join(argv)} failed: {proc.stderr.strip()}")   <span class="text-amber-400"># line 429</span></pre>
+  </div>
+
+  <h3 class="mt-6 text-sm font-semibold uppercase tracking-wide text-slate-500">Solution</h3>
+  <p class="mt-2 text-slate-600">The fixture guard stays, and the tail becomes <span class="mono">run(argv)</span> with its result dropped. Three lines go.</p>
+
+  <h3 class="mt-6 text-sm font-semibold uppercase tracking-wide text-slate-500">Before / After</h3>
+  <div class="mt-3 grid gap-4 lg:grid-cols-2">
+    <div class="rounded-lg border border-rose-200 bg-rose-50 p-4">
+      <p class="mono mb-2 text-xs font-semibold uppercase tracking-wide text-rose-700">Before</p>
+      <div class="mass h-12 rounded bg-rose-300"></div><p class="mono mt-2 text-xs text-rose-700">2 copies of the error contract</p>
+    </div>
+    <div class="rounded-lg border border-emerald-200 bg-emerald-50 p-4">
+      <p class="mono mb-2 text-xs font-semibold uppercase tracking-wide text-emerald-700">After</p>
+      <div class="mass h-6 rounded bg-emerald-300"></div><p class="mono mt-2 text-xs text-emerald-700">1 copy</p>
+    </div>
+  </div>
+
+  <h3 class="mt-6 text-sm font-semibold uppercase tracking-wide text-slate-500">Benefits</h3>
+  <p class="mt-2 text-slate-600">The message format cannot drift between a read and a write. That is the whole benefit, and it is small. This is a three-line tidy inside one commit of other work, not a piece of architecture.</p>
+</article>
+
+<!-- TOP RECOMMENDATION -->
+<section class="rounded-xl border-2 border-blue-400 bg-blue-50 p-6">
+  <p class="mono text-xs uppercase tracking-widest text-blue-600">Top recommendation</p>
+  <h2 class="mt-2 text-2xl font-bold text-slate-900">Candidate 1 &mdash; give the tick predicate a callable interface</h2>
+  <p class="mt-3 text-slate-700">Take this one first, for three reasons that the other four do not have.</p>
+  <ol class="mt-4 space-y-3 text-slate-700">
+    <li class="flex gap-3"><span class="mono font-bold text-blue-600">1.</span><span>It is the only candidate that <strong>unblocks a measurement</strong>. <span class="mono">thresholds.coverage</span> in <span class="mono">docs/agents/orchestrator.md</span> is blank with a written reason, and this is the change that retires that reason.</span></li>
+    <li class="flex gap-3"><span class="mono font-bold text-blue-600">2.</span><span>It removes a live instance of this repo&rsquo;s own named failure family. <strong>15 positional arguments in one forward</strong> is a reorder that runs, passes and prints a plausible line.</span></li>
+    <li class="flex gap-3"><span class="mono font-bold text-blue-600">3.</span><span>It <strong>reopens no decision</strong>. It uses ADR 0040&rsquo;s adapter harder, and it needs no new ADR. Candidate 4 is the one that would need one.</span></li>
+  </ol>
+  <p class="mt-4 text-slate-700">Candidates 2 and 3 are small, safe and independent. They fit inside whichever commit next touches those methods. Candidate 5 is a tidy, not a ticket.</p>
+</section>
+
+<footer class="border-t border-slate-200 pt-6 pb-2 text-sm text-slate-500">
+  <p>Layer 5 is <strong>advisory</strong>. It holds no exit code, so it fails no push and no merge (ADR 0033). Vocabulary from <span class="mono">orchestrator/CONTEXT.md</span> and the <span class="mono">/codebase-design</span> skill: <span class="mono">module</span>, <span class="mono">interface</span>, <span class="mono">depth</span>, <span class="mono">seam</span>, <span class="mono">adapter</span>, <span class="mono">leverage</span>, <span class="mono">locality</span>.</p>
+</footer>
+
+</main>
+
+<script>
+  mermaid.initialize({ startOnLoad: true, theme: 'neutral', securityLevel: 'loose' });
+</script>
+</body>
+</html>
