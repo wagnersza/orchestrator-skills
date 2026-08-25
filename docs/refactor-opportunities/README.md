@@ -4,7 +4,9 @@ The reports the **layer 5 story gate** produces. One file per user story.
 
 Layer 5 runs when a user story finishes. The orchestrator session invokes
 `/improve-codebase-architecture` in the main checkout, and that skill writes an HTML report.
-The session then saves a copy here. The five layers are in
+The session then saves a copy here, as a docs-only commit
+([ADR 0048](../../orchestrator/docs/adr/0048-the-story-gate-report-is-a-repo-artifact.md)). The
+five layers are in
 [`../../orchestrator/references/quality-gates.md`](../../orchestrator/references/quality-gates.md),
 and the flow is
 [The layer 5 story gate](../../orchestrator/SKILL.md#the-layer-5-story-gate).

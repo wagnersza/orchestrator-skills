@@ -35,8 +35,9 @@ The orchestrator reads these from here; its own config never redefines them.
 
 Triage roles (`needs-triage`, `needs-info`, `ready-for-human`, `wontfix`) are a
 separate vocabulary — see `triage-labels.md`. Phase labels are a third — see
-[Phase labels](#phase-labels). The project board's `Status` field is derived from the
-work-state labels above — see [Project board](#project-board).
+[Phase labels](#phase-labels). The layer 5 story gate writes two more, and both stack —
+see [Story gate labels](#story-gate-labels). The project board's `Status` field is derived
+from the work-state labels above — see [Project board](#project-board).
 
 Labels beyond GitHub's defaults don't exist in this repo yet. Create on first use:
 
@@ -82,6 +83,47 @@ Create on first use:
 gh label create phase:impl   --color C5DEF5 --description "A worker is implementing this"
 gh label create phase:review --color C5DEF5 --description "A reviewer is reading the diff"
 gh label create phase:e2e    --color C5DEF5 --description "A worker is proving the feature works"
+```
+
+## Story gate labels
+
+Two more families, and the layer 5 story gate writes both on every candidate it files. They
+answer different questions from the three families this file already names. So they **stack**
+with a work-state label and with a phase label, and neither one replaces a label of another
+family. Rationale:
+[`orchestrator/docs/adr/0048-the-story-gate-report-is-a-repo-artifact.md`](../../orchestrator/docs/adr/0048-the-story-gate-report-is-a-repo-artifact.md).
+
+**`refactor` is provenance, and not a state.** It answers where an item came from: a layer 5
+story gate filed it. Provenance never changes, so a session writes the label once. It never
+swaps the label and never removes it. One label is the whole family.
+
+| Provenance | Label | Meaning |
+|-------|-------|---------|
+| story gate | `refactor` | A layer 5 story gate filed this item. Written once, never swapped and never removed. |
+
+**The `rating:*` family says what the gate rated the candidate.** **Mutually exclusive inside
+the family — swap, never stack** (`gh issue edit <n> --add-label <new> --remove-label <old>`),
+the same rule the work-state family and the phase family take. It stacks with `refactor`,
+because the two answer different questions: where the item came from, and how the gate judged
+it.
+
+| Rating | Label | Meaning |
+|-------|-------|---------|
+| strong | `rating:strong` | The gate rated the candidate strong. Filed as a work item, so it wears `ready-for-agent` beside this label. |
+| worth exploring | `rating:worth-exploring` | The gate rated the candidate worth exploring. Sent to the backlog, so it wears no work-state label. |
+
+The gate files no item for a candidate it drops, so nothing wears either family.
+
+**The `Deriving Status` table is unchanged.** `Status` derives from the work-state labels
+alone, so neither family writes a card. That is one statement for both families, and it is the
+same rule the phase family takes.
+
+Create on first use:
+
+```bash
+gh label create refactor --color A2EEEF --description "A layer 5 story gate filed this. Provenance, not a state, so it stacks"
+gh label create rating:strong --color D4C5F9 --description "The layer 5 story gate rated this candidate Strong"
+gh label create rating:worth-exploring --color D4C5F9 --description "The layer 5 story gate rated this candidate Worth exploring"
 ```
 
 ## Project board

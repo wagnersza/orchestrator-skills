@@ -1367,12 +1367,30 @@ of its row in [`references/skill-routing.md`](references/skill-routing.md) holds
 **The skill owns its own report.** Never restate one of its headings here, in a prompt or
 in a report.
 
+**Save the report before you triage.** The skill writes its HTML to the temporary directory of
+the OS, and the next reboot deletes it. Copy that file to
+`docs/refactor-opportunities/<story>-<slug>.html`. `<story>` is the number of the user story,
+and `<slug>` is a short slug from its title. The story number comes first, so two stories never
+collide. **This session commits the copy**, as a docs-only commit on the default branch,
+because it already writes to the tracker from the same checkout. The word is the **Story gate
+report** entry in [`CONTEXT.md`](CONTEXT.md), and what lands in that directory is
+[`../docs/refactor-opportunities/README.md`](../docs/refactor-opportunities/README.md).
+Rationale:
+[`docs/adr/0048-the-story-gate-report-is-a-repo-artifact.md`](docs/adr/0048-the-story-gate-report-is-a-repo-artifact.md).
+
 **Triage every candidate the report holds. This session does it, in prose:**
 
-- **`Strong`** becomes a work item, through `/to-tickets`.
+- **`Strong`** becomes a work item, through `/to-tickets`, and it wears `rating:strong`.
 - **`Worth exploring`** goes to the backlog, with its card attached
-  ([Board status](#board-status)).
+  ([Board status](#board-status)), and it wears `rating:worth-exploring`.
 - **`Speculative`** is dropped, with a one-line reason in the report to the user.
+
+**Every candidate this gate files carries two back-references and two labels.** The references
+are the user story the gate read, and a link to the saved report. The labels are `refactor` and
+the rating label in the list, and `docs/agents/issue-tracker.md` defines both families. The
+first two ratings each reach the tracker, so each one carries the pair and both labels. The
+third files nothing, so it carries none. **Neither family moves a board card**, because
+`Status` derives from the work-state labels alone ([Board status](#board-status)).
 
 The skill ends by asking which candidate to explore. This triage is the answer, so no
 grilling loop runs here.
