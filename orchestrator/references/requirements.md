@@ -259,6 +259,35 @@ their own: `gofmt` ships with the Go toolchain, and `gocyclo`, `gocognit`, `funl
 `depguard` ship inside `golangci-lint`. So the check of those four reads the linter list
 of that one binary.
 
+## TypeScript gate tools
+
+One row per tool the TypeScript column of [`quality-gates.md`](quality-gates.md) names.
+These are conditional the same way as the rest of this file: a repo with no
+`tsconfig.json` needs none of them.
+
+| Dep | Why | Check | Install |
+|-----|-----|-------|---------|
+| **pnpm** | the documented package manager. The layer 4 dependency-CVE gate runs `pnpm audit`, and every project install in this table runs through it | `command -v pnpm` | `npm install -g pnpm` |
+| **biome** | the layer 1 format gate, plus the lint rules it implements. It is the fast linter, so it answers layer 1 | `pnpm exec biome --version` | `pnpm add -D @biomejs/biome` — the package name carries the scope, the binary does not |
+| **tsc** | the layer 1 strict type check, with strict on. The binary ships inside the `typescript` package | `pnpm exec tsc --version` | `pnpm add -D typescript` |
+| **eslint** | the layer 1 lint rules `biome` does not have, plus the three layer 2 caps. `quality-gates.md` maps each cap to its rule | `pnpm exec eslint --version` | `pnpm add -D eslint` |
+| **eslint-plugin-sonarjs** | the layer 2 cognitive-complexity cap. It supplies the `sonarjs/cognitive-complexity` rule, which `eslint` has no built-in for | `pnpm ls eslint-plugin-sonarjs` | `pnpm add -D eslint-plugin-sonarjs` |
+| **vitest** | the layer 2 unit tests (`--related`) and the layer 3 coverage gate (`--coverage`) | `pnpm exec vitest --version` | `pnpm add -D vitest @vitest/coverage-v8` — coverage needs the provider package beside the runner |
+| **@cucumber/cucumber** | the layer 2 BDD acceptance gate | `pnpm exec cucumber-js --version` | `pnpm add -D @cucumber/cucumber` |
+| **dependency-cruiser** | the layer 3 import-boundaries gate. The binary is `depcruise`, and the contracts live in `.dependency-cruiser.js` | `pnpm exec depcruise --version` | `pnpm add -D dependency-cruiser` |
+| **stryker** | the layer 4 mutation-score gate. The binary is `stryker`, and the package name is scoped | `pnpm exec stryker --version` | `pnpm add -D @stryker-mutator/core` |
+| **semgrep** | the layer 4 SAST gate | `command -v semgrep` | `brew install semgrep` |
+| **trivy** | the layer 4 dependency-CVE gate, beside `pnpm audit`. It reads the lockfile, so it catches a transitive dependency the audit command reports differently | `command -v trivy` | `brew install trivy` |
+
+**`gitleaks` gets no second row.** The layer 3 secrets gate is the same tool in every
+column, and the Python table already declares it. One tool, one row.
+
+Read every install command in this table as **(verify)**. None of them ran on this
+machine, because this repo carries no TypeScript file and no gate config. Eight of the
+eleven install into the project rather than onto the machine, so their check command
+needs the project dependencies installed first. When a run proves them, record the
+target repo and the date here.
+
 ## Vendor keys
 
 A worker needs the API access its harness/model uses (Anthropic for opus-5/

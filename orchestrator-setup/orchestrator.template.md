@@ -49,7 +49,7 @@ db_gate:    ""            # e.g. "alembic upgrade head; verify new column/table 
 evidence:   "make deep green + real-data proof"  # the evidence bar
 
 # --- quality gates (the layered completion bar) ---
-# The layer model and the Python gate matrix are in references/quality-gates.md.
+# The layer model and every language gate matrix are in references/quality-gates.md.
 # Config is the source of truth for a threshold.
 gates:
   profile: strict         # strict | lite — `lite` drops layer 4
@@ -117,15 +117,18 @@ gates:
   drives a browser through the **Browser surface**. So the field asks for both.
 - **gates** is the completion bar. Layers 1 to 4 each run one command inside the
   worker's own worktree, before the push. A non-zero exit stops the work. Layer 5
-  runs once per user story, and it is advisory. The layer model, the Python gate
-  matrix and the default for each number are in `references/quality-gates.md`. The
-  rationale is `orchestrator/docs/adr/0032-quality-gates-are-a-layered-contract.md`.
+  runs once per user story, and it is advisory. The layer model, the gate matrix of
+  each language family and the default for each number are in
+  `references/quality-gates.md`. The rationale is
+  `orchestrator/docs/adr/0032-quality-gates-are-a-layered-contract.md`.
   - **profile** is `strict` or `lite`. `strict` runs all four layers. `lite` drops
     layer 4, so a small repo needs no mutation runner and no SAST. `lite` drops the
     layer 4 box even when `deep` holds a command.
-  - **langs** lists the language families that setup found, comma-separated. Only
-    `python` has a gate matrix today, and each other family is a work item of its
-    own.
+  - **langs** lists the language families that setup found, comma-separated. `python`
+    and `typescript` each have a gate matrix today, and each other family is a work
+    item of its own. The marker for `typescript` is a `tsconfig.json`. One hit turns
+    the column on. So several `tsconfig.json` files in a monorepo are one hit and not
+    several, because the gate commands run from the repo root.
   - **quick / full / deep** are layers 1+2, 3 and 4. A worker runs `quick` after
     each edit and before each commit, `full` before the push, and `deep` once per
     item. `story` is layer 5, and the orchestrator session runs it.
@@ -140,8 +143,15 @@ gates:
     each one, so no number stands twice with two values. `complexity` counts
     cyclomatic branches per function, and `coverage`, `branch` and `mutation` are
     percentages. A blank threshold is no cap, so the tool's own default stands.
-    `cognitive`, `funlen` and `branch` ship blank, because the Python matrix declares
-    no default for them.
+    `cognitive`, `funlen` and `branch` ship blank, because the `python` family in this
+    seed declares no default for them. The TypeScript column declares a default for
+    each of the three. So a repo whose `langs` holds `typescript` carries a number in
+    every threshold.
+  - **Each TypeScript threshold has one tool config that reads it.** `complexity` maps
+    to the `eslint` rule option of the same name. `cognitive` maps to the option of
+    `sonarjs/cognitive-complexity`, and `funlen` to the option of
+    `max-lines-per-function`. The coverage pair maps to the `vitest` coverage
+    thresholds: `coverage` to `lines`, and `branch` to `branches`.
   - **Setup writes each threshold into the tool config that reads it**, so the number
     reaches that tool with no hand step. **Setup never rewrites a tool config that it
     did not create.** If that file already exists, setup reports both values, asks
