@@ -226,6 +226,39 @@ machine, because this repo has no gate config yet. Five of the nine install into
 project rather than onto the machine, so their check command needs the project
 environment active.
 
+## Go gate tools
+
+One row per tool the Go column of [`quality-gates.md`](quality-gates.md) names. These are
+conditional the same way as the rest of this file: a repo with no `go.mod` needs none of
+them.
+
+| Dep | Why | Check | Install |
+|-----|-----|-------|---------|
+| **go** (the toolchain) | the layer 1 strict-type-check gate (`go build`, `go vet`), the layer 2 unit-tests gate (`go test -race`) and the layer 3 coverage gate (`go test -cover`) | `command -v go` | `brew install go` — <https://go.dev/dl/> |
+| **gofmt** | the layer 1 formatting gate | `command -v gofmt` | nothing of its own. It ships with **go**, so the **go** row installs it |
+| **goimports** | the layer 1 formatting gate, for import order | `command -v goimports` | `go install golang.org/x/tools/cmd/goimports@latest` |
+| **golangci-lint** | the layer 1 static-lint gate, and the binary that runs the four capped linters in this table | `command -v golangci-lint` | `brew install golangci-lint` — <https://golangci-lint.run> |
+| **gocyclo** | the layer 2 cyclomatic-complexity cap. Config writes the number into the `gocyclo` setting of `.golangci.yml` | `golangci-lint linters` | nothing of its own. It ships inside **golangci-lint** |
+| **gocognit** | the layer 2 cognitive-complexity cap. Config writes the number into the `gocognit` setting of `.golangci.yml` | `golangci-lint linters` | nothing of its own. It ships inside **golangci-lint** |
+| **funlen** | the layer 2 function-length cap. Config writes the number into the `funlen` setting of `.golangci.yml` | `golangci-lint linters` | nothing of its own. It ships inside **golangci-lint** |
+| **depguard** | the layer 3 import-boundaries gate, for an illegal import | `golangci-lint linters` | nothing of its own. It ships inside **golangci-lint** |
+| **godog** | the layer 2 BDD-acceptance gate. It is the runner, and how a repo writes its features is that repo's choice | `command -v godog` | `go install github.com/cucumber/godog/cmd/godog@latest` |
+| **go-arch-lint** | the layer 3 import-boundaries gate, for a cycle between packages | `command -v go-arch-lint` | `go install github.com/fe3dback/go-arch-lint@latest` |
+| **go-mutesting** | the layer 4 mutation-score gate | `command -v go-mutesting` | `go install github.com/zimmski/go-mutesting/cmd/go-mutesting@latest` |
+| **gosec** | the layer 4 SAST gate | `command -v gosec` | `brew install gosec` — <https://github.com/securego/gosec> |
+| **semgrep** | the layer 4 SAST gate, beside `gosec` | `command -v semgrep` | `brew install semgrep` — <https://semgrep.dev> |
+| **govulncheck** | the layer 4 dependency-CVE gate | `command -v govulncheck` | `go install golang.org/x/vuln/cmd/govulncheck@latest` |
+
+**`gitleaks` answers the secrets Gate of this column too.** It reads a git history and not
+a language. So its one row stays in the **Python gate tools** table, and this table does
+not repeat it.
+
+Read every install command in this table as **(verify)**. None of them ran on this
+machine, because this repo carries no Go file. Five of the fourteen install nothing of
+their own: `gofmt` ships with the Go toolchain, and `gocyclo`, `gocognit`, `funlen` and
+`depguard` ship inside `golangci-lint`. So the check of those four reads the linter list
+of that one binary.
+
 ## TypeScript gate tools
 
 One row per tool the TypeScript column of [`quality-gates.md`](quality-gates.md) names.
@@ -246,8 +279,8 @@ These are conditional the same way as the rest of this file: a repo with no
 | **semgrep** | the layer 4 SAST gate | `command -v semgrep` | `brew install semgrep` |
 | **trivy** | the layer 4 dependency-CVE gate, beside `pnpm audit`. It reads the lockfile, so it catches a transitive dependency the audit command reports differently | `command -v trivy` | `brew install trivy` |
 
-**`gitleaks` gets no second row.** The layer 3 secrets gate is the same tool in both
-columns, and the Python table already declares it. One tool, one row.
+**`gitleaks` gets no second row.** The layer 3 secrets gate is the same tool in every
+column, and the Python table already declares it. One tool, one row.
 
 Read every install command in this table as **(verify)**. None of them ran on this
 machine, because this repo carries no TypeScript file and no gate config. Eight of the
