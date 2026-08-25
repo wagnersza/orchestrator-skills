@@ -81,6 +81,18 @@ def read_json(argv, empty="{}"):
     return json.loads(run(argv) or empty)
 
 
+def label_names(labels):
+    """The label names in one tracker answer.
+
+    A label is a plain string on one tracker and an object with a `name` on the other.
+    So one reader serves both answers, and no caller learns which shape it holds.
+    """
+    return [
+        entry if isinstance(entry, str) else entry.get("name") or ""
+        for entry in labels or []
+    ]
+
+
 class Tracker:
     """The tracker one seam talks to: a CLI, a host, a repository and a fixture.
 
@@ -98,6 +110,19 @@ class Tracker:
     def _item(self, number):
         """One work item's fixture record, or an empty one where it is absent."""
         return (self.fixture.get("items") or {}).get(str(number)) or {}
+
+    def _repo_flag(self):
+        """The repository argument, in the form and the place each CLI wants it.
+
+        One CLI takes `--repo OWNER/NAME`. The other takes `-R`, and its host is part
+        of that argument rather than a flag of its own. With no repository neither one
+        names it, so every command goes to the clone the working directory holds.
+        """
+        if not self.repo:
+            return []
+        if self.cli == GLAB:
+            return ["-R", f"{self.host}/{self.repo}" if self.host else self.repo]
+        return ["--repo", self.repo]
 
     # --- the facts a seam reads
 
@@ -119,12 +144,19 @@ class Tracker:
 
     def _gh_facts(self, item):
         """The two facts from `gh`, which reads both of them in one command."""
-        argv = [GH, "issue", "view", str(item), "--json", "comments,labels"]
-        if self.repo:
-            argv += ["--repo", self.repo]
-        data = read_json(argv)
+        data = read_json(
+            [
+                GH,
+                "issue",
+                "view",
+                str(item),
+                "--json",
+                "comments,labels",
+                *self._repo_flag(),
+            ]
+        )
         return (
-            [entry.get("name") or "" for entry in data.get("labels") or []],
+            label_names(data.get("labels")),
             [entry.get("body") or "" for entry in data.get("comments") or []],
         )
 
@@ -152,7 +184,7 @@ class Tracker:
                 "part of both commands"
             )
         labels_argv = [GLAB, "issue", "view", str(item), "-F", "json"]
-        labels_argv += ["-R", f"{self.host}/{self.repo}" if self.host else self.repo]
+        labels_argv += self._repo_flag()
         notes_argv = [
             GLAB,
             "api",
@@ -163,31 +195,37 @@ class Tracker:
         issue = read_json(labels_argv)
         notes = read_json(notes_argv, "[]")
         return (
-            # A label is a plain string on this tracker, and an object on the other one.
-            [
-                entry if isinstance(entry, str) else entry.get("name") or ""
-                for entry in issue.get("labels") or []
-            ],
+            label_names(issue.get("labels")),
             [entry.get("body") or "" for entry in notes or []],
         )
 
     def issue(self, number):
-        """One work item's state and its label names."""
+        """One work item's state and its label names.
+
+        The state reads as the caller's own case, because one tracker answers `OPEN`
+        and `CLOSED` and the other answers `opened` and `closed`.
+        """
         if self.fixture is not None:
             record = self._item(number)
             return {
                 "state": record.get("state"),
                 "labels": list(record.get("labels") or []),
             }
-        argv = [self.cli, "issue", "view", str(number), "--json", "state,labels"]
-        data = read_json(argv)
-        return {
-            "state": data.get("state"),
-            "labels": [label["name"] for label in data.get("labels") or []],
-        }
+        if self.cli == GLAB:
+            argv = [GLAB, "issue", "view", str(number), "-F", "json"]
+        else:
+            argv = [GH, "issue", "view", str(number), "--json", "state,labels"]
+        data = read_json([*argv, *self._repo_flag()])
+        return {"state": data.get("state"), "labels": label_names(data.get("labels"))}
 
     def pull_request(self, number):
-        """The pull request's state, and the commit its merge landed as."""
+        """The pull request's state, and the commit its merge landed as.
+
+        Both answers say the same two things under different names. One tracker
+        answers `MERGED` and a `mergeCommit` object, and the other answers `merged`
+        and a `merge_commit_sha` string. The caller compares the state in its own
+        case, so only the commit needs a branch here.
+        """
         if self.fixture is not None:
             record = (self.fixture.get("pull_requests") or {}).get(str(number)) or {}
             return {
@@ -195,6 +233,11 @@ class Tracker:
                 "merge_commit": str(record.get("merge_commit") or ""),
             }
         data = read_json(self.pr_read_argv(number))
+        if self.cli == GLAB:
+            return {
+                "state": data.get("state"),
+                "merge_commit": str(data.get("merge_commit_sha") or ""),
+            }
         return {
             "state": data.get("state"),
             "merge_commit": (data.get("mergeCommit") or {}).get("oid") or "",
@@ -233,25 +276,71 @@ class Tracker:
     # --- the argv a seam runs or prints
 
     def pr_read_argv(self, number):
-        """The argv of the merged-state read, which a plan also prints."""
-        return [self.cli, "pr", "view", str(number), "--json", "state,mergeCommit"]
+        """The argv of the merged-state read, which a plan also prints.
+
+        The two trackers disagree three ways about this one read, and no way is a
+        rename. The object has its own subcommand, the JSON flag has its own spelling,
+        and the number belongs to its own sequence. One tracker numbers a merge request
+        apart from an issue, so `number` there is the merge request's own number and
+        never the item's.
+        """
+        if self.cli == GLAB:
+            return [GLAB, "mr", "view", str(number), "-F", "json", *self._repo_flag()]
+        return [
+            GH,
+            "pr",
+            "view",
+            str(number),
+            "--json",
+            "state,mergeCommit",
+            *self._repo_flag(),
+        ]
 
     def label_argv(self, item, remove=(), add=()):
         """The argv that swaps the labels on one work item.
 
-        The caller passes the names it wants and no flag. The flag that carries a
-        label is one of the things the two trackers disagree about.
+        The caller passes the names it wants and no flag. The subcommand that takes a
+        label, and the flag that carries one, are two of the things the two trackers
+        disagree about. One name per flag, so no CLI splits a name on a comma.
         """
         flags = []
+        if self.cli == GLAB:
+            for name in add:
+                flags += ["--label", name]
+            for name in remove:
+                flags += ["--unlabel", name]
+            return [GLAB, "issue", "update", str(item), *flags, *self._repo_flag()]
         for name in remove:
             flags += ["--remove-label", name]
         for name in add:
             flags += ["--add-label", name]
-        return [self.cli, "issue", "edit", str(item), *flags]
+        return [GH, "issue", "edit", str(item), *flags, *self._repo_flag()]
 
-    def close_argv(self, item):
-        """The argv that closes one work item."""
-        return [self.cli, "issue", "close", str(item)]
+    def close_argv(self, item, comment=""):
+        """The argv that closes one work item, with the reason where the CLI takes one.
+
+        One CLI closes an item and records the reason in the same command. The other
+        has no such flag, so there the reason is its own write and
+        `closing_note_argv` builds it.
+        """
+        if self.cli == GLAB:
+            return [GLAB, "issue", "close", str(item), *self._repo_flag()]
+        argv = [GH, "issue", "close", str(item)]
+        if comment:
+            argv += ["--comment", comment]
+        return [*argv, *self._repo_flag()]
+
+    def closing_note_argv(self, item, body):
+        """The argv that posts a closing reason as its own write, or an empty list.
+
+        Where the close command carries the reason itself, there is no second write. So
+        this answers nothing, and the caller plans one write instead of two. The caller
+        then reads whether the reason needs a write of its own, and never which CLI
+        needs one.
+        """
+        if not body or self.cli != GLAB:
+            return []
+        return self.comment_argv(item, body)
 
     def card_argv(self, card, project_id, field_id, option_id):
         """The argv that writes one card's `Status`.
@@ -276,21 +365,29 @@ class Tracker:
     def comment_argv(self, item, body):
         """The argv that posts one comment on a work item.
 
-        One branch per tracker, for the same reason the reads above have one each:
-        the flag that carries the message differs, and so does the place the host
-        goes. One CLI takes an optional repository, and falls back to the one the
-        working directory holds. For the other CLI the repository is part of the
-        command.
+        One branch per tracker, for the same reason each read here has one: the
+        subcommand differs, and so does the flag that carries the message. The
+        repository argument differs as well, and `_repo_flag` holds that difference.
         """
         if self.cli == GLAB:
-            argv = [GLAB, "issue", "note", str(item), "--message", body]
-            if self.repo:
-                argv += ["-R", f"{self.host}/{self.repo}" if self.host else self.repo]
-            return argv
-        argv = [GH, "issue", "comment", str(item), "--body", body]
-        if self.repo:
-            argv += ["--repo", self.repo]
-        return argv
+            return [
+                GLAB,
+                "issue",
+                "note",
+                str(item),
+                "--message",
+                body,
+                *self._repo_flag(),
+            ]
+        return [
+            GH,
+            "issue",
+            "comment",
+            str(item),
+            "--body",
+            body,
+            *self._repo_flag(),
+        ]
 
     def _board_list_argv(self, project, owner, jq=""):
         """The argv of the one board read, which is the recipe the tracker file holds.

@@ -142,6 +142,34 @@ A label is a plain string on GitLab and an object with a `name` on GitHub. Both 
 are the pair `scripts/worker_state.py` already builds for a tick, so a session and a
 tick read one item the same way.
 
+## Whether a merge request is merged, and the commit it landed as
+
+The two facts step 4 of a **Close transaction** gates on. Where the flows need it:
+**Steps 4 to 8** and **Merge the queue**. `scripts/close_item.py` runs this read through
+the **Tracker adapter**, and it prints the same command in its plan
+([`../CONTEXT.md`](../CONTEXT.md), **Tracker adapter**).
+
+```bash
+gh pr view <PR> --repo <owner>/<name> --json state,mergeCommit
+```
+
+```bash
+glab mr view <PR> -R <host>/<owner>/<name> -F json | jq '{state, merge_commit_sha}'
+```
+
+Three differences, and none of them is a rename:
+
+| Concern | `gh` | `glab` |
+|---|---|---|
+| the subcommand | `pr view` | `mr view` |
+| the JSON flag | `--json <fields>` | `-F json`, and it reads every field |
+| the two facts | `MERGED`, and `mergeCommit.oid` | `merged`, and `merge_commit_sha` |
+
+**`<PR>` is not the item number on GitLab.** That tracker numbers merge requests in a
+sequence of their own, so a project can hold issue 2 and merge request 1 at once. On
+GitHub the two share one sequence. So read the number from the merge request itself, and
+never from the work item.
+
 ## The `glab issue list` flag trap
 
 `glab issue list` disagrees with every other `glab` command about its flags. Three

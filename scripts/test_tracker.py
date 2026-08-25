@@ -183,6 +183,77 @@ class TrackerTest(unittest.TestCase):
             tracker.Tracker().label_argv(ITEM), ["gh", "issue", "edit", str(ITEM)]
         )
 
+    def test_the_close_seam_argv_on_the_other_tracker_is_no_rename(self):
+        """Four commands, and each one differs by more than the CLI name."""
+        one = tracker.Tracker(cli=tracker.GLAB, host=HOST, repo=REPO)
+        where = ["-R", f"{HOST}/{REPO}"]
+
+        # The merge request has its own subcommand and its own JSON flag.
+        self.assertEqual(
+            one.pr_read_argv(PR), ["glab", "mr", "view", str(PR), "-F", "json", *where]
+        )
+        # The label swap has its own subcommand and its own two flags.
+        self.assertEqual(
+            one.label_argv(ITEM, remove=["to-review"], add=["to-merge"]),
+            [
+                "glab",
+                "issue",
+                "update",
+                str(ITEM),
+                "--label",
+                "to-merge",
+                "--unlabel",
+                "to-review",
+                *where,
+            ],
+        )
+        # The close takes no reason, whatever reason the caller passes.
+        self.assertEqual(
+            one.close_argv(ITEM, "the work is merged"),
+            ["glab", "issue", "close", str(ITEM), *where],
+        )
+        # So the reason is its own write, and it is the note command.
+        self.assertEqual(
+            one.closing_note_argv(ITEM, "the work is merged"),
+            one.comment_argv(ITEM, "the work is merged"),
+        )
+
+    def test_the_close_command_carries_the_reason_where_the_cli_takes_one(self):
+        """One tracker records the reason in the close itself, so there is one write."""
+        one = tracker.Tracker()
+
+        self.assertEqual(
+            one.close_argv(ITEM, "the work is merged"),
+            ["gh", "issue", "close", str(ITEM), "--comment", "the work is merged"],
+        )
+        self.assertEqual(one.closing_note_argv(ITEM, "the work is merged"), [])
+
+    def test_no_reason_leaves_the_close_bare_on_either_tracker(self):
+        """A caller that passes no reason posts nothing and closes as it did before."""
+        for cli in (tracker.GH, tracker.GLAB):
+            one = tracker.Tracker(cli=cli)
+            self.assertEqual(one.close_argv(ITEM), [cli, "issue", "close", str(ITEM)])
+            self.assertEqual(one.closing_note_argv(ITEM, ""), [])
+
+    def test_the_repository_argument_goes_where_each_cli_wants_it(self):
+        """One CLI takes a flag of its own for the host, and the other joins the two."""
+        self.assertEqual(
+            tracker.Tracker(repo=REPO).close_argv(ITEM)[-2:], ["--repo", REPO]
+        )
+        self.assertEqual(
+            tracker.Tracker(cli=tracker.GLAB, host=HOST, repo=REPO).close_argv(ITEM)[
+                -2:
+            ],
+            ["-R", f"{HOST}/{REPO}"],
+        )
+        # With no repository, neither CLI names one: both read the clone the working
+        # directory holds.
+        for cli in (tracker.GH, tracker.GLAB):
+            self.assertEqual(
+                tracker.Tracker(cli=cli).close_argv(ITEM),
+                [cli, "issue", "close", str(ITEM)],
+            )
+
     # --- the reads, one command per tracker
 
     def test_the_gh_facts_read_is_one_command(self):
@@ -226,6 +297,49 @@ class TrackerTest(unittest.TestCase):
             tracker.Tracker(cli=tracker.GLAB).item_facts(ITEM)
 
         self.assertIn("--repo", str(caught.exception))
+
+    def test_the_merged_state_read_answers_the_same_two_facts_on_either_tracker(self):
+        """One tracker says `merged` and `merge_commit_sha`, the other says neither."""
+        self.fake_cli("gh", answer=json.dumps({"state": "MERGED", "mergeCommit": None}))
+        self.assertEqual(
+            tracker.Tracker().pull_request(PR), {"state": "MERGED", "merge_commit": ""}
+        )
+
+        self.fake_cli(
+            "gh",
+            answer=json.dumps({"state": "MERGED", "mergeCommit": {"oid": "a1b2c3d"}}),
+        )
+        self.assertEqual(
+            tracker.Tracker().pull_request(PR),
+            {"state": "MERGED", "merge_commit": "a1b2c3d"},
+        )
+
+        log = self.fake_cli(
+            "glab",
+            answer=json.dumps({"state": "merged", "merge_commit_sha": "e4f5a6b"}),
+        )
+        self.assertEqual(
+            tracker.Tracker(cli=tracker.GLAB, host=HOST, repo=REPO).pull_request(PR),
+            {"state": "merged", "merge_commit": "e4f5a6b"},
+        )
+        self.assertEqual(
+            log.read_text().splitlines(),
+            [f"mr view {PR} -F json -R {HOST}/{REPO}"],
+        )
+
+    def test_the_item_read_on_the_other_tracker_is_one_command_with_plain_labels(self):
+        """A label is a string there, and the state is the caller's to compare."""
+        log = self.fake_cli(
+            "glab", answer=json.dumps({"state": "closed", "labels": ["to-review"]})
+        )
+
+        one = tracker.Tracker(cli=tracker.GLAB, host=HOST, repo=REPO)
+
+        self.assertEqual(one.issue(ITEM), {"state": "closed", "labels": ["to-review"]})
+        self.assertEqual(
+            log.read_text().splitlines(),
+            [f"issue view {ITEM} -F json -R {HOST}/{REPO}"],
+        )
 
     def test_the_board_read_names_one_tracker_whichever_cli_is_set(self):
         """A board is one tracker's own surface, so the CLI name does not reach it."""
