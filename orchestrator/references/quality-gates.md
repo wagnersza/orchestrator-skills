@@ -102,5 +102,7 @@ an install command. A row that names a tool with no such row fails
 [`../../scripts/test_quality_gates.py`](../../scripts/test_quality_gates.py). So this
 matrix cannot promise a tool the repo has no install path for.
 
-Only the Python column lands here. The Go, TypeScript, Terraform and Kubernetes
-columns are each a work item of their own.
+Only the Python column lands here. The Go, TypeScript and Kubernetes columns are each a
+work item of their own, and **the Terraform column lives in
+[`quality-gates-infra.md`](quality-gates-infra.md)**, because an infra Gate reads a plan
+and not code.
