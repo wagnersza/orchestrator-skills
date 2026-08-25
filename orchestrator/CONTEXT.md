@@ -219,6 +219,65 @@ _Avoid_: ticket, issue, task (pick one — prefer work item).
 **Ready queue**:
 The set of work items a worker can start now — labelled `ready-for-agent` with every `## Blocked by` edge closed. The orchestrator resolves this over whatever tracker `docs/agents/issue-tracker.md` names.
 
+**The automation needs one fact more, and it is the card.** An item starts by itself only
+where it carries the label *and* its card sits in the board's `To do` column. Both facts are
+necessary. So a card in `To do` with no label never starts, and a labelled item whose card
+sits in `Ready` never starts either. That second case is the point: `Ready` is the
+maintainer's own lane, and no agent enters it. **Where `docs/agents/issue-tracker.md` names
+no board, the label alone is the whole gate**, which is the fallback a **Merge queue**
+already takes. A queue read reports every item that holds one fact and not the other, because
+a forgotten drag otherwise reads as an empty queue
+([`docs/adr/0045-a-story-start-is-automatic-under-two-roofs.md`](docs/adr/0045-a-story-start-is-automatic-under-two-roofs.md)).
+
+**Story run**:
+One user story the automation owns end to end: the `user-story` parent, plus every **Worker**
+it spawns for that story's children, plus the story proof that runs before the parent closes.
+It begins when the parent holds both facts of a **Ready queue** entry. It ends when the parent
+closes.
+
+**A child of a live Story run needs neither fact.** The queue tick descends from the parent to
+its unblocked children and spawns them, and it writes no `ready-for-agent` label on any of
+them. So the rule that only a human writes that label is unchanged, and one human act starts
+ten children. A child that itself carries `user-story` is a nested spec, so the descent
+continues to the implementable leaves, which is the rule the `work on N` flow already holds.
+
+`work on N` stays as the manual override. It writes the label and spawns at once, and it is a
+convenience rather than the mechanism
+([`docs/adr/0045-a-story-start-is-automatic-under-two-roofs.md`](docs/adr/0045-a-story-start-is-automatic-under-two-roofs.md)).
+_Avoid_: epic, batch, story batch (that names one spawn, not the whole run), campaign.
+
+**Story slot**:
+One unit of the bound on live **Story run**s. The count is `max_stories` in
+**Config**, and its default is **2**. A run holds its slot until the parent closes, story
+proof included, so a story with one child left still occupies one.
+
+**A second roof stands beside it, and the lower one wins.** The worker cap bounds live
+**Worker**s across every run, and it is **4**. The queue tick spawns nothing where either roof
+is full. Two roofs exist because one of them alone fails: `max_stories` on its own multiplies
+into 2 runs times the worker cap, and the worker cap on its own lets one wide story starve
+every other
+([`docs/adr/0045-a-story-start-is-automatic-under-two-roofs.md`](docs/adr/0045-a-story-start-is-automatic-under-two-roofs.md)).
+_Avoid_: story limit, concurrency, quota, seat.
+
+**Touch set**:
+The paths a **Work item** declares it will change, as a `## Touches` block of paths or globs
+in the item body. It sits beside the `## Blocked by` and `## Parent` edges. The session that
+creates the item writes the block, because `/to-spec`, `/to-tickets` and `/triage` all run in
+the **inline** **Lane**. Nothing forks the external template to hold it.
+
+**Two items start in parallel only where their touch sets are disjoint.** An overlap delays
+the higher-numbered item and cancels nothing, so the next tick with a free slot spawns it.
+The comparison is on where `parallel_check` in **Config** is `touches`, and an item with no
+block is spawned alone. With `off` the tick compares nothing.
+
+**It is a declaration, and not a constraint.** No gate reads a diff against it, and a worker
+that edits an undeclared file breaks no rule. The test-merge inside `scripts/merge_train.py`
+stays the real check, so a wrong block costs one park and never a wrong merge. That is the
+same posture a **Merge train** takes on file overlap
+([`docs/adr/0046-parallel-spawn-is-gated-on-a-declared-touch-set.md`](docs/adr/0046-parallel-spawn-is-gated-on-a-declared-touch-set.md)).
+_Avoid_: file list, scope, footprint, blast radius (the last one already stands on **Halt
+condition**), affected files.
+
 **Merge queue**:
 The set of open work items that are ready to merge. Two entry conditions, and either one is
 enough: the item carries the `to-merge` label, or its card sits in the board's `To merge`
@@ -245,7 +304,7 @@ _Avoid_: merge queue (that names the set, not the run), batch merge, auto-merge,
 sequence.
 
 **Config**:
-The per-project orchestrator settings — tool, harness, model, adversarial-review policy, and tracker-setup pointer. Lives at `docs/agents/orchestrator.md` in the target repo (same pattern as `/setup-matt-pocock-skills`): human-editable markdown, seeded from a template in the skill folder, with a one-line summary block in `CLAUDE.md`. Per-project because different projects use different setups.
+The per-project orchestrator settings — tool, harness, model, adversarial-review policy, tracker-setup pointer, and the two dials the automation reads: `max_stories` (the **Story slot** count, default 2) and `parallel_check` (`touches` or `off`, which decides whether a **Touch set** gates a parallel spawn). Lives at `docs/agents/orchestrator.md` in the target repo (same pattern as `/setup-matt-pocock-skills`): human-editable markdown, seeded from a template in the skill folder, with a one-line summary block in `CLAUDE.md`. Per-project because different projects use different setups.
 
 **Setup phase**:
 The one-time interview that writes the Config — the user describes environment, tool, harness/CLI, models, adversarial-review policy, and the project recipes (setup command, run-for-evidence recipe + port scheme, optional DB gate, evidence expectations). Same posture as `/setup-matt-pocock-skills`: explore, present findings, confirm, write. Also ensures the tracker config exists (calls `/setup-matt-pocock-skills` if `docs/agents/issue-tracker.md` is missing).
@@ -260,15 +319,27 @@ exclusive with the other four — swap, never stack. It is also the standing aut
 ([`docs/adr/0037-the-merge-queue-is-an-ordered-train.md`](docs/adr/0037-the-merge-queue-is-an-ordered-train.md)).
 
 **Board status**:
-The `Status` field on a work item's card, where the tracker has a project board (GitHub Projects v2: `Backlog | Ready | In progress | In review | Done`). A **derived projection of the Work-state labels, not a second state machine** — labels are the source of truth, and `Status` is written wherever a label is written, plus recomputed for every open item when the **Ready queue** is read (which is where drift is repaired; there is no sync command). `Backlog` covers both never-triaged and ready-but-blocked; `Ready` is exactly the ready queue, which is why the split is only knowable at queue time. A human drag is drift, not intent — it is overwritten. The derivation table and the board coordinates live in `docs/agents/issue-tracker.md`, alongside the labels; a repo with no board omits the section and every board write becomes a no-op. Rationale: `docs/adr/0009-labels-drive-board-status.md`.
+The `Status` field on a work item's card, where the tracker has a project board (GitHub Projects v2: `Backlog | Ready | To do | In progress | In review | To merge | Done`). A **derived projection of the Work-state labels, not a second state machine** — labels are the source of truth, and `Status` is written wherever a label is written, plus recomputed for every open item when the **Ready queue** is read (which is where drift is repaired; there is no sync command). `Backlog` covers both never-triaged and ready-but-blocked; `Ready` is exactly the ready queue, which is why the split is only knowable at queue time. A human drag is drift, not intent — it is overwritten. The derivation table and the board coordinates live in `docs/agents/issue-tracker.md`, alongside the labels; a repo with no board omits the section and every board write becomes a no-op. Rationale: `docs/adr/0009-labels-drive-board-status.md`.
 
-**The `To merge` column is the one exception, and its direction is board to label.** A card
+**Two columns are intent, and their direction is board to label.** A card
 the maintainer drags there is intent. The session reads that card once and writes the
 `to-merge` label, which is one entry to a **Merge queue**. The direction never reverses: the
 reconcile pass writes no `Status` for an item that carries `to-merge`, so the dragged card
-is not overwritten. Every other column stays a derived projection, and the drag rule in
-this entry holds for all five of them
+is not overwritten
 ([`docs/adr/0038-the-to-merge-column-is-intent.md`](docs/adr/0038-the-to-merge-column-is-intent.md)).
+
+**`To do` is the second one, and it works the same way.** A card the maintainer drags there
+means "an agent can start this now". It is the second fact of a **Ready queue** entry, beside
+the `ready-for-agent` label, and the reconcile pass writes no `Status` for an item whose card
+sits there. So the board gains one column between `Ready` and `In progress`, and `Ready` keeps
+its old derivation while it stops meaning "an agent will take this"
+([`docs/adr/0045-a-story-start-is-automatic-under-two-roofs.md`](docs/adr/0045-a-story-start-is-automatic-under-two-roofs.md)).
+
+**No drag ever removes a label, in either column.** The promotion is one-way, so a card
+dragged back out of `To do` or `To merge` changes nothing. A take-back is the maintainer
+removing `ready-for-agent`, or writing `needs-human`, plus a comment that says why. Every
+other column stays a derived projection, and the drag rule in this entry holds for all of
+them.
 _Avoid_: board state, column, board label, project status (the field is `Status`; the layer is Board status).
 
 **Project recipe**:

@@ -27,6 +27,24 @@ board's `To merge` column. The set is read fresh when a train starts, which is t
 File overlap is a cheap proxy, and the test-merge is the real check. The seam does both, so
 a wrong ranking costs one extra park and never a wrong merge.
 
+## The order comment
+
+Where the plan holds more than one item, the order is published on the PR/MR of each item in
+it. One comment per PR, and it names the neighbours: `merge after #12, before #14`. The first
+item names no predecessor and the last names no successor.
+
+Three rules keep it from becoming noise:
+
+- **The comment is rewritten in place, and never posted twice.** It is found by a fixed first
+  line, `<!-- orchestrator:merge-order -->`, and that literal is shared by the writer and the
+  search. A tick runs once a minute, so a second post is sixty comments an hour.
+- **A plan of one item writes nothing.** An order of one is not an order.
+- **The session writes it, and the seam does not.** `scripts/merge_train.py` still prints
+  JSON and comments nowhere, which is the contract below.
+
+The order is recomputed every time a train starts, because the queue is read fresh. So the
+comment is a report of the current plan and not a promise about the next one.
+
 ## The park rule
 
 Where a branch conflicts, the session does three things:

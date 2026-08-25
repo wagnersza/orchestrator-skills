@@ -1,0 +1,1131 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>orchestrator-skills · the label-driven workflow</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script type="module">
+      import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+      mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "loose",
+        flowchart: { curve: "basis", padding: 14 } });
+    </script>
+    <style>
+      .band { border-left-width: 6px; }
+      .mermaid { display:flex; justify-content:center; }
+      .mermaid svg { max-width: 100%; height: auto; }
+      table { font-variant-numeric: tabular-nums; }
+      a.iss { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color:#4338ca; }
+      a.iss:hover { text-decoration: underline; }
+    </style>
+  </head>
+  <body class="bg-stone-50 text-slate-900 font-sans antialiased">
+  <main class="max-w-6xl mx-auto px-6 py-12 space-y-14">
+
+  <!-- ══════════════ HEADER ══════════════ -->
+  <header class="space-y-4">
+    <p class="text-xs uppercase tracking-widest text-slate-500">Target design · orchestrator-skills</p>
+    <h1 class="font-serif text-4xl leading-tight">Start a story, and the workflow runs itself</h1>
+    <p class="text-lg text-slate-600 max-w-3xl">The plugin is at
+      <code class="font-mono text-sm bg-white px-1.5 py-0.5 rounded border border-slate-200">0.32.0</code>.
+      This page holds one design, and it obeys two rules. <b>The tracker is the only control
+      surface: a label, a card and a block in the item body.</b> <b>An AI agent runs only where
+      a machine cannot decide.</b> Everything else is a Python seam with an exit code.</p>
+    <p class="text-slate-600 max-w-3xl">You act twice per <b>user story</b>, and never once per
+      child. <b>The first act starts the story</b>, and it is two facts:
+      the <span class="font-mono">ready-for-agent</span> label, and the card in the board's
+      <span class="font-mono">To do</span> column. <b>The second act merges</b>, and it is the
+      <span class="font-mono">to-merge</span> label. The automation then finds every unblocked
+      child of that story and works it, up to two roofs. No chat verb, and no session that must
+      stay open.</p>
+    <p class="text-slate-600 max-w-3xl"><b>The <span class="font-mono">Ready</span> column is
+      your own lane.</b> An item that carries the label and sits in
+      <span class="font-mono">Ready</span> is never started, so a groomed item you mean to do
+      yourself is safe on the same board. Both facts are needed, and the gate is quiet on
+      purpose.</p>
+    <p class="text-slate-600 max-w-3xl"><b>The run holds exactly one agent per work item: the
+      worker that writes the code.</b> Adversarial review adds a second one, and it stays off
+      by default. The story proof adds one more, once per user story and never once per item.
+      No other step is an agent, because no other step needs judgement. A label swap is a
+      lookup. A merge order is a computation. A teardown is a file operation. Each one belongs
+      in a script that a test can fail.</p>
+    <p class="text-slate-600 max-w-3xl">This design supersedes the plan that used a
+      machine-started session. Read
+      <b>What this design retires</b> for the reasons, and
+      <a class="iss" href="skill-state-and-roadmap.html">skill-state-and-roadmap.html</a> for
+      the skill as it stands today.</p>
+
+    <div class="grid sm:grid-cols-4 gap-4 pt-2">
+      <div class="rounded-lg border border-slate-200 bg-white p-4">
+        <p class="font-mono text-2xl font-bold text-emerald-700">2</p>
+        <p class="text-sm text-slate-600">stories at a time · <span class="font-mono">max_stories</span></p>
+      </div>
+      <div class="rounded-lg border border-slate-200 bg-white p-4">
+        <p class="font-mono text-2xl font-bold text-emerald-700">1</p>
+        <p class="text-sm text-slate-600">AI agent inside the run</p>
+      </div>
+      <div class="rounded-lg border border-slate-200 bg-white p-4">
+        <p class="font-mono text-2xl font-bold text-indigo-700">4</p>
+        <p class="text-sm text-slate-600">Python seams · 3 exist, 1 is new</p>
+      </div>
+      <div class="rounded-lg border border-slate-200 bg-white p-4">
+        <p class="font-mono text-2xl font-bold text-amber-600">13</p>
+        <p class="text-sm text-slate-600">work items to build · 7 new ADRs</p>
+      </div>
+    </div>
+
+    <div class="rounded-lg border-2 border-sky-300 bg-sky-50 p-5 space-y-2">
+      <p class="text-xs uppercase tracking-wider text-sky-800">What changed since 2026-08-21</p>
+      <p class="text-sm text-sky-900"><b>Three things landed, and none of them is this
+        design.</b> <span class="font-mono">scripts/merge_train.py</span> exists
+        (<a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/152">#152</a>),
+        so three of the four seams are real. The
+        <span class="font-mono">to-merge</span> label and the
+        <span class="font-mono">To merge</span> column are in the tracker config
+        (<a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/151">#151</a>).
+        The tick reads the <span class="font-mono">merge-requested</span> outcome
+        (<a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/153">#153</a>).</p>
+      <p class="text-sm text-sky-900"><b>Those two last items shipped under the old
+        design.</b> The tick prints the outcome, and a session acts on it. This design makes
+        the tick act. So the work is not lost, and it is not finished either. Read row 8 of
+        <b>What is left to build, in order</b>.</p>
+      <p class="text-sm text-sky-900"><b>The five new ADRs move up by one number.</b> Story
+        <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/163">#163</a>
+        claims ADR 0039 for the story proof. So this design takes 0040 to 0044. That story
+        also adds one step to the loop: a user story is proved end to end before its parent
+        closes.</p>
+    </div>
+
+    <div class="rounded-lg border-2 border-violet-300 bg-violet-50 p-5 space-y-2">
+      <p class="text-xs uppercase tracking-wider text-violet-800">Revision · 2026-08-24 · the story start</p>
+      <p class="text-sm text-violet-900"><b>Three things on this page changed, and ADR 0045 and
+        ADR 0046 are on disk.</b> The trigger moved up from a work item to a <b>user story</b>,
+        the board gained a <span class="font-mono">To do</span> column that is intent, and a
+        parallel spawn is now gated on a declared <b>Touch set</b>.</p>
+      <p class="text-sm text-violet-900"><b>One earlier sentence on this page is retired.</b> It
+        said "no dragged card". A drag is now half of the start gate, so planned ADR 0040 must
+        <b>generalise</b> ADR 0038 rather than reverse it. Two columns are intent, and the other
+        five stay projections.</p>
+      <p class="text-sm text-violet-900"><b>The worker cap drops from 5 to 4.</b> Two stories
+        times a cap of 5 is 10 live workers, which no one asked for. Two roofs now stand, and
+        the lower one wins.</p>
+    </div>
+
+    <div class="flex flex-wrap gap-x-6 gap-y-2 text-xs text-slate-500 pt-3 border-t border-slate-200">
+      <span><span class="inline-block w-3 h-3 bg-indigo-600 align-middle mr-1"></span>a Python seam · deterministic</span>
+      <span><span class="inline-block w-3 h-3 bg-emerald-600 align-middle mr-1"></span>an AI agent · judgement</span>
+      <span><span class="inline-block w-3 h-3 bg-amber-500 align-middle mr-1"></span>you, one CLI command</span>
+      <span><span class="inline-block w-3 h-3 bg-rose-600 align-middle mr-1"></span>the run stops and reports</span>
+      <span><span class="inline-block w-3 h-3 bg-violet-600 align-middle mr-1"></span>story <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/163">#163</a> · once per story</span>
+      <span class="ml-auto">2026-08-24 · every issue number links to GitHub</span>
+    </div>
+  </header>
+
+  <!-- ══════════════ THE TWO COMMANDS ══════════════ -->
+  <section class="space-y-5">
+    <div class="flex items-baseline gap-3 flex-wrap">
+      <h2 class="font-serif text-2xl">Your two acts, per story</h2>
+      <span class="text-xs uppercase tracking-wider px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 border border-emerald-200">a label and a card</span>
+    </div>
+    <p class="text-slate-600 max-w-3xl">A step stays human for one reason only: a machine
+      cannot supply the fact. The first act is consent to spend money. The second act says a
+      person read the diff. Neither fact exists on disk, so neither can be computed.</p>
+    <p class="text-slate-600 max-w-3xl"><b>Act once on the parent, and every child follows.</b>
+      A story of ten children costs two acts in total, and no child is ever labelled. Label a
+      leaf task instead and only that task runs.</p>
+
+    <div class="rounded-lg border border-slate-200 bg-white overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead class="text-xs uppercase tracking-wider text-slate-500 border-b border-slate-200">
+          <tr class="text-left">
+            <th class="px-4 py-3 font-medium">Act</th>
+            <th class="px-4 py-3 font-medium">On the board</th>
+            <th class="px-4 py-3 font-medium">Or from the CLI</th>
+            <th class="px-4 py-3 font-medium">What it starts</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-100 text-slate-600">
+          <tr class="bg-amber-50/60">
+            <td class="px-4 py-3 font-medium text-slate-900">1 · start<br/><span class="text-xs font-normal text-slate-500">two facts</span></td>
+            <td class="px-4 py-3">The story already carries <span class="font-mono">ready-for-agent</span>. Drag its card to <span class="font-mono">To do</span></td>
+            <td class="px-4 py-3 font-mono text-[11.5px]">gh issue edit N --add-label ready-for-agent<br/>+ one <span class="font-sans">Projects v2</span> field write</td>
+            <td class="px-4 py-3">The queue tick descends to every unblocked child and spawns them, under both roofs. A blocked child waits until its blocker closes</td>
+          </tr>
+          <tr class="bg-amber-50/60">
+            <td class="px-4 py-3 font-medium text-slate-900">2 · merge</td>
+            <td class="px-4 py-3">Drag the reviewed card to <span class="font-mono">To merge</span></td>
+            <td class="px-4 py-3 font-mono text-[11.5px]">gh issue edit N --add-label to-merge<br/>glab issue update N --label to-merge</td>
+            <td class="px-4 py-3">The item tick runs the merge train over every <span class="font-mono">to-merge</span> item, then closes and tears down each one</td>
+          </tr>
+        </tbody>
+      </table>
+      <p class="px-4 py-3 text-sm text-slate-500">Every act is idempotent. Two writes of the
+        same label are one state, and a card already in a column stays there. So a retry is
+        safe, and a script can apply them from a loop over five item numbers.</p>
+      <p class="px-4 pb-3 text-sm text-slate-500"><b>A tracker with no board keeps working.</b>
+        Where <span class="font-mono">docs/agents/issue-tracker.md</span> names no board, the
+        label alone is the whole gate. That is the fallback the merge queue already takes, so
+        local markdown and a board-less GitLab project stay supported targets.</p>
+    </div>
+
+    <div class="grid md:grid-cols-2 gap-4">
+      <div class="rounded-lg border border-slate-200 bg-white p-4 space-y-2">
+        <p class="text-xs uppercase tracking-wider text-slate-500">Five items at once</p>
+<pre class="font-mono text-[12.5px] leading-relaxed overflow-x-auto text-slate-700">for n in 151 152 153 154 155; do
+  gh issue edit $n --add-label to-merge
+done</pre>
+        <p class="text-sm text-slate-600">The train computes one order across all five, and
+          merges them in it. You resolve a file once, and never twice. Each PR gets a comment
+          that names its place in that order.</p>
+      </div>
+      <div class="rounded-lg border border-slate-200 bg-white p-4 space-y-2">
+        <p class="text-xs uppercase tracking-wider text-slate-500">The chat verb still works</p>
+        <p class="text-sm text-slate-600"><span class="font-mono">work on 151</span> stays as
+          a manual override, and it does the same label write plus an immediate spawn. It needs
+          no card in <span class="font-mono">To do</span>, because the ask itself is the second
+          fact. It is a convenience, and never the mechanism. <b>The two facts are the trigger,
+          so the flow works with no session open at all.</b></p>
+      </div>
+    </div>
+
+    <div class="rounded-lg border-2 border-rose-200 bg-rose-50/60 p-5 space-y-2">
+      <p class="text-xs uppercase tracking-wider text-rose-800">How you take it back</p>
+      <p class="text-sm text-rose-900"><b>No drag ever removes a label.</b> The promotion runs
+        one way, board to label, so a card dragged back out of
+        <span class="font-mono">To do</span> changes nothing. To stop work, remove
+        <span class="font-mono">ready-for-agent</span>, or write
+        <span class="font-mono">needs-human</span>, and comment why. Once a worker holds the
+        item the card reads <span class="font-mono">In progress</span> anyway, so a drag back is
+        already too late.</p>
+    </div>
+  </section>
+
+  <!-- ══════════════ THE FULL LOOP ══════════════ -->
+  <section class="space-y-5">
+    <div class="flex items-baseline gap-3 flex-wrap">
+      <h2 class="font-serif text-2xl">The full loop, label to label to Done</h2>
+      <span class="text-xs uppercase tracking-wider px-2 py-0.5 rounded bg-slate-800 text-white">diagram A</span>
+    </div>
+    <p class="text-slate-600 max-w-3xl">Blue is a Python seam. Green is the one agent. Amber
+      is you, with one CLI command. Red is a stop that reports and waits. Violet is story
+      <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/163">#163</a>,
+      which runs once per user story and is not built yet. <b>Count the green boxes.</b> That is
+      the per-item AI cost of the loop.</p>
+
+    <div class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+      <pre class="mermaid">
+flowchart TB
+  L1["YOU · label the STORY ready-for-agent<br/>and drag its card to To do"]
+  QT["Queue tick · orchestrator-queue<br/>one per minute · repo wide<br/>reads labels, cards, Blocked by edges"]
+  DSC["descend to the unblocked children<br/>a child needs no label and no card<br/>a nested story descends further"]
+  TCH{"Touch sets disjoint?<br/>parallel_check: touches"}
+  CAP{"Both roofs free?<br/>max_stories 2 · worker cap 4"}
+  SPN["spawn_item.py<br/>worktree · terminal · rendered prompt<br/>readiness gate · labels · item schedule"]
+  WRK["THE WORKER · the only agent<br/>edits code · runs the Layers<br/>appends to gates-N.jsonl"]
+  IT["Item tick · orchestrator-item-N<br/>one per minute · reads the work product"]
+  TS["transition seam<br/>swaps the labels · moves the card"]
+  PH{"Which phase label?"}
+  RV["to-review<br/>PR open · evidence posted · card In review"]
+  L2["YOU · to-merge label, or drag to To merge"]
+  MT["merge_train.py<br/>test-merge each queued branch<br/>rank by file overlap · print a JSON plan"]
+  ORD["the order comment<br/>one per PR/MR · rewritten in place<br/>merge after #12, before #14"]
+  CI["close_item.py<br/>steps 1 to 8 · per item · in the planned order"]
+  DN["Done · issue closed · PR merged<br/>worktree and both schedules gone"]
+  LC{"Last child of a<br/>user story?"}
+  SPF["STORY PROOF · story #163 · not built<br/>parent wears phase:e2e · one fresh worker<br/>drives playwright-cli end to end"]
+  L5G["Layer 5 story gate<br/>advisory · never blocks"]
+  PCL["Parent story closed<br/>the version bump lands here"]
+  PK["PARKED · back to to-review<br/>the conflicting paths in a comment"]
+  RS["re-spawn one rung up · once<br/>clean tree only · a label records it"]
+  RE["re-prompt from the template<br/>no label moves"]
+  ST["STOPPED · a comment on the item<br/>needs-human label"]
+
+  L1 --> QT --> DSC --> TCH
+  TCH -- no --> QT
+  TCH -- yes --> CAP
+  CAP -- no --> QT
+  CAP -- yes --> SPN --> WRK --> IT
+  IT --> TS --> PH
+  PH -- "impl · e2e" --> WRK
+  PH -- "done" --> RV
+  RV --> L2 --> IT
+  IT -. "to-merge label" .-> MT
+  MT --> ORD
+  ORD -- "clean" --> CI --> DN
+  MT -. "conflicts" .-> PK
+  CI -. "late conflict" .-> PK
+  DN --> LC
+  LC -- no --> QT
+  LC -- yes --> SPF --> L5G --> PCL --> QT
+  IT -. "gates-unproven" .-> RE -.-> WRK
+  IT -. "dead · second stall · clean tree" .-> RS -.-> SPN
+  IT -. "dirty tree · rounds exhausted · unreadable" .-> ST
+  PK --> ST
+
+  classDef seam fill:#eef2ff,stroke:#4f46e5
+  classDef agent fill:#ecfdf5,stroke:#059669,stroke-width:3px
+  classDef you fill:#fef3c7,stroke:#d97706
+  classDef pl fill:#f8fafc,stroke:#94a3b8
+  classDef stop fill:#fee2e2,stroke:#dc2626,color:#991b1b
+  classDef other fill:#f5f3ff,stroke:#7c3aed,stroke-dasharray:4 4
+  class QT,SPN,IT,TS,MT,CI,RE,RS,DSC,ORD seam
+  class WRK agent
+  class L1,L2 you
+  class CAP,PH,RV,DN,LC,TCH pl
+  class PK,ST stop
+  class SPF,L5G,PCL other
+      </pre>
+      <p class="text-sm text-slate-500 mt-3">The loop closes on itself. A close feeds the
+        queue tick, and the queue tick spawns the next child. <b>So a story of ten children
+        needs one start act and one merge act, and no other input.</b> The merge act can cover
+        all ten at once, with one shell loop.</p>
+      <p class="text-sm text-slate-500 mt-2"><b>Two gates now stand between a ready story and a
+        spawn, and both are cheap.</b> The touch check is an <span class="font-mono">fnmatch</span>
+        compare over two lists of paths. The roof check is two integers. Neither one is an agent,
+        and a <b>no</b> on either sends the tick back to sleep with nothing spent.</p>
+      <p class="text-sm text-violet-700 mt-2"><b>The three violet boxes belong to another
+        story.</b> Story
+        <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/163">#163</a>
+        adds them, and nothing in them is built yet. Two of them run an agent, and both run
+        <b>once per user story</b> and never once per work item. So the per-item cost stays one
+        green box, and a ten-child story pays for two more agents in total.</p>
+    </div>
+
+    <div class="grid md:grid-cols-3 gap-4">
+      <article class="rounded-lg border border-slate-200 bg-white p-4 space-y-2">
+        <p class="text-xs uppercase tracking-wider text-slate-500">1 · the tracker is the state</p>
+        <p class="text-sm text-slate-600">No seam keeps state between ticks. Each tick reads
+          the labels, the cards and the files again. So a reboot loses nothing, and a repeat
+          cannot fire: the transition swapped the label, and the next tick reads the new one.</p>
+      </article>
+      <article class="rounded-lg border border-slate-200 bg-white p-4 space-y-2">
+        <p class="text-xs uppercase tracking-wider text-slate-500">2 · a seam refuses, and never warns</p>
+        <p class="text-sm text-slate-600">A dirty tree stops a teardown. A missing gate record
+          stops a review transition. A conflict stops a merge. Each one is a non-zero exit and
+          a comment on the item, and never a warning the run walks past.</p>
+      </article>
+      <article class="rounded-lg border border-slate-200 bg-white p-4 space-y-2">
+        <p class="text-xs uppercase tracking-wider text-slate-500">3 · one agent, one job</p>
+        <p class="text-sm text-slate-600">The worker writes code. It writes no label, moves no
+          card, opens no schedule and merges nothing. So a worker that dies mid-run costs one
+          worktree, and never a corrupt state.</p>
+      </article>
+    </div>
+  </section>
+
+  <!-- ══════════════ THE CONTROL SURFACE ══════════════ -->
+  <section class="space-y-5">
+    <div class="flex items-baseline gap-3 flex-wrap">
+      <h2 class="font-serif text-2xl">The control surface · every fact, and what it fires</h2>
+      <span class="text-xs uppercase tracking-wider px-2 py-0.5 rounded bg-slate-800 text-white">this table is the API</span>
+    </div>
+    <p class="text-slate-600 max-w-3xl">Read this table as the whole interface. A fact fires
+      exactly one deterministic response. <b>Two label families stay mutually exclusive.</b> A
+      work-state label swaps, and never stacks. A phase label swaps, and never stacks.</p>
+    <p class="text-slate-600 max-w-3xl"><b>Two facts are not labels, and both are new.</b> A card
+      in the <span class="font-mono">To do</span> column is the second half of the start gate. A
+      <span class="font-mono">## Touches</span> block in the item body decides whether two
+      children can run at the same time. Every other column is still a copy of the work-state
+      label, and the board writes nothing back there (ADR 0009).</p>
+
+    <div class="rounded-lg border border-slate-200 bg-white overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead class="text-xs uppercase tracking-wider text-slate-500 border-b border-slate-200">
+          <tr class="text-left">
+            <th class="px-4 py-3 font-medium">Fact</th>
+            <th class="px-4 py-3 font-medium">Family</th>
+            <th class="px-4 py-3 font-medium">Who writes it</th>
+            <th class="px-4 py-3 font-medium">What reads it, and what happens next</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-100 text-slate-600">
+          <tr class="bg-amber-50/60">
+            <td class="px-4 py-3 font-mono text-[12.5px] text-slate-900">ready-for-agent</td>
+            <td class="px-4 py-3">work state</td>
+            <td class="px-4 py-3"><b>You</b>, or triage</td>
+            <td class="px-4 py-3"><b>Half of the start gate.</b> On its own it starts nothing. With the card in <span class="font-mono">To do</span>, the queue tick starts the item once both roofs are free and every <span class="font-mono">## Blocked by</span> item is closed</td>
+          </tr>
+          <tr class="bg-amber-50/60">
+            <td class="px-4 py-3 font-mono text-[12.5px] text-slate-900">card in To do
+              <span class="ml-1 text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-200">new</span></td>
+            <td class="px-4 py-3">board · intent</td>
+            <td class="px-4 py-3"><b>You</b>, by dragging</td>
+            <td class="px-4 py-3"><b>The other half of the start gate.</b> The reconcile pass never writes <span class="font-mono">Status</span> over it, so your drag survives. <b>No board means the label alone is the gate.</b> A drag back out removes nothing</td>
+          </tr>
+          <tr class="bg-indigo-50/50">
+            <td class="px-4 py-3 font-mono text-[12.5px] text-slate-900">## Touches
+              <span class="ml-1 text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-800 border border-indigo-200">new</span></td>
+            <td class="px-4 py-3">item body</td>
+            <td class="px-4 py-3">the session that writes the item</td>
+            <td class="px-4 py-3">A list of paths or globs. Two items start in parallel only where their lists are disjoint. <b>No block means the item runs alone</b>, where <span class="font-mono">parallel_check</span> is <span class="font-mono">touches</span></td>
+          </tr>
+          <tr>
+            <td class="px-4 py-3 font-mono text-[12.5px] text-slate-900">in-progress</td>
+            <td class="px-4 py-3">work state</td>
+            <td class="px-4 py-3"><span class="font-mono">spawn_item.py</span></td>
+            <td class="px-4 py-3">The queue tick skips the item. Written <b>before</b> the prompt, so the same item cannot be handed out twice</td>
+          </tr>
+          <tr>
+            <td class="px-4 py-3 font-mono text-[12.5px] text-slate-900">phase:impl</td>
+            <td class="px-4 py-3">phase</td>
+            <td class="px-4 py-3"><span class="font-mono">spawn_item.py</span></td>
+            <td class="px-4 py-3">The item tick watches the checklist and the gate record. A full checklist plus a green record swaps the phase</td>
+          </tr>
+          <tr>
+            <td class="px-4 py-3 font-mono text-[12.5px] text-slate-900">phase:e2e</td>
+            <td class="px-4 py-3">phase</td>
+            <td class="px-4 py-3">the transition seam</td>
+            <td class="px-4 py-3">Same watch, with the UI proof required. Present only where the config asks for a proof phase. <b>A <span class="font-mono">user-story</span> parent can also wear this label</b>, while its story proof runs</td>
+          </tr>
+          <tr>
+            <td class="px-4 py-3 font-mono text-[12.5px] text-slate-900">phase:review</td>
+            <td class="px-4 py-3">phase</td>
+            <td class="px-4 py-3">the transition seam</td>
+            <td class="px-4 py-3">Present only where <span class="font-mono">review.enabled</span> is true. The tick watches the newest <span class="font-mono">Verdict:</span> comment</td>
+          </tr>
+          <tr class="bg-indigo-50/50">
+            <td class="px-4 py-3 font-mono text-[12.5px] text-slate-900">phase:fix-&lt;k&gt;
+              <span class="ml-1 text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-800 border border-indigo-200">new</span></td>
+            <td class="px-4 py-3">phase</td>
+            <td class="px-4 py-3">the transition seam</td>
+            <td class="px-4 py-3"><b>This label replaces the back-off marker.</b> A fix round in flight is a fact on the tracker, so the same verdict cannot fire a second round</td>
+          </tr>
+          <tr>
+            <td class="px-4 py-3 font-mono text-[12.5px] text-slate-900">to-review</td>
+            <td class="px-4 py-3">work state</td>
+            <td class="px-4 py-3">the transition seam</td>
+            <td class="px-4 py-3">The item tick waits for <span class="font-mono">to-merge</span>. The card moves to <span class="font-mono">In review</span>. No phase label is present</td>
+          </tr>
+          <tr class="bg-amber-50/60">
+            <td class="px-4 py-3 font-mono text-[12.5px] text-slate-900">to-merge</td>
+            <td class="px-4 py-3">work state</td>
+            <td class="px-4 py-3"><b>You</b></td>
+            <td class="px-4 py-3">The item tick runs <span class="font-mono">merge_train.py</span> over every <span class="font-mono">to-merge</span> item, then <span class="font-mono">close_item.py</span> per item in the planned order</td>
+          </tr>
+          <tr class="bg-rose-50/40">
+            <td class="px-4 py-3 font-mono text-[12.5px] text-slate-900">needs-human
+              <span class="ml-1 text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-rose-100 text-rose-700 border border-rose-200">new</span></td>
+            <td class="px-4 py-3">work state</td>
+            <td class="px-4 py-3">every seam</td>
+            <td class="px-4 py-3"><b>Every tick then leaves the item alone.</b> One comment says why. This is the one label that stops the machine, and only you remove it</td>
+          </tr>
+          <tr class="bg-indigo-50/50">
+            <td class="px-4 py-3 font-mono text-[12.5px] text-slate-900">role:heavy · role:light
+              <span class="ml-1 text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-800 border border-indigo-200">new</span></td>
+            <td class="px-4 py-3">routing</td>
+            <td class="px-4 py-3">You, or triage</td>
+            <td class="px-4 py-3"><span class="font-mono">spawn_item.py</span> maps the label to a model and an effort from the config. <b>Absent means light.</b> So a spawn needs no judgement</td>
+          </tr>
+          <tr class="bg-indigo-50/50">
+            <td class="px-4 py-3 font-mono text-[12.5px] text-slate-900">verb:&lt;skill&gt;
+              <span class="ml-1 text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-800 border border-indigo-200">new</span></td>
+            <td class="px-4 py-3">routing</td>
+            <td class="px-4 py-3">You, or triage</td>
+            <td class="px-4 py-3">Names the skill the prompt splices in, from the table in <span class="font-mono">skill-routing.md</span>. <b>Absent means <span class="font-mono">/implement</span>.</b></td>
+          </tr>
+          <tr>
+            <td class="px-4 py-3 font-mono text-[12.5px] text-slate-900">user-story</td>
+            <td class="px-4 py-3">shape</td>
+            <td class="px-4 py-3">You, or triage</td>
+            <td class="px-4 py-3"><b>This is the item you start.</b> The queue tick never spawns it for the work itself. It descends to the unblocked children and spawns those, and no child needs a label or a card. The last child to close bumps the plugin version. <b>The one exception is the story proof</b> (story <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/163">#163</a>): the parent wears <span class="font-mono">phase:e2e</span>, and one fresh worker proves the story before the parent closes</td>
+          </tr>
+        </tbody>
+      </table>
+      <p class="px-4 py-3 text-sm text-slate-500">Three labels are new, and two of them replace
+        judgement with a lookup. <span class="font-mono">role:*</span> and
+        <span class="font-mono">verb:*</span> are what let a script spawn a worker without an
+        agent to classify the item first. Each one has a default, so an unlabelled item still
+        runs.</p>
+      <p class="px-4 pb-3 text-sm text-slate-500"><b>The start gate is the one place two facts
+        say one thing, and that is deliberate.</b> An item holding one fact and not the other is
+        not an error, and nothing repairs it: that is how you park a groomed story. The cost is
+        that a forgotten drag reads as an empty queue, so <b>the queue report names every item
+        that holds one fact and not the other</b>.</p>
+    </div>
+  </section>
+
+  <!-- ══════════════ WHERE THE AGENT STAYS ══════════════ -->
+  <section class="space-y-5">
+    <div class="flex items-baseline gap-3 flex-wrap">
+      <h2 class="font-serif text-2xl">Where an agent is needed, and where it is not</h2>
+      <span class="text-xs uppercase tracking-wider px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 border border-emerald-200">one agent in the run</span>
+    </div>
+
+    <div class="grid md:grid-cols-2 gap-6">
+      <div class="rounded-lg border-2 border-emerald-500 bg-white p-5 space-y-3">
+        <p class="text-xs uppercase tracking-wider text-emerald-700">An agent is needed here</p>
+        <div class="space-y-3 text-sm text-slate-600">
+          <p><b>The worker.</b> It reads a work item and writes code. No script can do that.
+            It is the whole reason the loop exists.</p>
+          <p><b>The adversarial reviewer</b>, where
+            <span class="font-mono">review.enabled</span> is true. A verdict is a judgement.
+            It is off by default in this repo, so the normal run has one agent.</p>
+          <p><b>Writing the work item</b>, before the run.
+            <span class="font-mono">/to-spec</span>, <span class="font-mono">/to-tickets</span>
+            and <span class="font-mono">/triage</span> turn a conversation into items and
+            labels. You start those, and they end before the first
+            <span class="font-mono">ready-for-agent</span>. <b>They also write the
+            <span class="font-mono">## Touches</span> block</b>, because the person who splits
+            the work is the only one who knows the paths before the code exists.</p>
+          <p><b>The proof worker</b>, once per user story. Story
+            <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/163">#163</a>
+            adds it, and it is not built yet. A browser run is judgement, so it is an agent. It
+            runs once per story, so it does not change the per-item cost. <b>The tick still runs
+            no agent.</b></p>
+        </div>
+        <div class="rounded border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">
+          <p><b>One case is deliberately not an agent.</b> A merge conflict is judgement, so an
+            agent could resolve it. This design parks it for you instead. A machine that
+            guesses what your merged file means is the one failure nobody can see in a diff.
+            Run <span class="font-mono">/resolving-merge-conflicts</span> yourself when you
+            want the help.</p>
+        </div>
+      </div>
+
+      <div class="rounded-lg border-2 border-indigo-400 bg-white p-5 space-y-3">
+        <p class="text-xs uppercase tracking-wider text-indigo-700">These stop being an agent</p>
+        <table class="w-full text-sm">
+          <thead class="text-xs uppercase tracking-wider text-slate-500 border-b border-slate-200">
+            <tr class="text-left">
+              <th class="py-2 font-medium">Was an agent lookup</th>
+              <th class="py-2 font-medium">Becomes</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-100 text-slate-600">
+            <tr><td class="py-2">Answer a wake, and write the two labels</td><td class="py-2">the transition seam</td></tr>
+            <tr><td class="py-2">Classify the role, and pick a model</td><td class="py-2"><span class="font-mono">role:*</span> label</td></tr>
+            <tr><td class="py-2">Resolve the verb, and pick a skill</td><td class="py-2"><span class="font-mono">verb:*</span> label</td></tr>
+            <tr><td class="py-2">Draft the prompt for this item</td><td class="py-2">a rendered template</td></tr>
+            <tr><td class="py-2">Cut the worktree, and gate readiness</td><td class="py-2"><span class="font-mono">spawn_item.py</span></td></tr>
+            <tr><td class="py-2">Pick which ready item runs next</td><td class="py-2">the queue tick</td></tr>
+            <tr><td class="py-2">Pick which children of a story run</td><td class="py-2">the queue tick's descent</td></tr>
+            <tr><td class="py-2">Judge whether two children collide</td><td class="py-2">a <span class="font-mono">## Touches</span> compare</td></tr>
+            <tr><td class="py-2">Rank five branches for merging</td><td class="py-2"><span class="font-mono">merge_train.py</span></td></tr>
+            <tr><td class="py-2">Tell each PR where it sits in the order</td><td class="py-2">the order comment</td></tr>
+            <tr><td class="py-2">Re-prompt a stalled worker</td><td class="py-2">the same rendered template</td></tr>
+          </tbody>
+        </table>
+        <p class="text-sm text-slate-600">Every row above is a lookup, a read, or a
+          computation. Each one already has an answer written in a reference file. <b>A rule
+          written for an agent to follow is a rule a script can run.</b></p>
+      </div>
+    </div>
+
+    <div class="rounded-lg border border-slate-200 bg-white p-5 space-y-3">
+      <p class="text-xs uppercase tracking-wider text-slate-500">The prompt becomes a template, and stays reviewed</p>
+      <p class="text-sm text-slate-600">A rendered prompt is the one part of this that looks
+        like a downgrade. It is not. ADR 0006 keeps holding, and it moves up one level:
+        <b><span class="font-mono">prompt-improver</span> reviews the template once, at build
+        time, instead of every prompt at run time.</b> The template takes the work item title
+        and body, the checklist from
+        <span class="font-mono">references/checklist.template.md</span>, the gate commands from
+        the config, and the skill named by the <span class="font-mono">verb:*</span> label.
+        Those are the only values a per-item prompt ever carried.</p>
+      <p class="text-sm text-slate-600"><b>The test is the guard.</b> The template renders in
+        a test, against a fixture work item, and the test fails when a field goes missing. A
+        prompt an agent wrote by hand had no such check.</p>
+    </div>
+  </section>
+
+  <!-- ══════════════ THE TWO TICKS ══════════════ -->
+  <section class="space-y-5">
+    <div class="flex items-baseline gap-3 flex-wrap">
+      <h2 class="font-serif text-2xl">The two ticks</h2>
+      <span class="text-xs uppercase tracking-wider px-2 py-0.5 rounded bg-slate-800 text-white">diagram B</span>
+    </div>
+    <p class="text-slate-600 max-w-3xl">One schedule per repo watches the queue. One schedule
+      per item watches the worker. The <b>Tool</b> owns both, and not a session's shell. So
+      both live through a closed session, a restarted harness and a reboot.</p>
+    <p class="text-slate-600 max-w-3xl"><b>The big change is in the tick itself.</b> Today the
+      precheck reads facts, prints a line, and wakes an agent to act. Now it reads the facts
+      and <b>acts</b>, because the act is a label swap. It wakes an agent only to spawn a
+      worker, and it reports to you only when it refuses.</p>
+
+    <div class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+      <pre class="mermaid">
+flowchart TB
+  subgraph QQ["Queue tick · orchestrator-queue · repo wide"]
+    direction TB
+    A1["Read every open item<br/>labels + cards + Blocked by edges"]
+    A2{"Any item with BOTH facts?<br/>ready-for-agent + card in To do"}
+    A6["user-story? descend to the<br/>unblocked children · else take the item"]
+    A7{"Touch set disjoint from<br/>every live worker's?"}
+    A3{"Both roofs free?<br/>max_stories 2 · worker cap 4"}
+    A4["spawn_item.py for that item<br/>one item per tick"]
+    A5["exit 1 · nothing is due"]
+    A1 --> A2
+    A2 -- no --> A5
+    A2 -- yes --> A6 --> A7
+    A7 -- no --> A5
+    A7 -- yes --> A3
+    A3 -- no --> A5
+    A3 -- yes --> A4
+  end
+
+  subgraph II["Item tick · orchestrator-item-N · one worker"]
+    direction TB
+    B1{"Does the worktree<br/>still exist?"}
+    B2["Read the labels and the comments"]
+    B3{"needs-human label?"}
+    B4{"Which family of label<br/>does the item wear?"}
+    B5["Read the work product<br/>checklist · gate record · live process · file age"]
+    B6{"Is a transition due?"}
+    B7["transition seam · swap the labels<br/>move the card · exit 1"]
+    B8["merge_train.py, then close_item.py<br/>per item, in the planned order"]
+    B9["exit 3 · nothing left to watch"]
+    B10["exit 1 · nothing is due"]
+    B11["needs-human + one comment<br/>exit 2 · refused"]
+    B1 -- no --> B9
+    B1 -- yes --> B2 --> B3
+    B3 -- yes --> B10
+    B3 -- no --> B4
+    B4 -- "to-merge" --> B8
+    B4 -- "phase:*" --> B5 --> B6
+    B6 -- no --> B10
+    B6 -- yes --> B7
+    B8 -. "conflict · dirty tree" .-> B11
+    B6 -. "dead · rounds exhausted · unreadable" .-> B11
+  end
+
+  classDef seam fill:#eef2ff,stroke:#4f46e5
+  classDef pl fill:#f8fafc,stroke:#94a3b8
+  classDef quiet fill:#f1f5f9,stroke:#64748b,color:#334155
+  classDef stop fill:#fee2e2,stroke:#dc2626,color:#991b1b
+  class A1,A4,A6,B2,B5,B7,B8 seam
+  class A2,A3,A7,B1,B3,B4,B6 pl
+  class A5,B9,B10 quiet
+  class B11 stop
+      </pre>
+      <p class="text-sm text-slate-500 mt-3"><b>No path exits 0.</b> Exit 0 is what loads the
+        schedule's own model, and no tick needs one. So both schedules hold a prompt and a
+        provider that never run. The only tokens the loop spends belong to the worker.</p>
+      <p class="text-sm text-slate-500 mt-2"><b>The queue tick now reads the board every
+        minute.</b> That is one Projects v2 query per tick, repo-wide, and it is the price of the
+        second fact. Before this change the board read was a side effect of the reconcile pass.
+        Now the start path depends on it, so a board read that fails is a tick that spawns
+        nothing and says so.</p>
+    </div>
+
+    <div class="grid lg:grid-cols-2 gap-6">
+      <div class="rounded-lg border border-slate-200 bg-white overflow-x-auto">
+        <p class="px-4 pt-4 text-xs uppercase tracking-wider text-slate-500">What each exit code means</p>
+        <table class="w-full text-sm mt-2">
+          <thead class="text-xs uppercase tracking-wider text-slate-500 border-b border-slate-200">
+            <tr class="text-left">
+              <th class="px-4 py-2 font-medium">Code</th>
+              <th class="px-4 py-2 font-medium">Meaning</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-100 text-slate-600">
+            <tr><td class="px-4 py-2 font-mono">1</td><td class="px-4 py-2">Nothing is due, <b>or</b> a transition was applied and the run is quiet again</td></tr>
+            <tr class="bg-rose-50/40"><td class="px-4 py-2 font-mono">2</td><td class="px-4 py-2"><b>New.</b> A seam refused. The item wears <span class="font-mono">needs-human</span>, and one comment says why</td></tr>
+            <tr><td class="px-4 py-2 font-mono">3</td><td class="px-4 py-2">The worktree is gone, so there is nothing left to watch</td></tr>
+            <tr><td class="px-4 py-2 font-mono">4</td><td class="px-4 py-2">A worker was spawned, or an agent was woken</td></tr>
+            <tr><td class="px-4 py-2 font-mono">64</td><td class="px-4 py-2">A flag has a typo. It sits outside the contract, so a bad command cannot read as a quiet tick</td></tr>
+          </tbody>
+        </table>
+        <p class="px-4 py-3 text-sm text-slate-500">Code 5 retires with the wake ladder. A
+          transition no longer needs a target to accept a line, because the seam applies it
+          itself.</p>
+      </div>
+
+      <div class="rounded-lg border border-slate-200 bg-white p-4 space-y-3">
+        <p class="text-xs uppercase tracking-wider text-slate-500">Three bugs the label kills</p>
+        <p class="text-sm text-slate-600"><b><a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/155">#155</a>
+          two stacked work states.</b> The seam owns the swap, and one test asserts that
+          exactly one work-state label is present after every transition. A prose rule in four
+          places becomes one function.</p>
+        <p class="text-sm text-slate-600"><b><a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/156">#156</a>
+          an undelivered wake burns its window.</b> There is no delivery, so there is no
+          marker and no window. The transition either applied or it did not, and the next tick
+          reads the truth from the labels.</p>
+        <p class="text-sm text-slate-600"><b><a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/157">#157</a>
+          an answered fix round re-fires.</b> The
+          <span class="font-mono">phase:fix-&lt;k&gt;</span> label records the round in
+          flight, on the tracker, where any tick and any restarted session reads it.</p>
+        <p class="text-sm text-slate-600"><b>All three are one class of bug:</b> a fact that
+          lived in a marker file, in a delivery, or in a session's memory. Move each fact to a
+          label, and the bug has nowhere to live.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════════ THE SEAMS ══════════════ -->
+  <section class="space-y-5">
+    <div class="flex items-baseline gap-3 flex-wrap">
+      <h2 class="font-serif text-2xl">Four seams own the whole run</h2>
+      <span class="text-xs uppercase tracking-wider px-2 py-0.5 rounded bg-indigo-100 text-indigo-800 border border-indigo-200">stdlib only · tested</span>
+    </div>
+    <p class="text-slate-600 max-w-3xl">Three exist. One is new. Every one is stdlib-only
+      Python with a test suite, because that is the bar this repo already holds for
+      <span class="font-mono">close_item.py</span>,
+      <span class="font-mono">worker_state.py</span> and
+      <span class="font-mono">merge_train.py</span>.</p>
+    <p class="text-slate-600 max-w-3xl"><b>The count is four, and it stays four.</b> Story
+      <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/163">#163</a>,
+      the story proof, adds no seam. It spawns one more worker and writes two artifacts, so
+      the existing seams carry it.</p>
+
+    <div class="rounded-lg border border-slate-200 bg-white overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead class="text-xs uppercase tracking-wider text-slate-500 border-b border-slate-200">
+          <tr class="text-left">
+            <th class="px-4 py-3 font-medium">Seam</th>
+            <th class="px-4 py-3 font-medium">State</th>
+            <th class="px-4 py-3 font-medium">What it owns</th>
+            <th class="px-4 py-3 font-medium">What it refuses</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-100 text-slate-600">
+          <tr>
+            <td class="px-4 py-3 font-mono text-[12.5px] text-slate-900">worker_state.py</td>
+            <td class="px-4 py-3"><span class="text-xs uppercase px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 border border-emerald-200">exists</span></td>
+            <td class="px-4 py-3">Both ticks. It reads the labels and the work product, then calls the transition it computed. Gains the <span class="font-mono">queue</span> subcommand and the write path</td>
+            <td class="px-4 py-3">A transition with no gate record at the current <span class="font-mono">HEAD</span></td>
+          </tr>
+          <tr>
+            <td class="px-4 py-3 font-mono text-[12.5px] text-slate-900">close_item.py</td>
+            <td class="px-4 py-3"><span class="text-xs uppercase px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 border border-emerald-200">exists</span></td>
+            <td class="px-4 py-3">Steps 4 to 8 of the close transaction, in one order, teardown included</td>
+            <td class="px-4 py-3">A dirty worktree, at step 6. It refuses, and never warns</td>
+          </tr>
+          <tr>
+            <td class="px-4 py-3 font-mono text-[12.5px] text-slate-900">merge_train.py</td>
+            <td class="px-4 py-3"><span class="text-xs uppercase px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 border border-emerald-200">exists</span>
+              <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/152">#152</a></td>
+            <td class="px-4 py-3">The order. It test-merges each queued branch in a throwaway checkout, ranks by file overlap, and prints a JSON plan</td>
+            <td class="px-4 py-3">Nothing. <b>It mutates nothing at all.</b> It plans, and the close merges</td>
+          </tr>
+          <tr class="bg-amber-50/50">
+            <td class="px-4 py-3 font-mono text-[12.5px] text-slate-900">spawn_item.py</td>
+            <td class="px-4 py-3"><span class="text-xs uppercase px-1.5 py-0.5 rounded bg-rose-100 text-rose-700 border border-rose-200">new</span></td>
+            <td class="px-4 py-3">The worktree, the terminal, the rendered prompt, the readiness gate, the two labels and the item schedule. Six steps, one order</td>
+            <td class="px-4 py-3">A harness that fails the readiness gate. No prompt is ever sent to a process that is not alive</td>
+          </tr>
+        </tbody>
+      </table>
+      <p class="px-4 py-3 text-sm text-slate-500">The transition writer lives inside
+        <span class="font-mono">worker_state.py</span>, and not in a fifth file. It reads the
+        same labels the tick already read, in the same process, so a split would only add a
+        second read that can disagree with the first.</p>
+    </div>
+
+    <div class="rounded-lg border border-slate-200 bg-white p-5 space-y-3">
+      <p class="text-xs uppercase tracking-wider text-slate-500">One tracker adapter behind all four</p>
+      <p class="text-sm text-slate-600">Four seams now read and write the tracker, so the
+        adapter stops being a nice idea. Story
+        <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/143">#143</a>
+        becomes a hard dependency of this design, not a parallel track.
+        <span class="font-mono">gh</span> and <span class="font-mono">glab</span> both need one
+        verified recipe per operation: read labels, write labels, read the body, post a
+        comment, close an item, move a card.</p>
+      <p class="text-sm text-slate-600"><b>Every seam takes the tracker as flags, and reads no
+        config file.</b> That rule already holds for the tick, and it is why the same code
+        works on GitHub and on a self-hosted GitLab with no wrapper. The one place the config
+        is read is the schedule that the setup writes.</p>
+    </div>
+  </section>
+
+  <!-- ══════════════ SAFETY ══════════════ -->
+  <section class="space-y-5">
+    <div class="flex items-baseline gap-3 flex-wrap">
+      <h2 class="font-serif text-2xl">Safety · what an unwatched script may do</h2>
+      <span class="text-xs uppercase tracking-wider px-2 py-0.5 rounded bg-rose-100 text-rose-700 border border-rose-200">read this one twice</span>
+    </div>
+    <p class="text-slate-600 max-w-3xl">A deterministic loop is safer than an agent loop in
+      one way, and more dangerous in another. It is safer because every act is a tested
+      function with an exit code. It is more dangerous because nothing hesitates. So the
+      permissions are written down, and a test holds each one.</p>
+
+    <div class="grid md:grid-cols-2 gap-6">
+      <div class="rounded-lg border-2 border-emerald-400 bg-emerald-50 p-5 space-y-2">
+        <p class="text-xs uppercase tracking-wider text-emerald-800">A seam may do this unwatched</p>
+        <ul class="text-sm text-slate-700 space-y-2 list-disc pl-5">
+          <li>Swap a label, and move a card.</li>
+          <li>Cut a worktree, and start a harness process.</li>
+          <li>Send a rendered prompt to a live worker.</li>
+          <li>Merge a PR, <b>where the item wears <span class="font-mono">to-merge</span></b>. That label is a human act, and it is the standing authorization (ADR 0037).</li>
+          <li>Tear down a worktree with a <b>clean</b> tree, and remove its schedule.</li>
+          <li>Post a comment, and close an item whose PR is merged.</li>
+          <li><b>Spawn every unblocked child of a story you started</b>, under both roofs. The story is the ask, and the children are what it asked for.</li>
+          <li><b>Post and rewrite the order comment</b> on a PR/MR. It reports the plan, and it authorises nothing.</li>
+        </ul>
+      </div>
+      <div class="rounded-lg border-2 border-rose-400 bg-rose-50 p-5 space-y-2">
+        <p class="text-xs uppercase tracking-wider text-rose-800">A seam may never do this</p>
+        <ul class="text-sm text-slate-700 space-y-2 list-disc pl-5">
+          <li>Merge an item that does not wear <span class="font-mono">to-merge</span>. There is no other path to a merge.</li>
+          <li>Resolve a conflict. It parks the branch and comments the paths.</li>
+          <li>Remove a worktree with uncommitted work. Step 6 refuses.</li>
+          <li>Write <span class="font-mono">ready-for-agent</span>. Only you and triage do, so no loop can start work you did not ask for. <b>A child of a story is never labelled either</b>, so this rule needs no exception.</li>
+          <li><b>Move a card into <span class="font-mono">To do</span> or <span class="font-mono">To merge</span>.</b> Both columns are your intent, and a seam that writes one would authorise its own work.</li>
+          <li><b>Remove a label because a card moved.</b> The promotion runs one way only.</li>
+          <li>Remove <span class="font-mono">needs-human</span>. That label is a full stop, and only you lift it.</li>
+          <li>Spawn past <b>either</b> roof, or spawn a <span class="font-mono">user-story</span> item for the work itself.</li>
+          <li><b>Spawn two items whose touch sets overlap</b>, where <span class="font-mono">parallel_check</span> is <span class="font-mono">touches</span>.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="rounded-lg border border-slate-200 bg-white p-5 space-y-2">
+      <p class="text-xs uppercase tracking-wider text-slate-500">The one cost bound</p>
+      <p class="text-sm text-slate-600">Money is spent in exactly one place: a spawned worker,
+        and its re-prompts. So the cost bound is three numbers, and all three live in the config:
+        <span class="font-mono">max_stories</span> (2), the worker cap (4), and the re-prompt
+        bound per item. <b>The two roofs do not multiply. The lower one wins</b>, so the worst
+        case is four live workers and not eight. <b>A worker that stalls twice is
+        re-spawned once, one rung up, and never a third time.</b> The re-spawn is recorded as a
+        label, so a restarted loop cannot forget it and try again.</p>
+      <p class="text-sm text-slate-600">A dirty tree still stops the re-spawn, because a
+        re-spawn tears down. That is the only ask left inside the automatic part, and the ask
+        exists to protect uncommitted work.</p>
+    </div>
+  </section>
+
+  <!-- ══════════════ RETIRED ══════════════ -->
+  <section class="space-y-5">
+    <div class="flex items-baseline gap-3 flex-wrap">
+      <h2 class="font-serif text-2xl">What this design retires</h2>
+      <span class="text-xs uppercase tracking-wider px-2 py-0.5 rounded bg-violet-100 text-violet-800 border border-violet-200">7 new ADRs · 2 on disk</span>
+    </div>
+    <p class="text-slate-600 max-w-3xl">A decision that reverses or narrows an earlier one
+      gets a new ADR, and never a silent edit. Seven decisions here do that. Two of them touch
+      ADRs that landed this week, so the pair reads as narrowed and not as
+      contradicted.</p>
+    <p class="text-slate-600 max-w-3xl"><b>The planned numbers start at 0040.</b> Story
+      <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/163">#163</a>
+      claims 0039 for the story proof, and it is queued first. <b>ADR 0045 and ADR 0046 are
+      already on disk</b>, because the story start needed deciding before the rest of the loop
+      could be specified against it.</p>
+
+    <div class="rounded-lg border border-slate-200 bg-white overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead class="text-xs uppercase tracking-wider text-slate-500 border-b border-slate-200">
+          <tr class="text-left">
+            <th class="px-4 py-3 font-medium">New ADR</th>
+            <th class="px-4 py-3 font-medium">What it decides</th>
+            <th class="px-4 py-3 font-medium">What it narrows or reverses</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-100 text-slate-600">
+          <tr>
+            <td class="px-4 py-3 font-mono text-[12.5px] text-slate-900">0040</td>
+            <td class="px-4 py-3"><b>The tracker is the only control surface.</b> Every transition the machine makes is one label write. Every act you make is a label or a drag into one of the two intent columns</td>
+            <td class="px-4 py-3"><b>Generalises ADR 0038</b> rather than reversing it. <span class="font-mono">To do</span> joins <span class="font-mono">To merge</span> as intent, in one direction, board to label. <b>ADR 0009 keeps its body</b>, narrowed to the other five columns</td>
+          </tr>
+          <tr>
+            <td class="px-4 py-3 font-mono text-[12.5px] text-slate-900">0041</td>
+            <td class="px-4 py-3"><b>A deterministic outcome runs in a seam, and not in a session.</b> The tick applies the transition it computed. An agent is woken only to write code</td>
+            <td class="px-4 py-3"><b>Narrows ADR 0022 and ADR 0027.</b> The clock still decides when. What changes is that a lookup is not a decision, so it needs no session. <b>Narrows ADR 0025</b>: the writer is the seam, and the worker still writes nothing</td>
+          </tr>
+          <tr>
+            <td class="px-4 py-3 font-mono text-[12.5px] text-slate-900">0042</td>
+            <td class="px-4 py-3"><b>The spawn prompt is a rendered template</b>, and routing comes from labels</td>
+            <td class="px-4 py-3"><b>Narrows ADR 0006.</b> <span class="font-mono">prompt-improver</span> reviews the template at build time, and not each prompt at run time. <b>Narrows ADR 0005</b>: the role is a label, and not a per-item judgement</td>
+          </tr>
+          <tr>
+            <td class="px-4 py-3 font-mono text-[12.5px] text-slate-900">0043</td>
+            <td class="px-4 py-3"><b>The ready queue is a schedule, not a question.</b> One repo-wide tick spawns the next ready item, up to the roofs</td>
+            <td class="px-4 py-3">Narrows ADR 0029. A work-item number stays a complete instruction, and the two facts now carry it, so no one has to type the number</td>
+          </tr>
+          <tr class="bg-violet-50/60">
+            <td class="px-4 py-3 font-mono text-[12.5px] text-slate-900">0045
+              <span class="ml-1 text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 border border-emerald-200">on disk</span></td>
+            <td class="px-4 py-3"><b>A story start is automatic, under two roofs.</b> A story that carries <span class="font-mono">ready-for-agent</span> and sits in <span class="font-mono">To do</span> runs by itself, and the tick descends to its children</td>
+            <td class="px-4 py-3"><b>Narrows ADR 0009 a second time</b>, for the <span class="font-mono">To do</span> column. <b>Narrows ADR 0029</b>: the maintainer supplies a story, and the tick supplies each child's number</td>
+          </tr>
+          <tr class="bg-violet-50/60">
+            <td class="px-4 py-3 font-mono text-[12.5px] text-slate-900">0046
+              <span class="ml-1 text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 border border-emerald-200">on disk</span></td>
+            <td class="px-4 py-3"><b>Parallel spawn is gated on a declared touch set.</b> Two items start together only where their <span class="font-mono">## Touches</span> lists are disjoint</td>
+            <td class="px-4 py-3"><b>Extends ADR 0037</b> from merge time to spawn time. The train's file overlap reads real branches, and a touch set is the same proxy where no branch exists yet</td>
+          </tr>
+          <tr>
+            <td class="px-4 py-3 font-mono text-[12.5px] text-slate-900">0044</td>
+            <td class="px-4 py-3"><b>A failed worker re-spawns once, one rung up, unasked</b>, where the tree is clean</td>
+            <td class="px-4 py-3">Narrows the <i>Safety</i> rule that a <span class="font-mono">dead</span> worker and a second stall both ask first. The data-loss case keeps its ask, because a dirty tree is the only thing that ask protected</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="rounded-lg border-2 border-amber-300 bg-amber-50 p-5 space-y-2">
+      <p class="text-xs uppercase tracking-wider text-amber-800">Say the cost out loud</p>
+      <p class="text-sm text-amber-900"><b>This repo stops being mostly Markdown.</b>
+        <span class="font-mono">CLAUDE.md</span> opens with that sentence today, and this
+        design retires it. Much of <i>On the wake</i> in
+        <span class="font-mono">orchestrator/SKILL.md</span> becomes Python, and the skill body
+        shrinks to the parts an agent still reads: how to be a worker, and how to write a work
+        item.</p>
+      <p class="text-sm text-amber-900">That is the trade you are buying. A rule in prose is
+        cheap to write and impossible to fail. A rule in a seam costs a test and a review, and
+        it cannot drift. <b>You asked for deterministic, and this is what deterministic
+        costs.</b></p>
+      <p class="text-sm text-amber-900">One consequence is worth naming. The plugin becomes
+        useful to a repo that never opens an orchestrator session at all. Two acts and two
+        schedules are the whole interface, so a CI job or a cron can drive it.</p>
+      <p class="text-sm text-amber-900"><b>The story start adds one more cost, and it is on
+        you.</b> A <span class="font-mono">## Touches</span> block is only as good as the person
+        who writes it. An empty block costs parallelism, and a wrong one costs one park. Neither
+        one costs a wrong merge, because the test-merge is still the real check.</p>
+    </div>
+  </section>
+
+  <!-- ══════════════ TO BUILD ══════════════ -->
+  <section class="space-y-5">
+    <div class="flex items-baseline gap-3 flex-wrap">
+      <h2 class="font-serif text-2xl">What is left to build, in order</h2>
+      <span class="text-xs uppercase tracking-wider px-2 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-200">13 items</span>
+    </div>
+    <p class="text-slate-600 max-w-3xl">One item shipped. Three change scope. Seven are new.
+      <b>The tracker adapter goes first now</b>, because four seams read and write the tracker
+      instead of one.</p>
+    <p class="text-slate-600 max-w-3xl"><b>Two rows changed state on 2026-08-24.</b> Row 7 is
+      done. Row 8 shipped under the old design, so its rescope is still open. Row 12 is new,
+      and it is not part of this design: story
+      <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/163">#163</a>
+      is queued ahead of it and adds one step to the loop.</p>
+    <p class="text-slate-600 max-w-3xl"><b>Rows 13 to 15 are the story start, and they are new
+      on 2026-08-24.</b> They land ADR 0045 and ADR 0046. Rows 6 and 11 are rescoped by them,
+      because the queue tick gains the descent and the two gates, and the setup gains two
+      fields.</p>
+
+    <div class="rounded-lg border border-slate-200 bg-white overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead class="text-xs uppercase tracking-wider text-slate-500 border-b border-slate-200">
+          <tr class="text-left">
+            <th class="px-4 py-3 font-medium">#</th>
+            <th class="px-4 py-3 font-medium">Item</th>
+            <th class="px-4 py-3 font-medium">Why it sits here</th>
+            <th class="px-4 py-3 font-medium">State</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-100 text-slate-600">
+          <tr class="bg-rose-50/40">
+            <td class="px-4 py-3 font-mono">1</td>
+            <td class="px-4 py-3 text-slate-900 font-medium">One verified tracker adapter behind every seam · story
+              <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/143">#143</a>
+              (<a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/132">#132</a>,
+              <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/86">#86</a>,
+              <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/134">#134</a>)</td>
+            <td class="px-4 py-3"><b>Hard dependency.</b> Four seams read and write labels. An unverified read makes every one of them refuse</td>
+            <td class="px-4 py-3"><span class="text-xs uppercase tracking-wider px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 border border-emerald-200">ready · rescope</span></td>
+          </tr>
+          <tr>
+            <td class="px-4 py-3 font-mono">2</td>
+            <td class="px-4 py-3 text-slate-900 font-medium">The five new labels · <b>new issue</b></td>
+            <td class="px-4 py-3"><span class="font-mono">needs-human</span>, <span class="font-mono">phase:fix-&lt;k&gt;</span>, <span class="font-mono">role:*</span>, <span class="font-mono">verb:*</span>. Every later item reads them. <span class="font-mono">to-merge</span> is already in the tracker config, from <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/151">#151</a>, so this item adds four labels and not five</td>
+            <td class="px-4 py-3"><span class="text-xs uppercase tracking-wider px-2 py-0.5 rounded bg-rose-100 text-rose-700 border border-rose-200">new</span></td>
+          </tr>
+          <tr>
+            <td class="px-4 py-3 font-mono">3</td>
+            <td class="px-4 py-3 text-slate-900 font-medium">The transition seam, and the label swap · <b>new issue</b>, absorbs
+              <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/155">#155</a></td>
+            <td class="px-4 py-3">The write path inside <span class="font-mono">worker_state.py</span>. One function owns every swap, and one test asserts one work-state label</td>
+            <td class="px-4 py-3"><span class="text-xs uppercase tracking-wider px-2 py-0.5 rounded bg-rose-100 text-rose-700 border border-rose-200">new</span></td>
+          </tr>
+          <tr>
+            <td class="px-4 py-3 font-mono">4</td>
+            <td class="px-4 py-3 text-slate-900 font-medium">The prompt template and the routing labels · <b>new issue</b></td>
+            <td class="px-4 py-3">A spawn cannot be a script until the prompt renders. This is the item that removes the agent from the middle of the loop</td>
+            <td class="px-4 py-3"><span class="text-xs uppercase tracking-wider px-2 py-0.5 rounded bg-rose-100 text-rose-700 border border-rose-200">new</span></td>
+          </tr>
+          <tr>
+            <td class="px-4 py-3 font-mono">5</td>
+            <td class="px-4 py-3 text-slate-900 font-medium"><span class="font-mono">scripts/spawn_item.py</span> · <b>new issue</b></td>
+            <td class="px-4 py-3">Six steps in one order. Needs the template from item 4 and the adapter from item 1</td>
+            <td class="px-4 py-3"><span class="text-xs uppercase tracking-wider px-2 py-0.5 rounded bg-rose-100 text-rose-700 border border-rose-200">new</span></td>
+          </tr>
+          <tr>
+            <td class="px-4 py-3 font-mono">6</td>
+            <td class="px-4 py-3 text-slate-900 font-medium">The queue tick · <b>new issue</b> · <b>rescoped by row 13</b></td>
+            <td class="px-4 py-3">Turns the two facts into act 1. Needs the spawn seam to call. <b>It also owns the descent, the two roofs and the touch check</b>, so it is the largest of the new seams</td>
+            <td class="px-4 py-3"><span class="text-xs uppercase tracking-wider px-2 py-0.5 rounded bg-rose-100 text-rose-700 border border-rose-200">new</span></td>
+          </tr>
+          <tr>
+            <td class="px-4 py-3 font-mono">7</td>
+            <td class="px-4 py-3 text-slate-900 font-medium"><span class="font-mono">scripts/merge_train.py</span> ·
+              <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/152">#152</a></td>
+            <td class="px-4 py-3">Unchanged by this design. It plans, and it mutates nothing. <b>It shipped on 2026-08-24</b>, so nothing here waits on it</td>
+            <td class="px-4 py-3"><span class="text-xs uppercase tracking-wider px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 border border-emerald-200">done</span></td>
+          </tr>
+          <tr class="bg-amber-50/50">
+            <td class="px-4 py-3 font-mono">8</td>
+            <td class="px-4 py-3 text-slate-900 font-medium">The tick runs the train ·
+              <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/153">#153</a> shipped · <b>new issue</b></td>
+            <td class="px-4 py-3"><a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/153">#153</a> shipped the printed <span class="font-mono">merge-requested</span> outcome, and a session acts on it. This design makes the tick run the train itself, so the change is a new item on top of shipped code</td>
+            <td class="px-4 py-3"><span class="text-xs uppercase tracking-wider px-2 py-0.5 rounded bg-rose-100 text-rose-700 border border-rose-200">new</span></td>
+          </tr>
+          <tr class="bg-amber-50/50">
+            <td class="px-4 py-3 font-mono">9</td>
+            <td class="px-4 py-3 text-slate-900 font-medium">The re-spawn rule ·
+              <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/157">#157</a> absorbed · <b>new issue</b></td>
+            <td class="px-4 py-3">The <span class="font-mono">phase:fix-&lt;k&gt;</span> label and the one-shot re-spawn. Last, because it tears down a worker</td>
+            <td class="px-4 py-3"><span class="text-xs uppercase tracking-wider px-2 py-0.5 rounded bg-rose-100 text-rose-700 border border-rose-200">new</span></td>
+          </tr>
+          <tr class="bg-amber-50/50">
+            <td class="px-4 py-3 font-mono">10</td>
+            <td class="px-4 py-3 text-slate-900 font-medium">The flow rewrite, and the version bump ·
+              <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/154">#154</a> · <b>rescope</b></td>
+            <td class="px-4 py-3"><i>On the wake</i> shrinks to a table of what the seam does. The five ADRs land here, and so does the bump. <b><a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/154">#154</a> is in progress under the old design</b>, so this row waits for it to close</td>
+            <td class="px-4 py-3"><span class="text-xs uppercase tracking-wider px-2 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-200">rewrite the spec</span></td>
+          </tr>
+          <tr>
+            <td class="px-4 py-3 font-mono">11</td>
+            <td class="px-4 py-3 text-slate-900 font-medium">Setup writes both schedules · <b>new issue</b> · <b>rescoped</b></td>
+            <td class="px-4 py-3">A repo needs the queue tick at setup time, and not at the first spawn. <span class="font-mono">cmux</span> and <span class="font-mono">herdr</span> have no schedule surface, so they get a cron line and a documented fallback. <b>The interview also asks two new questions</b>: <span class="font-mono">max_stories</span> and <span class="font-mono">parallel_check</span></td>
+            <td class="px-4 py-3"><span class="text-xs uppercase tracking-wider px-2 py-0.5 rounded bg-rose-100 text-rose-700 border border-rose-200">new</span></td>
+          </tr>
+          <tr class="bg-violet-50/50">
+            <td class="px-4 py-3 font-mono">12</td>
+            <td class="px-4 py-3 text-slate-900 font-medium">The story proof · story
+              <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/163">#163</a> · <b>not this design</b></td>
+            <td class="px-4 py-3">A separate story, queued ahead of this one. It proves a user story end to end before the parent closes, and it takes ADR 0039. This design must carry that step through the loop, and it adds no seam</td>
+            <td class="px-4 py-3"><span class="text-xs uppercase tracking-wider px-2 py-0.5 rounded bg-violet-100 text-violet-800 border border-violet-200">5 items · ready</span></td>
+          </tr>
+          <tr class="bg-emerald-50/50">
+            <td class="px-4 py-3 font-mono">13</td>
+            <td class="px-4 py-3 text-slate-900 font-medium">The <span class="font-mono">To do</span> column and the story descent · <b>new issue</b> · ADR 0045</td>
+            <td class="px-4 py-3">The column in the tracker config, the second fact in the gate, the descent to the children, and the two roofs. <b>It changes the reconcile pass too</b>, which must write no <span class="font-mono">Status</span> over a <span class="font-mono">To do</span> card</td>
+            <td class="px-4 py-3"><span class="text-xs uppercase tracking-wider px-2 py-0.5 rounded bg-rose-100 text-rose-700 border border-rose-200">new</span></td>
+          </tr>
+          <tr class="bg-emerald-50/50">
+            <td class="px-4 py-3 font-mono">14</td>
+            <td class="px-4 py-3 text-slate-900 font-medium">The touch set, and the parallel gate · <b>new issue</b> · ADR 0046</td>
+            <td class="px-4 py-3">The <span class="font-mono">## Touches</span> block, the <span class="font-mono">fnmatch</span> compare, the <span class="font-mono">parallel_check</span> field, and the line in the item-writing flows that fills the block</td>
+            <td class="px-4 py-3"><span class="text-xs uppercase tracking-wider px-2 py-0.5 rounded bg-rose-100 text-rose-700 border border-rose-200">new</span></td>
+          </tr>
+          <tr class="bg-emerald-50/50">
+            <td class="px-4 py-3 font-mono">15</td>
+            <td class="px-4 py-3 text-slate-900 font-medium">The order comment on each PR/MR · <b>new issue</b></td>
+            <td class="px-4 py-3">Smallest of the three. The train already computes the order, so this writes it where the reviewer reads. <b>The rewrite-in-place rule is the whole risk</b>: a tick runs once a minute</td>
+            <td class="px-4 py-3"><span class="text-xs uppercase tracking-wider px-2 py-0.5 rounded bg-rose-100 text-rose-700 border border-rose-200">new</span></td>
+          </tr>
+        </tbody>
+      </table>
+      <p class="px-4 py-3 text-sm text-slate-500"><b>One issue to close as out of date:</b>
+        <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/156">#156</a>,
+        because there is no delivery left to fail. Close it with a comment that names the ADR,
+        and never delete it. <b><a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/151">#151</a>
+        already closed</b>, and it shipped the <span class="font-mono">To merge</span> column
+        this design now builds on rather than retires. So ADR 0040 names that column as the
+        pattern it generalises, and row 13 adds the second one beside it.</p>
+    </div>
+  </section>
+
+  <!-- ══════════════ VERSION PLAN ══════════════ -->
+  <section class="space-y-4">
+    <h2 class="font-serif text-2xl">Version plan</h2>
+    <p class="text-slate-600 max-w-3xl">One story is one minor bump, and the bump lands with
+      the last child. This design is two stories: the adapter, then the label-driven loop.</p>
+    <p class="text-slate-600 max-w-3xl"><b>Two stories now sit in front of both of them.</b>
+      Story <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/149">#149</a>
+      has one child left, and story
+      <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/163">#163</a>
+      has five. Each one is a minor bump, so this design starts at 0.35.0 and not at 0.33.0.</p>
+
+    <div class="rounded-lg border border-slate-200 bg-white overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead class="text-xs uppercase tracking-wider text-slate-500 border-b border-slate-200">
+          <tr class="text-left">
+            <th class="px-4 py-3 font-medium">Version</th>
+            <th class="px-4 py-3 font-medium">What lands</th>
+            <th class="px-4 py-3 font-medium">What you get</th>
+            <th class="px-4 py-3 font-medium">Items</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-100 text-slate-600">
+          <tr class="bg-emerald-50/40">
+            <td class="px-4 py-3 font-mono font-bold text-slate-900">0.32.0</td>
+            <td class="px-4 py-3">shipped</td>
+            <td class="px-4 py-3">The gate record, the merge vocabulary, ADR 0036 to 0038</td>
+            <td class="px-4 py-3 font-mono">done</td>
+          </tr>
+          <tr class="bg-sky-50/60">
+            <td class="px-4 py-3 font-mono font-bold text-slate-900">0.33.0</td>
+            <td class="px-4 py-3">story <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/149">#149</a> · the merge queue · <b>in progress</b></td>
+            <td class="px-4 py-3">The merge train runs in the flow. Four of the five children are closed, and <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/154">#154</a> carries the bump</td>
+            <td class="px-4 py-3 font-mono">1</td>
+          </tr>
+          <tr class="bg-violet-50/50">
+            <td class="px-4 py-3 font-mono font-bold text-slate-900">0.34.0</td>
+            <td class="px-4 py-3">story <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/163">#163</a> · the story proof</td>
+            <td class="px-4 py-3">A user story is proved end to end before its parent closes. It takes ADR 0039, and it adds no seam</td>
+            <td class="px-4 py-3 font-mono">5</td>
+          </tr>
+          <tr>
+            <td class="px-4 py-3 font-mono font-bold text-slate-900">0.35.0</td>
+            <td class="px-4 py-3">story <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/143">#143</a> · the tracker adapter</td>
+            <td class="px-4 py-3">One verified read and one verified write per tracker, behind one interface. A GitLab repo becomes a supported target</td>
+            <td class="px-4 py-3 font-mono">3</td>
+          </tr>
+          <tr class="bg-amber-50/60">
+            <td class="px-4 py-3 font-mono font-bold text-slate-900">0.36.0</td>
+            <td class="px-4 py-3">the label-driven loop · items 2 to 11, 13 to 15</td>
+            <td class="px-4 py-3"><b>Two acts run the workflow, once per story.</b> One agent in the run. Four tested seams. No session needed, and a cron can drive it</td>
+            <td class="px-4 py-3 font-mono">12</td>
+          </tr>
+          <tr class="bg-slate-50">
+            <td class="px-4 py-3 font-mono font-bold text-slate-500">after</td>
+            <td class="px-4 py-3">the quality-gate columns · stories
+              <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/100">#100</a>,
+              <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/101">#101</a>,
+              <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/102">#102</a>,
+              <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/103">#103</a></td>
+            <td class="px-4 py-3">Terraform, Kubernetes, Go and TypeScript gate commands. Untouched by this design, and they gain from it: a gate record is what the transition seam reads</td>
+            <td class="px-4 py-3 font-mono">19</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ══════════════ SOURCES ══════════════ -->
+  <section class="space-y-3 pt-2 border-t border-slate-200">
+    <h2 class="font-serif text-xl">Sources</h2>
+    <p class="text-sm text-slate-500 max-w-3xl">Read with <span class="font-mono">gh</span>
+      and from the repo on 2026-08-24, at <span class="font-mono">0.32.0</span>, with 139
+      tests green on <span class="font-mono">python3 -m pytest scripts/ -q</span>. The
+      repo holds 37 ADR files, and the highest number is 0046.</p>
+    <p class="text-sm text-slate-500 max-w-3xl"><b>Files:</b>
+      <span class="font-mono">orchestrator/SKILL.md</span> ·
+      <span class="font-mono">orchestrator/CONTEXT.md</span> ·
+      <span class="font-mono">orchestrator/references/merge-train.md</span> ·
+      <span class="font-mono">orchestrator/references/quality-gates.md</span> ·
+      <span class="font-mono">orchestrator/references/skill-routing.md</span> ·
+      <span class="font-mono">orchestrator/references/checklist.template.md</span> ·
+      <span class="font-mono">scripts/worker_state.py</span> ·
+      <span class="font-mono">scripts/close_item.py</span> ·
+      <span class="font-mono">scripts/merge_train.py</span> ·
+      <span class="font-mono">docs/agents/issue-tracker.md</span>.</p>
+    <p class="text-sm text-slate-500 max-w-3xl"><b>ADRs read:</b> 0005, 0006, 0009, 0015,
+      0016, 0018, 0021, 0022, 0023, 0024, 0025, 0026, 0027, 0029, 0032, 0033, 0034, 0036,
+      0037, 0038. <b>Planned:</b> 0040, 0041, 0042, 0043, 0044. <b>On disk since this
+      revision:</b> 0045 (the story start), 0046 (the touch set).</p>
+    <p class="text-sm text-slate-500 max-w-3xl"><b>Work items:</b>
+      <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/86">#86</a>,
+      <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/132">#132</a>,
+      <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/134">#134</a>,
+      <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/143">#143</a>,
+      <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/149">#149</a>,
+      <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/151">#151</a>,
+      <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/152">#152</a>,
+      <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/153">#153</a>,
+      <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/154">#154</a>,
+      <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/155">#155</a>,
+      <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/156">#156</a>,
+      <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/157">#157</a>,
+      <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/163">#163</a>,
+      <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/167">#167</a>.</p>
+    <p class="text-sm text-slate-500 max-w-3xl"><b>No suite reads this page.</b>
+      <span class="font-mono">scripts/test_links.py</span> walks
+      <span class="font-mono">*.md</span> only. So every fact here is read by hand.
+      <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/167">#167</a>
+      is the work item that brings this page in line with the story proof, and it is still
+      blocked by the ADR and the flow item of story
+      <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/163">#163</a>.</p>
+  </section>
+
+  </main>
+  </body>
+</html>
