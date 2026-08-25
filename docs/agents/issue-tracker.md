@@ -67,6 +67,10 @@ label together, because they answer different questions: who owns the item, and 
 that owner is doing. **Human review carries no phase label**, because `to-review`
 already records it.
 
+**A `user-story` parent also wears `phase:e2e` while its story proof runs**, with the same
+label string and the same swap rule:
+[`orchestrator/docs/adr/0047-the-story-proof-runs-before-the-story-gate.md`](../../orchestrator/docs/adr/0047-the-story-proof-runs-before-the-story-gate.md).
+
 **The `Status` derivation table below is unchanged.** `Status` derives from the
 work-state labels alone, so a phase change writes no card. Rationale, and why this is a
 second family rather than more values in the first one:
