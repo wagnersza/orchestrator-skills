@@ -92,15 +92,60 @@ script rejects a commit. Rationale, and the risk that a line can be forged:
 | SAST | 0 findings at high severity | 4 | `bandit` |
 | dependency CVEs | 0 known at high severity or above | 4 | `pip-audit` |
 
-Every threshold above is a default. **Config is the source of truth for a threshold**,
-so a maintainer raises coverage in one place and not in five tool configs
+Every threshold in a gate matrix is a default. **Config is the source of truth for a
+threshold**, so a maintainer raises coverage in one place and not in five tool configs
 ([ADR 0032](../docs/adr/0032-quality-gates-are-a-layered-contract.md)).
 
-Every tool in the `Tool` column has a row in
+Every tool in a `Tool` column has a row in
 [`requirements.md`](requirements.md), with the reason it is needed, a check command and
 an install command. A row that names a tool with no such row fails
-[`../../scripts/test_quality_gates.py`](../../scripts/test_quality_gates.py). So this
+[`../../scripts/test_quality_gates.py`](../../scripts/test_quality_gates.py). So a
 matrix cannot promise a tool the repo has no install path for.
 
-Only the Python column lands here. The Go, TypeScript, Terraform and Kubernetes
-columns are each a work item of their own.
+## The application gate matrix — TypeScript
+
+| Gate | Hard threshold | Layer | Tool |
+|---|---|---|---|
+| formatting | 0 unformatted files | 1 | `biome format` |
+| strict type check | 0 errors, 0 warnings | 1 | `tsc --noEmit` |
+| static lint | 0 warnings | 1 | `biome check`, `eslint` |
+| cyclomatic complexity | max 10 per function | 2 | `eslint complexity` |
+| cognitive complexity | max 8 per function | 2 | `eslint-plugin-sonarjs` |
+| function length | max 30 lines | 2 | `eslint max-lines-per-function` |
+| unit tests | 100% pass, 0 retries | 2 | `vitest --related` |
+| BDD acceptance | 100% pass, 0 skipped | 2 | `@cucumber/cucumber` |
+| line and branch coverage | over 85% and over 80% | 3 | `vitest --coverage` |
+| import boundaries | 0 illegal, 0 cycles | 3 | `dependency-cruiser` |
+| secrets | 0 leaked | 3 | `gitleaks` |
+| mutation score | 70% of mutants killed | 4 | `stryker` |
+| SAST | 0 high or critical | 4 | `semgrep` |
+| dependency CVEs | 0 high or critical | 4 | `pnpm audit`, `trivy` |
+
+**Two linters, split by speed.** `biome` owns format and the lint rules it implements,
+because it is the fast one. `eslint` runs only the rules `biome` does not have. So layer
+1 keeps its budget. The `Tool` cell of each row names the linter that answers it.
+
+Each layer 2 cap maps to one `eslint` rule, so a reader traces a failure back to a row:
+
+| Gate | `eslint` rule |
+|---|---|
+| cyclomatic complexity | `complexity` |
+| cognitive complexity | `sonarjs/cognitive-complexity` |
+| function length | `max-lines-per-function` |
+
+**The strict type check row holds two halves.** `0 errors, 0 warnings` counts the
+`tsc --noEmit` errors, and it counts the lint rule that bans an explicit `any` cast. A
+type check that passes says nothing where the code casts to `any`. So the ban belongs
+inside the row rather than beside it, and a green layer 1 means the types carry
+information.
+
+**Layer 2 runs the related tests, and layer 3 runs the full suite with coverage.**
+`vitest --related` runs only the tests the change touches, so layer 2 keeps its budget
+on a large package. The full suite is slower, so it belongs to layer 3 and its 30
+seconds. The fast layer stays fast, and the slow one still runs before the push.
+
+**`pnpm` is the documented package manager**, because the dependency CVE row runs
+`pnpm audit`. A repo on `npm` or `yarn` substitutes its own audit command in the
+`Makefile`, and no other row changes.
+
+The Go, Terraform and Kubernetes columns are each a work item of their own.
