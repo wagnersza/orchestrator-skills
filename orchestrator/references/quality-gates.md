@@ -92,15 +92,71 @@ script rejects a commit. Rationale, and the risk that a line can be forged:
 | SAST | 0 findings at high severity | 4 | `bandit` |
 | dependency CVEs | 0 known at high severity or above | 4 | `pip-audit` |
 
-Every threshold above is a default. **Config is the source of truth for a threshold**,
-so a maintainer raises coverage in one place and not in five tool configs
+## The application gate matrix — Go
+
+`go.mod` in the repo root is the detection marker for the Go family. One hit turns this
+column on.
+
+| Gate | Hard threshold | Layer | Tool |
+|---|---|---|---|
+| formatting | 0 unformatted files | 1 | `gofmt`, `goimports` |
+| strict type check | 0 errors, 0 warnings | 1 | `go build`, `go vet` |
+| static lint | 0 warnings | 1 | `golangci-lint` |
+| cyclomatic complexity | max 10 per function | 2 | `gocyclo` |
+| cognitive complexity | max 8 per function | 2 | `gocognit` |
+| function length | max 30 lines | 2 | `funlen` |
+| unit tests | 100% pass, 0 retries | 2 | `go test -race` |
+| BDD acceptance | 100% pass, 0 skipped | 2 | `godog` |
+| line and branch coverage | over 85% and over 80% | 3 | `go test -cover` |
+| import boundaries | 0 illegal, 0 cycles | 3 | `depguard`, `go-arch-lint` |
+| secrets | 0 leaked | 3 | `gitleaks` |
+| mutation score | over 70% mutants killed | 4 | `go-mutesting` |
+| SAST | 0 high or critical | 4 | `gosec`, `semgrep` |
+| dependency CVEs | 0 high or critical | 4 | `govulncheck` |
+
+**`golangci-lint` is one binary and several Gates.** The `Tool` column names the linter
+that answers each Gate, and not the command that runs it. So a reader maps a fault to one
+row and guesses nothing. Which linter answers which row, and which Layer runs it:
+
+| Gate | Linter | Layer |
+|---|---|---|
+| static lint | every linter the config enables, except the four that follow | 1 |
+| cyclomatic complexity | `gocyclo` | 2 |
+| cognitive complexity | `gocognit` | 2 |
+| function length | `funlen` | 2 |
+| import boundaries | `depguard` | 3 |
+
+**One run per Layer.** `golangci-lint` runs once in each Layer of that table, with only
+that Layer's linters on. So a complexity linter does not fire inside the one-second
+budget of Layer 1. Layer 1 also does not wait for `depguard`.
+
+The `gates.thresholds` keys of config reach this column through `.golangci.yml`:
+
+| Config key | Where the number lands | Gate |
+|---|---|---|
+| `complexity` | the `gocyclo` setting of `.golangci.yml` | cyclomatic complexity |
+| `cognitive` | the `gocognit` setting of `.golangci.yml` | cognitive complexity |
+| `funlen` | the `funlen` setting of `.golangci.yml` | function length |
+| `coverage` and `branch` | the Layer 3 coverage gate | line and branch coverage |
+
+**One `thresholds` block serves every column.** So the mutation-score row of this column
+states the same 70% the Python column states, and not a number of its own. A block per
+family reverses that decision, and it needs an ADR of its own
 ([ADR 0032](../docs/adr/0032-quality-gates-are-a-layered-contract.md)).
 
-Every tool in the `Tool` column has a row in
-[`requirements.md`](requirements.md), with the reason it is needed, a check command and
-an install command. A row that names a tool with no such row fails
-[`../../scripts/test_quality_gates.py`](../../scripts/test_quality_gates.py). So this
-matrix cannot promise a tool the repo has no install path for.
+**No soft fail.** Every linter in this column is on from the first commit, and no Go Gate
+has a soft-fail setting. A soft-fail setting exists to carry a backlog, and a hard fail
+from the first commit means no backlog forms.
 
-Only the Python column lands here. The Go, TypeScript, Terraform and Kubernetes
-columns are each a work item of their own.
+## What every column shares
+
+Every threshold in a column here is a default. **Config is the source of truth for a
+threshold**, so a maintainer raises coverage in one place and not in five tool configs
+([ADR 0032](../docs/adr/0032-quality-gates-are-a-layered-contract.md)).
+
+Every tool in a `Tool` column has a row in [`requirements.md`](requirements.md), with the
+reason it is needed, a check command and an install command. A row that names a tool with no such row fails
+[`../../scripts/test_quality_gates.py`](../../scripts/test_quality_gates.py). So no
+column here can promise a tool the repo has no install path for.
+
+The TypeScript, Terraform and Kubernetes columns are each a work item of their own.
