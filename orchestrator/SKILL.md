@@ -1216,12 +1216,13 @@ the merge at the plugin.
 python3 <plugin root>/scripts/close_item.py --issue <N> --pr <PR> \
   --repo <config's repo> --worktree <the path from op 8> \
   --remove-label <the review label> \
+  --tracker-cli <gh or glab> --tracker-host <host> --tracker-repo <owner>/<name> \
   --project-number <n> --project-owner <owner> --project-id <id> \
   --status-field-id <id> --done-option-id <the `Done` option id> \
   --teardown-command '<op 10, with the ids filled in>'
 ```
 
-Three things the seam never learns, so you pass them in:
+Four things the seam never learns, so you pass them in:
 
 - **The teardown command, as a string — and it removes the automation as well as the
   worktree.** Read both halves from
@@ -1242,7 +1243,18 @@ Three things the seam never learns, so you pass them in:
   `docs/agents/issue-tracker.md`'s
   [`## Project board`](../docs/agents/issue-tracker.md#project-board) section. Where
   that section is absent, omit them. The card write is then a no-op
-  ([Board status](#board-status)).
+  ([Board status](#board-status)). **GitLab has no board of this kind**, so a project
+  there passes none of the five and step 7 writes no card.
+- **Which tracker, as three arguments.** Read `--tracker-cli`, `--tracker-host` and
+  `--tracker-repo` from [`../docs/agents/issue-tracker.md`](../docs/agents/issue-tracker.md),
+  the same way the tick reads its own two
+  ([On the wake](#on-the-wake--one-response-per-outcome)). `gh` on github.com is the
+  default, so this repo passes none of the three. A self-hosted GitLab needs all three,
+  and the seam then runs there with no wrapper script. `--tracker-repo` is the tracker
+  project and `--repo` is the checkout on disk, so the two never share an argument. Every
+  command comes from the **Tracker adapter**
+  ([`CONTEXT.md`](CONTEXT.md), **Tracker adapter**), so never write a tracker command
+  here or in a prompt.
 - **Whether to mutate. The default invocation is a dry run.** It resolves every
   precondition, prints the plan as JSON, and changes nothing. Read that plan. Then
   re-run it with `--execute`. Teardown needs `--execute --teardown` together, and

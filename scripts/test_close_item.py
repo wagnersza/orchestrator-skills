@@ -42,6 +42,16 @@ GIT_ENV = {
 ISSUE = 32
 PR = 48
 REVIEW_LABEL = "to-review"
+
+# The second tracker, and the two values its commands need. `--repo` names the checkout
+# on disk, so the tracker project has an argument of its own.
+HOST = "git.example.com"
+PROJECT = "team/thing"
+GLAB = ["--tracker-cli", "glab", "--tracker-host", HOST, "--tracker-repo", PROJECT]
+
+# A closing reason with no space in it, so one write is one line in the write log.
+REASON = "merged-and-closed"
+
 BOARD = [
     "--project-number",
     "6",
@@ -143,6 +153,7 @@ class CloseItemTestCase(unittest.TestCase):
         issue_state="OPEN",
         labels=(REVIEW_LABEL,),
         card="PVTI_fixture",
+        comments=(),
     ):
         """Stand in for the three tracker reads: the PR, the issue, the card.
 
@@ -153,6 +164,8 @@ class CloseItemTestCase(unittest.TestCase):
         item = {"state": issue_state, "labels": list(labels)}
         if card:
             item["card"] = card
+        if comments:
+            item["comments"] = list(comments)
         data = {
             "items": {str(ISSUE): item},
             "pull_requests": {
@@ -557,6 +570,106 @@ class CloseItemTestCase(unittest.TestCase):
         self.assertFalse(self.marker.exists())
         self.assertIsNone(plan["refused"])
         self.assertEqual(len(self.tracker_writes()), 3)
+
+    # --- the other tracker --------------------------------------------------
+
+    def test_the_other_tracker_runs_the_same_five_steps_with_its_own_commands(self):
+        """The seam reaches a second tracker, and the eight steps do not change.
+
+        The one fixture format stands in for either CLI, so this case needs no
+        network and no login. `merged` in lower case passes the same gate, because
+        the seam compares the state in its own case.
+        """
+        self.write_fixture(pr_state="merged", card="")
+        plan = self.close("--execute", *GLAB, board=False)
+
+        self.assertEqual([s["step"] for s in plan["steps"]], [4, 5, 6, 7, 8])
+        self.assertEqual(self.step(plan, 4)["status"], "done")
+        self.assertEqual(
+            self.step(plan, 4)["command"],
+            f"glab mr view {PR} -F json -R {HOST}/{PROJECT}",
+        )
+        self.assertIsNone(plan["refused"])
+        self.assertEqual(plan["exit_code"], EXIT_OK)
+        self.assertEqual(
+            self.tracker_writes(),
+            [
+                f"glab issue update {ISSUE} --unlabel {REVIEW_LABEL} -R {HOST}/{PROJECT}",
+                f"glab issue close {ISSUE} -R {HOST}/{PROJECT}",
+            ],
+        )
+
+    def test_the_other_tracker_with_no_board_arguments_writes_no_card(self):
+        """That tracker has no board of this kind, so the five arguments stay absent."""
+        plan = self.close(*GLAB, board=False)
+
+        card = self.part(plan, "card")
+        self.assertEqual(card["status"], "skipped")
+        self.assertEqual(card["argv"], [])
+        self.assertIn("--project-number", card["note"])
+        # And nothing refused over the absence: the label and the close still run.
+        self.assertIsNone(plan["refused"])
+        self.assertEqual(plan["exit_code"], EXIT_OK)
+        self.assertEqual(self.step(plan, 7)["status"], "todo")
+        self.assertEqual(self.part(plan, "label")["status"], "todo")
+        self.assertEqual(self.part(plan, "close")["status"], "todo")
+
+    def test_a_close_reason_is_its_own_write_before_the_close_on_that_tracker(self):
+        """Its close command takes no reason, so the note is a part of its own."""
+        self.write_fixture(card="")
+        plan = self.close("--execute", *GLAB, "--close-comment", REASON, board=False)
+
+        self.assertEqual(
+            [p["name"] for p in self.step(plan, 7)["parts"]],
+            ["label", "note", "close", "card"],
+        )
+        self.assertEqual(self.part(plan, "note")["status"], "done")
+        # The note was written before the close, which is the whole point of the part.
+        self.assertEqual(
+            self.tracker_writes(),
+            [
+                f"glab issue update {ISSUE} --unlabel {REVIEW_LABEL} -R {HOST}/{PROJECT}",
+                f"glab issue note {ISSUE} --message {REASON} -R {HOST}/{PROJECT}",
+                f"glab issue close {ISSUE} -R {HOST}/{PROJECT}",
+            ],
+        )
+
+    def test_a_reason_already_on_the_item_is_not_posted_a_second_time(self):
+        """A note is not idempotent by itself, so the part reads the comments first."""
+        self.write_fixture(card="", comments=[f"a line, and {REASON}"])
+        plan = self.close("--execute", *GLAB, "--close-comment", REASON, board=False)
+
+        self.assertEqual(self.part(plan, "note")["status"], "done")
+        self.assertIn("already on the item", self.part(plan, "note")["note"])
+        self.assertEqual(
+            [w.split()[1:3] for w in self.tracker_writes()],
+            [["issue", "update"], ["issue", "close"]],
+        )
+
+    def test_a_close_reason_rides_the_close_command_where_the_cli_takes_one(self):
+        """One write and not two, so this tracker gains no part."""
+        plan = self.close("--close-comment", REASON)
+
+        self.assertEqual(
+            [p["name"] for p in self.step(plan, 7)["parts"]], ["label", "close", "card"]
+        )
+        self.assertIn(f"--comment {REASON}", self.part(plan, "close")["command"])
+
+    def test_no_tracker_argument_leaves_every_command_as_it_was(self):
+        """The default is the tracker this repo runs on, and no plan of it changes."""
+        plan = self.close()
+
+        self.assertEqual(
+            self.step(plan, 4)["command"], f"gh pr view {PR} --json state,mergeCommit"
+        )
+        self.assertEqual(
+            self.part(plan, "label")["command"],
+            f"gh issue edit {ISSUE} --remove-label {REVIEW_LABEL}",
+        )
+        self.assertEqual(self.part(plan, "close")["command"], f"gh issue close {ISSUE}")
+        self.assertEqual(
+            [p["name"] for p in self.step(plan, 7)["parts"]], ["label", "close", "card"]
+        )
 
     # --- the two things the seam must not know ------------------------------
 
