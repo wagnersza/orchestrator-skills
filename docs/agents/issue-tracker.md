@@ -68,6 +68,10 @@ label together, because they answer different questions: who owns the item, and 
 that owner is doing. **Human review carries no phase label**, because `to-review`
 already records it.
 
+**A `user-story` parent also wears `phase:e2e` while its story proof runs**, with the same
+label string and the same swap rule:
+[`orchestrator/docs/adr/0047-the-story-proof-runs-before-the-story-gate.md`](../../orchestrator/docs/adr/0047-the-story-proof-runs-before-the-story-gate.md).
+
 **The `Status` derivation table below is unchanged.** `Status` derives from the
 work-state labels alone, so a phase change writes no card. Rationale, and why this is a
 second family rather than more values in the first one:
@@ -87,7 +91,7 @@ Two more families, and the layer 5 story gate writes both on every candidate it 
 answer different questions from the three families this file already names. So they **stack**
 with a work-state label and with a phase label, and neither one replaces a label of another
 family. Rationale:
-[`orchestrator/docs/adr/0047-the-story-gate-report-is-a-repo-artifact.md`](../../orchestrator/docs/adr/0047-the-story-gate-report-is-a-repo-artifact.md).
+[`orchestrator/docs/adr/0048-the-story-gate-report-is-a-repo-artifact.md`](../../orchestrator/docs/adr/0048-the-story-gate-report-is-a-repo-artifact.md).
 
 **`refactor` is provenance, and not a state.** It answers where an item came from: a layer 5
 story gate filed it. Provenance never changes, so a session writes the label once. It never

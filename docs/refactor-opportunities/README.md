@@ -1,29 +1,61 @@
 # Refactor opportunities
 
-When a user story finishes, the layer 5 story gate runs
-`/improve-codebase-architecture`. That skill writes one HTML report. This directory holds the
-saved copy of each report, one file per story.
+The reports the **layer 5 story gate** produces. One file per user story.
 
-The name is `<story>-<slug>.html`: the number of the user story, then a short slug from its
-title. The story number comes first, so a file names its story with no lookup, and two stories
-never collide. That is the same shape a worktree name takes.
+Layer 5 runs when a user story finishes. The orchestrator session invokes
+`/improve-codebase-architecture` in the main checkout, and that skill writes an HTML report.
+The session then saves a copy here, as a docs-only commit
+([ADR 0048](../../orchestrator/docs/adr/0048-the-story-gate-report-is-a-repo-artifact.md)). The
+five layers are in
+[`../../orchestrator/references/quality-gates.md`](../../orchestrator/references/quality-gates.md),
+and the flow is
+[The layer 5 story gate](../../orchestrator/SKILL.md#the-layer-5-story-gate).
 
-**The orchestrator session writes the file.** It runs the gate in the main checkout, on the
-default branch, and it commits the copy from there as a docs-only commit
-([ADR 0047](../../orchestrator/docs/adr/0047-the-story-gate-report-is-a-repo-artifact.md)).
+## What each file is
 
-**A report is a point-in-time reading, and never a live document.** It records one commit on
-one day. Nothing updates it after the copy, and a later story writes a new file beside it. So a
-maintainer can file, fix or drop a candidate a report names, while the file still says what the
-gate saw.
+**A reading of the code at one commit, and not a live document.** Each report names the
+commit it read. The code moves after that, so a card in an old report can be stale. Read the
+work item instead, because a candidate that became work carries the current facts.
 
-Every work item the gate files links back to the report it came from. Each one also carries the
-`refactor` label and one `rating:*` label, and
-[`docs/agents/issue-tracker.md`](../agents/issue-tracker.md) defines both families.
+**The full evidence for a work item the gate filed.** Each report holds the before and after
+diagrams, the measurements and the rating for every candidate. The work item is a summary of
+one card. So the report answers "why is this a problem", and the work item answers "what do I
+build".
 
-Each report loads Tailwind and Mermaid from a CDN. With no network, the prose and the tables
-still read, and each diagram shows its own source text instead of a picture.
+## How a file is named
 
-| Report | Story |
-|---|---|
-| [`143-tracker-adapter.html`](143-tracker-adapter.html) | #143, "The tracker is one verified adapter behind both seams", read at `a94f459` on 2026-08-25 |
+`<story number>-<slug>.html`. The story number comes first, so a file identifies its user
+story with no lookup. That is the same shape a worktree name takes.
+
+## Which candidates reach the tracker
+
+The gate rates every candidate, and the rating decides where it goes:
+
+| Rating | Where it goes | Rating label |
+|---|---|---|
+| `Strong` | a work item, labelled `ready-for-agent` | `rating:strong` |
+| `Worth exploring` | the backlog, with its card attached | `rating:worth-exploring` |
+| `Speculative` | dropped, with a one-line reason in the report to the maintainer | none, because it files nothing |
+
+Every item the gate files carries four things: a reference to its user story, a link to its
+report here, the `refactor` label, and one `rating:*` label.
+
+`refactor` is provenance. It says a story gate filed the item, so it stacks with a work-state
+label. A `rating:*` label carries the rating the report gave, and the family is mutually
+exclusive. Neither one moves a board card. See
+[`../agents/issue-tracker.md`](../agents/issue-tracker.md).
+
+## What layer 5 does not do
+
+**It stops nothing.** The gate holds no exit code, so it fails no push and no merge. Depth is
+a judgement, and a hard gate here stalls every story on an opinion. The rationale is
+[ADR 0033](../../orchestrator/docs/adr/0033-the-story-gate-is-advisory.md).
+
+## The reports
+
+| Story | Report | Commit read | Candidates |
+|---|---|---|---|
+| [#143](https://github.com/wagnersza/orchestrator-skills/issues/143) — the tracker is one verified adapter behind both seams | [`143-tracker-adapter.html`](143-tracker-adapter.html) | `a94f459` | 5, of which 1 `Strong` |
+
+Each report loads Tailwind and Mermaid from a CDN. So a reader with no network sees the text
+and the tables, and the diagrams do not draw.

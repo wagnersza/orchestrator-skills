@@ -259,6 +259,34 @@ every other
 ([`docs/adr/0045-a-story-start-is-automatic-under-two-roofs.md`](docs/adr/0045-a-story-start-is-automatic-under-two-roofs.md)).
 _Avoid_: story limit, concurrency, quota, seat.
 
+**Story proof**:
+The proof that one whole user story works, run before its parent **Work item** closes. One
+fresh **Worker** does it, in its own worktree cut from the default branch, so it reads every
+child's merged code together. It drives the declared **Browser surface** through every user
+story of the parent spec, and it boots the app per the **Project recipe**.
+
+**The trigger is the close of the last child of a `user-story` parent**, and the proof runs
+before the layer 5 story gate. An architecture opinion about a story that does not work is
+premature.
+
+**A failed proof stops the parent close.** A pass or a fail is a fact, and depth is a
+judgement, so this step can block where **Layer** 5 cannot. The parent stays open with
+`phase:e2e` in place, and each failure becomes a work item.
+
+**It leaves two durable artifacts.** The first is an evidence note on the parent work item,
+with one line per user story. The second is the generated Playwright spec, committed on its
+own branch in a PR. The same **Commit slice** wires that spec into the project's own test
+command, so the proof becomes a regression test.
+
+**It adds no machinery.** The parent wears the existing `phase:e2e` label, so the **Worker
+watch** reads its **Checklist** and its **Gate record** with no edit. It reports the
+`proof-complete` outcome it already reports, and there is no new outcome, label string, exit
+code or config field. It is reachable only where the **Project recipe** boots something, so
+no story in this repo reaches one. Rationale, what it narrows and the accepted risks:
+[`docs/adr/0047-the-story-proof-runs-before-the-story-gate.md`](docs/adr/0047-the-story-proof-runs-before-the-story-gate.md).
+_Avoid_: wrap-up (the **Close transaction** entry already avoids it), e2e test, story gate
+(that names layer 5), smoke test.
+
 **Touch set**:
 The paths a **Work item** declares it will change, as a `## Touches` block of paths or globs
 in the item body. It sits beside the `## Blocked by` and `## Parent` edges. The session that
@@ -351,7 +379,7 @@ A persistent, file-based task list that survives context loss and works across e
 **Phase**:
 Which part of an owned run a **Work item** is in. A second label family, worn beside the **Work-state labels** rather than instead of them. Three values, **mutually exclusive inside the family — swap, never stack**: `phase:impl` (a worker is implementing), `phase:review` (a reviewer is reading the diff, fix rounds included), `phase:e2e` (a worker is proving the feature works through the **Browser surface**). So an owned item wears `in-progress` and exactly one `phase:*` label together. **Human review is `to-review` with no phase label**, because human review is already a work state. So removing the label *is* that transition, and no fact is written twice. **The Orchestrator writes that removal and `to-review` in one call**, and a **Worker** writes neither (`docs/adr/0025-the-session-writes-the-review-state.md`).
 
-**The Board status derivation does not read it.** `Status` keeps deriving from the work-state labels alone. So a phase change moves no card, and `docs/adr/0009-labels-drive-board-status.md` needs no edit. The label strings, the swap rule and their `gh label create` lines live with every other label vocabulary, in `docs/agents/issue-tracker.md`. The tracker is the only store: a label survives a restart, a reboot and a teardown, so a session with no memory of the spawn recovers the phase with one read. `phase:e2e` is reachable only where the **Project recipe** boots something, so an item in this repo never wears it. Why a second family and not a second state machine, and the rejected options: `docs/adr/0021-phase-is-a-second-label-family.md`.
+**The Board status derivation does not read it.** `Status` keeps deriving from the work-state labels alone. So a phase change moves no card, and `docs/adr/0009-labels-drive-board-status.md` needs no edit. **A `user-story` parent also wears `phase:e2e` while its Story proof runs**, and that derivation still reads no phase label (`docs/adr/0047-the-story-proof-runs-before-the-story-gate.md`). The label strings, the swap rule and their `gh label create` lines live with every other label vocabulary, in `docs/agents/issue-tracker.md`. The tracker is the only store: a label survives a restart, a reboot and a teardown, so a session with no memory of the spawn recovers the phase with one read. `phase:e2e` is reachable only where the **Project recipe** boots something, so an item in this repo never wears it. Why a second family and not a second state machine, and the rejected options: `docs/adr/0021-phase-is-a-second-label-family.md`.
 _Avoid_: stage, step, state, status (the last two name the work-state axis this deliberately is not), workflow phase.
 
 **Item automation**:
@@ -441,7 +469,7 @@ the gate files links back to it.
 nothing updates it after the copy, and a later story writes a new file beside it. The session
 commits it from the main checkout, where the gate runs. Rationale, the rejected homes and the
 accepted limits:
-[`docs/adr/0047-the-story-gate-report-is-a-repo-artifact.md`](docs/adr/0047-the-story-gate-report-is-a-repo-artifact.md).
+[`docs/adr/0048-the-story-gate-report-is-a-repo-artifact.md`](docs/adr/0048-the-story-gate-report-is-a-repo-artifact.md).
 _Avoid_: gate report (**Gate record** reserves it), architecture doc, refactor plan (a plan is a document someone keeps current, and this file is frozen).
 
 **Halt condition**:
