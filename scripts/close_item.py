@@ -43,9 +43,13 @@ part into a coupled one:
   So a new tool stays a Markdown change and no `orca` command is written here.
 - **The project board.** The coordinates arrive as arguments. This seam reads no
   Markdown and holds no board.
-- **Which tracker it talks to.** Every command comes from the **Tracker adapter**
-  in `scripts/tracker.py`, so this seam holds no tracker command and no CLI name
-  (ADR 0040).
+- **Which tracker it talks to.** `--tracker-cli`, `--tracker-host` and
+  `--tracker-repo` name it, and the caller reads all three from the repo's tracker
+  configuration. Every command then comes from the **Tracker adapter** in
+  `scripts/tracker.py`, so this seam holds no tracker command and no CLI name
+  (ADR 0040). Where a tracker closes an item with no reason flag, step 7 posts the
+  reason first and closes second. The seam reads that from the adapter, and never
+  from the CLI name.
 
 The exit code carries the outcome, so the caller reports the cause and parses no
 prose: 0 clean, 2 the PR is not merged, 3 the worktree is dirty, 1 a step failed.
@@ -61,9 +65,14 @@ from pathlib import Path
 # puts `scripts/` on the path, and `python3 -m scripts.close_item` puts the repo root
 # there (ADR 0034).
 try:
-    from .tracker import Tracker, TrackerError
+    from .tracker import GH, GLAB, Tracker, TrackerError
 except ImportError:  # the type checker reads the package form above
-    from tracker import Tracker, TrackerError  # type: ignore[no-redef, import-not-found]
+    from tracker import (  # type: ignore[no-redef, import-not-found]
+        GH,
+        GLAB,
+        Tracker,
+        TrackerError,
+    )
 
 EXIT_OK = 0
 EXIT_ERROR = 1
@@ -325,10 +334,14 @@ def build_plan(args, tracker):
 
 
 def tracker_parts(args, tracker):
-    """The three writes step 7 holds, each with its own status.
+    """The writes step 7 holds, each with its own status.
 
     Each part is idempotent, which is what makes a part-applied close resumable:
     a re-run finds the parts that landed already `done` and finishes the rest.
+
+    There are three writes where the close command records the closing reason itself,
+    and four where that reason needs its own write. The seam asks the adapter which of
+    the two it has, so the seam names no tracker (ADR 0040).
     """
     issue = tracker.issue(args.issue)
     labels = issue.get("labels") or []
@@ -349,7 +362,7 @@ def tracker_parts(args, tracker):
             f"the item carries {', '.join(labels) or 'no work-state label'}",
         )
 
-    close_argv = tracker.close_argv(args.issue)
+    close_argv = tracker.close_argv(args.issue, args.close_comment)
     close = part(
         "close",
         close_argv,
@@ -359,7 +372,35 @@ def tracker_parts(args, tracker):
         else f"closes issue #{args.issue}",
     )
 
-    return [label, close, card_part(args, tracker)]
+    note = note_part(args, tracker)
+    return [label, *([note] if note else []), close, card_part(args, tracker)]
+
+
+def note_part(args, tracker):
+    """The closing reason as its own write, or None where the close command carries it.
+
+    A repeat of this write posts a second note. So this part reads the comments on the
+    item first, and it answers `done` where the reason is already there. That keeps
+    every part of step 7 repeatable, which is what makes a part-applied close resumable.
+
+    The read runs only where there is a reason to post and the close command takes
+    none. So a tracker that closes with a reason costs no extra read.
+    """
+    argv = tracker.closing_note_argv(args.issue, args.close_comment)
+    if not argv:
+        return None
+    _, comments = tracker.item_facts(args.issue)
+    if any(args.close_comment in (body or "") for body in comments):
+        return part(
+            "note", argv, STATUS_DONE, "the closing reason is already on the item"
+        )
+    return part(
+        "note",
+        argv,
+        STATUS_TODO,
+        "posts the closing reason, before the close. This tracker closes an item with "
+        "no reason flag, so the reason is its own write",
+    )
 
 
 def card_part(args, tracker):
@@ -505,7 +546,11 @@ def main(argv=None):
     )
     parser.add_argument("--issue", required=True, type=int, help="the work item number")
     parser.add_argument(
-        "--pr", required=True, type=int, help="the pull request that must be merged"
+        "--pr",
+        required=True,
+        type=int,
+        help="the pull request that must be merged. Where a tracker numbers its merge "
+        "requests in a sequence of their own, this is that number and not the item's",
     )
     parser.add_argument(
         "--repo",
@@ -537,9 +582,43 @@ def main(argv=None):
         help="a label to add to the item. Repeatable",
     )
     parser.add_argument(
+        "--close-comment",
+        default="",
+        metavar="TEXT",
+        help="the reason to record on the item as it closes. With no reason, this seam "
+        "posts nothing. Where the tracker closes an item with a reason flag, the close "
+        "command carries the text. Where it does not, step 7 posts the reason first and "
+        "closes second",
+    )
+    parser.add_argument(
+        "--tracker-cli",
+        default=GH,
+        choices=(GH, GLAB),
+        help="which CLI runs every tracker read and write. The caller resolves it from "
+        "the repo's tracker configuration. This seam passes the name to the tracker "
+        "adapter, which holds every command, so this seam names no tracker",
+    )
+    parser.add_argument(
+        "--tracker-host",
+        default="",
+        metavar="HOST",
+        help="the tracker host, for a server the CLI does not reach by default. Each "
+        "command carries it in the place that command needs. With no host, every "
+        "command goes to the CLI's own default server",
+    )
+    parser.add_argument(
+        "--tracker-repo",
+        default="",
+        metavar="OWNER/NAME",
+        help="the tracker project that holds the item and its pull request. --repo is "
+        "the checkout on disk, so the tracker project takes an argument of its own. "
+        "With no value, every command goes to the clone the working directory holds",
+    )
+    parser.add_argument(
         "--project-number",
         help="the number of the board. Step 7 writes no card unless all five board "
-        "arguments are present",
+        "arguments are present. One tracker has no board of this kind, so a repo there "
+        "passes none of the five and step 7 writes no card",
     )
     parser.add_argument("--project-owner", help="the owner of the board")
     parser.add_argument("--project-id", help="the node id of the board")
@@ -568,14 +647,17 @@ def main(argv=None):
     )
     parser.add_argument(
         "--gh-fixture",
-        help="JSON that stands in for the tracker reads, so a plan needs no network "
-        "(used by the tests). The format is the one scripts/tracker.py documents, and "
-        "scripts/worker_state.py reads the same one",
+        help="JSON that stands in for the tracker reads, so a plan needs no network and "
+        "no login (used by the tests). One format for either --tracker-cli, and it is "
+        "the one scripts/tracker.py documents. scripts/worker_state.py reads the same "
+        "one",
     )
     parser.add_argument("--indent", type=int, default=2)
     args = parser.parse_args(argv)
 
-    tracker = Tracker(fixture=args.gh_fixture)
+    tracker = Tracker(
+        args.tracker_cli, args.tracker_host, args.tracker_repo, args.gh_fixture
+    )
     try:
         plan = build(args, tracker)
     except (GitError, TrackerError) as exc:
