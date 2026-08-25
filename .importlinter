@@ -7,6 +7,9 @@
 # `worker_state.py` owns the Worker watch predicate (ADR 0018). Neither seam imports
 # the other. An import puts the exit code of one seam in the hands of the other, and
 # each seam is invoked on its own.
+#
+# Both seams import `tracker.py`, the Tracker adapter (ADR 0040). It is a library and
+# not a seam, so it imports neither of its callers.
 
 [importlinter]
 root_package = scripts
@@ -15,5 +18,14 @@ root_package = scripts
 name = The two seams do not import each other
 type = independence
 modules =
+    scripts.close_item
+    scripts.worker_state
+
+[importlinter:contract:the-adapter-imports-no-seam]
+name = The tracker adapter imports neither of its callers
+type = forbidden
+source_modules =
+    scripts.tracker
+forbidden_modules =
     scripts.close_item
     scripts.worker_state

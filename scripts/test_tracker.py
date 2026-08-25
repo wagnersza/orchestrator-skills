@@ -1,0 +1,300 @@
+#!/usr/bin/env python3
+"""Behaviour tests for the tracker adapter: what argv it builds, and what it reads.
+
+The adapter is a library and not a seam, so these cases import it. A command that
+runs is a real `subprocess` against a shell script this file writes onto `PATH`. So
+no mocking framework stands between a case and the argv the adapter built. The
+script logs every call, which is what an argv assertion reads.
+
+The seam suites cover the two callers end to end. This file covers the part they
+share: one command per read, one fixture format, and a non-zero exit that raises
+before anything parses.
+
+    python3 -m pytest scripts/ -q
+    python3 -m unittest discover -s scripts -t . -q     # fallback, no pytest
+"""
+
+import json
+import os
+import tempfile
+import unittest
+from pathlib import Path
+
+from scripts import tracker
+
+ITEM = 54
+PR = 48
+HOST = "git.example.com"
+REPO = "team/thing"
+
+
+class TrackerTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.bin = self.root / "bin"
+        self.bin.mkdir()
+        self.path = os.environ["PATH"]
+        os.environ["PATH"] = f"{self.bin}{os.pathsep}{self.path}"
+        self.addCleanup(self.restore_path)
+        self.addCleanup(self.tmp.cleanup)
+
+    def restore_path(self):
+        os.environ["PATH"] = self.path
+
+    def fake_cli(self, name, answer="", code=0, stderr="", **payloads):
+        """A tracker CLI of `name` on `PATH`, and the file it logs its argv to.
+
+        Each keyword is a first argument the adapter can send (`issue`, `api`), and
+        its value is what that command prints. With no keyword every command prints
+        `answer`.
+        """
+        log = self.root / f"{name}.argv"
+        cases = "\n".join(
+            f"  {first}) printf '%s' '{json.dumps(payload)}' ;;"
+            for first, payload in payloads.items()
+        )
+        answers = (
+            f'case "$1" in\n{cases}\nesac\n'
+            if payloads
+            else f"printf '%s' '{answer}'\n"
+        )
+        script = self.bin / name
+        script.write_text(
+            "#!/bin/sh\n"
+            f"printf '%s\\n' \"$*\" >> '{log}'\n"
+            f"{answers}"
+            f"printf '%s' '{stderr}' >&2\n"
+            f"exit {code}\n"
+        )
+        script.chmod(0o755)
+        return log
+
+    def write_fixture(self, **items):
+        """One fixture file in the one format, and the path to it."""
+        path = self.root / "tracker.json"
+        path.write_text(json.dumps(items))
+        return path
+
+    # --- one fixture format, read by every fact the two seams ask for
+
+    def test_one_fixture_record_answers_every_fact_about_one_item(self):
+        """A test author writes one record, and both seams read it."""
+        path = self.write_fixture(
+            items={
+                str(ITEM): {
+                    "state": "OPEN",
+                    "labels": ["in-progress", "phase:review"],
+                    "comments": ["Verdict: approve"],
+                    "board": "To merge",
+                    "card": "PVTI_x",
+                }
+            },
+            pull_requests={str(PR): {"state": "MERGED", "merge_commit": "a1b2c3d"}},
+        )
+        one = tracker.Tracker(fixture=path)
+
+        self.assertEqual(
+            one.item_facts(ITEM),
+            (["in-progress", "phase:review"], ["Verdict: approve"]),
+        )
+        self.assertEqual(
+            one.issue(ITEM),
+            {"state": "OPEN", "labels": ["in-progress", "phase:review"]},
+        )
+        self.assertEqual(one.board_status(ITEM, 6, "someone"), "To merge")
+        self.assertEqual(one.board_card(ITEM, 6, "someone"), "PVTI_x")
+        self.assertEqual(
+            one.pull_request(PR), {"state": "MERGED", "merge_commit": "a1b2c3d"}
+        )
+
+    def test_an_absent_item_and_an_absent_key_read_the_same_way(self):
+        """No record is not an error, because a repo with no board reads this way."""
+        one = tracker.Tracker(fixture=self.write_fixture())
+
+        self.assertEqual(one.item_facts(ITEM), ([], []))
+        self.assertEqual(one.issue(ITEM), {"state": None, "labels": []})
+        self.assertEqual(one.board_status(ITEM, 6, "someone"), "")
+        self.assertEqual(one.board_card(ITEM, 6, "someone"), "")
+        self.assertEqual(one.pull_request(PR), {"state": None, "merge_commit": ""})
+
+    def test_a_fixture_write_runs_nothing_and_is_recorded(self):
+        """The log is how a test sees which writes an execute run made."""
+        path = self.write_fixture()
+        one = tracker.Tracker(fixture=path)
+        self.fake_cli("gh", code=9)
+
+        one.write(one.close_argv(ITEM))
+        one.write(one.label_argv(ITEM, remove=["to-review"]))
+
+        log = path.parent / (path.name + ".writes")
+        self.assertEqual(
+            log.read_text().splitlines(),
+            [
+                f"gh issue close {ITEM}",
+                f"gh issue edit {ITEM} --remove-label to-review",
+            ],
+        )
+        self.assertFalse((self.root / "gh.argv").exists())
+
+    # --- the argv of every command the close seam runs or prints
+
+    def test_the_close_seam_argv_is_one_command_per_write(self):
+        one = tracker.Tracker()
+
+        self.assertEqual(
+            one.pr_read_argv(PR),
+            ["gh", "pr", "view", str(PR), "--json", "state,mergeCommit"],
+        )
+        self.assertEqual(
+            one.label_argv(ITEM, remove=["to-review"], add=["to-merge"]),
+            [
+                "gh",
+                "issue",
+                "edit",
+                str(ITEM),
+                "--remove-label",
+                "to-review",
+                "--add-label",
+                "to-merge",
+            ],
+        )
+        self.assertEqual(one.close_argv(ITEM), ["gh", "issue", "close", str(ITEM)])
+        self.assertEqual(
+            one.card_argv("PVTI_x", "PVT_y", "PVTSSF_z", "98236657"),
+            [
+                "gh",
+                "project",
+                "item-edit",
+                "--id",
+                "PVTI_x",
+                "--project-id",
+                "PVT_y",
+                "--field-id",
+                "PVTSSF_z",
+                "--single-select-option-id",
+                "98236657",
+            ],
+        )
+
+    def test_a_label_swap_with_no_name_builds_no_flag(self):
+        """The caller passes names, so an empty pair leaves a bare edit command."""
+        self.assertEqual(
+            tracker.Tracker().label_argv(ITEM), ["gh", "issue", "edit", str(ITEM)]
+        )
+
+    # --- the reads, one command per tracker
+
+    def test_the_gh_facts_read_is_one_command(self):
+        log = self.fake_cli(
+            "gh",
+            answer=json.dumps(
+                {"labels": [{"name": "phase:impl"}], "comments": [{"body": "a note"}]}
+            ),
+        )
+
+        facts = tracker.Tracker(repo=REPO).item_facts(ITEM)
+
+        self.assertEqual(facts, (["phase:impl"], ["a note"]))
+        self.assertEqual(
+            log.read_text().splitlines(),
+            [f"issue view {ITEM} --json comments,labels --repo {REPO}"],
+        )
+
+    def test_the_glab_facts_read_carries_the_host_where_each_command_needs_it(self):
+        """One command takes the host in its repository argument, and one as a flag."""
+        log = self.fake_cli(
+            "glab",
+            issue={"labels": ["phase:impl"]},
+            api=[{"body": "a note"}],
+        )
+
+        facts = tracker.Tracker(cli=tracker.GLAB, host=HOST, repo=REPO).item_facts(ITEM)
+
+        self.assertEqual(facts, (["phase:impl"], ["a note"]))
+        self.assertEqual(
+            log.read_text().splitlines(),
+            [
+                f"issue view {ITEM} -F json -R {HOST}/{REPO}",
+                f"api projects/team%2Fthing/issues/{ITEM}/notes --hostname {HOST}",
+            ],
+        )
+
+    def test_a_glab_read_without_a_repository_says_why_it_cannot_run(self):
+        """The project path is part of both commands, so the name is not optional."""
+        with self.assertRaises(tracker.TrackerError) as caught:
+            tracker.Tracker(cli=tracker.GLAB).item_facts(ITEM)
+
+        self.assertIn("--repo", str(caught.exception))
+
+    def test_the_board_read_names_one_tracker_whichever_cli_is_set(self):
+        """A board is one tracker's own surface, so the CLI name does not reach it."""
+        log = self.fake_cli(
+            "gh",
+            answer=json.dumps(
+                {"items": [{"status": "To merge", "content": {"number": ITEM}}]}
+            ),
+        )
+
+        one = tracker.Tracker(cli=tracker.GLAB, host=HOST, repo=REPO)
+
+        self.assertEqual(one.board_status(ITEM, 6, "someone"), "To merge")
+        self.assertEqual(
+            log.read_text().splitlines(),
+            ["project item-list 6 --owner someone --format json --limit 100"],
+        )
+
+    def test_a_card_for_another_item_is_not_this_item_s_card(self):
+        self.fake_cli(
+            "gh",
+            answer=json.dumps(
+                {"items": [{"status": "To merge", "content": {"number": 99}}]}
+            ),
+        )
+
+        self.assertEqual(tracker.Tracker().board_status(ITEM, 6, "someone"), "")
+
+    def test_the_comment_argv_differs_by_tracker(self):
+        self.assertEqual(
+            tracker.Tracker(repo=REPO).comment_argv(ITEM, "a line"),
+            ["gh", "issue", "comment", str(ITEM), "--body", "a line", "--repo", REPO],
+        )
+        self.assertEqual(
+            tracker.Tracker(cli=tracker.GLAB, host=HOST, repo=REPO).comment_argv(
+                ITEM, "a line"
+            ),
+            [
+                "glab",
+                "issue",
+                "note",
+                str(ITEM),
+                "--message",
+                "a line",
+                "-R",
+                f"{HOST}/{REPO}",
+            ],
+        )
+
+    # --- a read is checked before it is parsed (ADR 0039)
+
+    def test_a_failed_read_names_the_command_and_parses_nothing(self):
+        """The exit code is the check, so no error block reaches a parser."""
+        self.fake_cli("gh", code=1, stderr="Unknown flag: --nope.")
+
+        with self.assertRaises(tracker.TrackerError) as caught:
+            tracker.Tracker().issue(ITEM)
+
+        message = str(caught.exception)
+        self.assertIn("gh issue view", message)
+        self.assertIn("Unknown flag", message)
+
+    def test_a_read_that_prints_no_json_fails_as_a_parse_and_not_as_a_fact(self):
+        """A clean exit is no proof of JSON, so the parser is the second check."""
+        self.fake_cli("gh", answer="a text table")
+
+        with self.assertRaises(json.JSONDecodeError):
+            tracker.Tracker().issue(ITEM)
+
+
+if __name__ == "__main__":
+    unittest.main()
