@@ -433,7 +433,7 @@ _Avoid_: tier, band, gate level, stage (the last one names a step of a run, and 
 **Story gate report**:
 The HTML file `/improve-codebase-architecture` writes when **Layer** 5 runs. The orchestrator
 session copies it into `docs/refactor-opportunities/` in the repo. The name is
-`architecture-review-<story>-<YYYYMMDD>.html`, so the story number keeps two stories apart. It
+`<story>-<slug>.html`, so the story number keeps two stories apart. It
 holds the diagrams, the measurements and the rating behind each candidate, and every work item
 the gate files links back to it.
 

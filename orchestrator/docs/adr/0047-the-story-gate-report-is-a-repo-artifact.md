@@ -17,9 +17,10 @@ is a claim.
 **The report is a repo artifact, and the orchestrator session commits it.**
 
 - **It lands in `docs/refactor-opportunities/`**, one file per story, named
-  `architecture-review-<story>-<YYYYMMDD>.html`. The story number is what keeps two stories
-  apart. `docs/automated-workflow.html` already holds committed HTML under `docs/`, so the
-  file type needs no new convention.
+  `<story>-<slug>.html`. The story number comes first, so a file names its story with no
+  lookup and two stories never collide. That is the same shape a worktree name takes.
+  `docs/automated-workflow.html` already holds committed HTML under `docs/`, so the file type
+  needs no new convention.
 - **The session commits it, as a docs-only commit on the default branch.** The gate runs
   `inline`, in the main checkout, and that session already writes issues, labels and board
   cards from there. A copy plus a docs-only commit is the same class of act.

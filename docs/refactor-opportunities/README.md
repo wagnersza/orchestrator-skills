@@ -4,8 +4,9 @@ When a user story finishes, the layer 5 story gate runs
 `/improve-codebase-architecture`. That skill writes one HTML report. This directory holds the
 saved copy of each report, one file per story.
 
-The name is `architecture-review-<story>-<YYYYMMDD>.html`: the number of the user story, then
-the day of the run. The story number is what keeps two stories apart.
+The name is `<story>-<slug>.html`: the number of the user story, then a short slug from its
+title. The story number comes first, so a file names its story with no lookup, and two stories
+never collide. That is the same shape a worktree name takes.
 
 **The orchestrator session writes the file.** It runs the gate in the main checkout, on the
 default branch, and it commits the copy from there as a docs-only commit
@@ -25,4 +26,4 @@ still read, and each diagram shows its own source text instead of a picture.
 
 | Report | Story |
 |---|---|
-| [`architecture-review-143-20260825.html`](architecture-review-143-20260825.html) | #143, "The tracker is one verified adapter behind both seams", read on 2026-08-25 |
+| [`143-tracker-adapter.html`](143-tracker-adapter.html) | #143, "The tracker is one verified adapter behind both seams", read at `a94f459` on 2026-08-25 |

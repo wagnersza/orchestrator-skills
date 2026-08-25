@@ -1294,9 +1294,9 @@ in a report.
 
 **Save the report before you triage.** The skill writes its HTML to the temporary directory of
 the OS, and the next reboot deletes it. Copy that file to
-`docs/refactor-opportunities/architecture-review-<story>-<YYYYMMDD>.html`. `<story>` is the
-number of the user story, and `<YYYYMMDD>` is the day of the run. The story number is what
-keeps two stories apart. **This session commits the copy**, as a docs-only commit on the
+`docs/refactor-opportunities/<story>-<slug>.html`. `<story>` is the number of the user story,
+and `<slug>` is a short slug from its title. The story number comes first, so two stories never
+collide. **This session commits the copy**, as a docs-only commit on the
 default branch, because it already writes to the tracker from the same checkout. The word is
 the **Story gate report** entry in [`CONTEXT.md`](CONTEXT.md), and what lands in that directory
 is
