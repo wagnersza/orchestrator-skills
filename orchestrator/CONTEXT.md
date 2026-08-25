@@ -427,8 +427,22 @@ Rationale, the rejected mechanisms and the accepted risk that a line can be forg
 _Avoid_: gate log, gate report, audit trail, receipt (each one names a document a human reads, and this is a fact a tick reads).
 
 **Layer**:
-One of the five bands a **Gate** runs in, numbered 1 to 5. Layers 1 to 4 each hold one command, and each one stops a push. Layer 5 is advisory: it runs once per user story, and it emits candidate work items instead of an exit code. The word is **Layer** everywhere, and never "tier", because `_Avoid_: tier` already stands on **Role** and on **Cost profile**. One word must not name three axes. The five, with a command and a budget for each: `references/quality-gates.md`.
+One of the five bands a **Gate** runs in, numbered 1 to 5. Layers 1 to 4 each hold one command, and each one stops a push. Layer 5 is advisory: it runs once per user story, and it emits candidate work items instead of an exit code. What that run leaves in the repo is the **Story gate report**. The word is **Layer** everywhere, and never "tier", because `_Avoid_: tier` already stands on **Role** and on **Cost profile**. One word must not name three axes. The five, with a command and a budget for each: `references/quality-gates.md`.
 _Avoid_: tier, band, gate level, stage (the last one names a step of a run, and **Phase** owns that axis).
+
+**Story gate report**:
+The HTML file `/improve-codebase-architecture` writes when **Layer** 5 runs. The orchestrator
+session copies it into `docs/refactor-opportunities/` in the repo. The name is
+`architecture-review-<story>-<YYYYMMDD>.html`, so the story number keeps two stories apart. It
+holds the diagrams, the measurements and the rating behind each candidate, and every work item
+the gate files links back to it.
+
+**It is a point-in-time reading, and never a live document.** It records one commit on one day,
+nothing updates it after the copy, and a later story writes a new file beside it. The session
+commits it from the main checkout, where the gate runs. Rationale, the rejected homes and the
+accepted limits:
+[`docs/adr/0047-the-story-gate-report-is-a-repo-artifact.md`](docs/adr/0047-the-story-gate-report-is-a-repo-artifact.md).
+_Avoid_: gate report (**Gate record** reserves it), architecture doc, refactor plan (a plan is a document someone keeps current, and this file is frozen).
 
 **Halt condition**:
 A policy that stops an infra plan before it applies. It is not a **Gate**: a Gate reads code that exists, and a Halt condition reads a plan for a change that has not happened. The term is declared here so that no later item defines it twice. The Terraform column is where it gets its rows, and that column is a work item of its own.
