@@ -39,6 +39,7 @@ tracker writes a run made.
 import json
 import subprocess
 from pathlib import Path
+from typing import Any
 
 # The two tracker CLIs a caller can name. Each method below that both of them answer
 # holds one branch per CLI. Nothing outside this module tells one tracker from the
@@ -105,7 +106,22 @@ class Tracker:
         self.host = host
         self.repo = repo
         self.path = Path(fixture) if fixture else None
-        self.fixture = json.loads(self.path.read_text()) if self.path else None
+        # The parse lives in `fixture`, and not in a line here. A caller builds one
+        # adapter before it makes a read. A constructor that reads a file turns a failed
+        # read into a traceback out of that construction.
+        self._fixture: Any = None
+
+    @property
+    def fixture(self):
+        """The parsed fixture file, read on the first fact a caller asks for.
+
+        A file that is absent or malformed raises where every other failed read raises.
+        So the caller reports it the way it reports one of those. In the watch that is
+        the `unreadable` outcome, and in the close it is the cause in the plan.
+        """
+        if self.path is not None and self._fixture is None:
+            self._fixture = json.loads(self.path.read_text())
+        return self._fixture
 
     def _item(self, number):
         """One work item's fixture record, or an empty one where it is absent."""

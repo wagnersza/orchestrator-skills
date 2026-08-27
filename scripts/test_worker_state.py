@@ -2,13 +2,22 @@
 """Behaviour tests for the worker-state seam: real fixtures in, an exit code and a
 line out.
 
-Every case runs `python3 -m scripts.worker_state` as a subprocess against a real
-worktree in a temp directory. Each one asserts on the exit code and the printed
-line, which are the two things a caller consumes. No mock of `subprocess`, no
-assertion about which internal function ran. No network and no agent run:
-`--gh-fixture` stands in for the label read, the comment read and the board read, so
-no tracker CLI is called. `GIT_CONFIG_GLOBAL` and `GIT_CONFIG_SYSTEM` point at
-`os.devnull`, so the developer's git config cannot leak into a fixture.
+Every case reads a real worktree in a temp directory, and asserts on the exit code and
+the printed line. Those are the two things a caller consumes. No mock of `subprocess`,
+no assertion about which internal function ran. No network and no agent run: a fixture
+file stands in for the label read, the comment read and the board read, so no tracker
+CLI is called. `GIT_CONFIG_GLOBAL` and `GIT_CONFIG_SYSTEM` point at `os.devnull`, so
+the developer's git config cannot leak into a fixture.
+
+**An outcome case asks the predicate in process** (`ask`). It builds one **Tracker
+adapter** over the fixture file and calls `phase` with it, the way `main` calls it.
+Every argument past the fifth is named. So the case reads as the question it asks, and
+in-process line coverage measures the module the case exercises.
+
+**A case that proves the command line runs as a subprocess** (`run_seam`, `tick`,
+`wake`). Those cases are the `--help` output, every usage error, the whole exit-code
+table, the argv each tracker read builds, and the delivery. Each one consumes the CLI
+contract itself, so it must cross a process boundary to prove anything.
 
 The cases that assert the argv of a tracker read need a real command. Each one puts
 a fake CLI of that name on `PATH` (`fake_cli`). It records the argv it received and
@@ -41,6 +50,9 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+
+from scripts import worker_state
+from scripts.tracker import Tracker
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -85,14 +97,30 @@ CHANGES = "Verdict: request-changes"
 TO_MERGE = "to-merge"
 HUMAN_REVIEW = ["to-review"]
 COLUMN = "Ready to land"
+BOARD_PROJECT = 9
+BOARD_OWNER = "fixture-owner"
+# The same three coordinates, in the two forms a case passes them. A subprocess case
+# passes flags. An in-process case passes the keyword arguments `main` names. One source
+# for both, so the two cannot drift apart.
+BOARD_ARGS = {
+    "board_project": BOARD_PROJECT,
+    "board_owner": BOARD_OWNER,
+    "board_option": COLUMN,
+}
 BOARD = (
     "--board-project",
-    "9",
+    str(BOARD_PROJECT),
     "--board-owner",
-    "fixture-owner",
+    BOARD_OWNER,
     "--board-option",
     COLUMN,
 )
+
+# The stall and back-off windows, in the seconds the predicate takes. The command line
+# takes `30m` and `1h`, and one case still proves that parse.
+HALF_HOUR = 30 * 60
+AN_HOUR = 60 * 60
+FOUR_HOURS = 4 * 60 * 60
 
 # The pattern comes from the harness reference, never from the seam — so a test
 # fixture names no harness either. This one matches the interpreter running the
@@ -104,6 +132,7 @@ PROCESS_PATTERN = "[Pp]ython"
 QUICK = "make quick"
 FULL = "make full"
 GATES = ("--require-gate", QUICK, "--require-gate", FULL)
+REQUIRED = (QUICK, FULL)
 
 UNTICKED = """# Checklist — 54
 
@@ -317,9 +346,51 @@ class WorkerStateTestCase(unittest.TestCase):
         ]
 
     def tick(self, *extra, expect=0, **flags):
-        """Ask the predicate once, the way an Item automation's precheck asked it
-        before the wake existed."""
+        """Ask the predicate through the command line, for a case that proves it.
+
+        Every outcome case asks `ask` instead. This helper stays for the cases whose
+        subject is the CLI: the argv a tracker read builds, a usage error, and the
+        exit-code table.
+        """
         return self.run_seam("phase", *self.tick_argv(*extra, **flags), expect=expect)
+
+    def adapter(self):
+        """The one Tracker adapter a run builds, over this case's fixture file.
+
+        `main` builds it from `--tracker-cli`, `--tracker-host`, `--repo` and
+        `--gh-fixture`. A case that reads the fixture needs only the last of the four. A
+        case that needs the other three runs the command line instead.
+        """
+        return Tracker(fixture=str(self.fixture))
+
+    def ask(
+        self,
+        *,
+        expect=EXIT_DUE,
+        rounds=3,
+        stall=FOUR_HOURS,
+        pattern=PROCESS_PATTERN,
+        worktree=None,
+        **named,
+    ):
+        """Ask the predicate in process, through one adapter.
+
+        Five values that describe the worker, then the adapter, then every other
+        argument by name. That is the call `main` makes. The four threaded tracker
+        values made this call shape impossible for a test.
+        """
+        code, line = worker_state.phase(
+            ITEM,
+            worktree or self.worktree,
+            pattern,
+            rounds,
+            stall,
+            self.adapter(),
+            **named,
+        )
+        self.assertEqual(code, expect, line)
+        self.assertEqual(len(line.splitlines()), 1, line)
+        return line
 
     def wake(
         self,
@@ -485,7 +556,7 @@ class WorkerStateTestCase(unittest.TestCase):
         write(self.checklist, TICKED)
         self.write_fixture(labels=IMPL)
 
-        line = self.tick(expect=EXIT_DUE)
+        line = self.ask()
 
         self.assertTrue(line.startswith("implementation-complete:"), line)
         self.assertIn(str(self.checklist), line)
@@ -496,7 +567,7 @@ class WorkerStateTestCase(unittest.TestCase):
         write(self.checklist, TICKED)
         self.write_fixture(labels=E2E)
 
-        self.assertTrue(self.tick(expect=EXIT_DUE).startswith("proof-complete:"))
+        self.assertTrue(self.ask().startswith("proof-complete:"))
 
     def test_an_absent_checklist_is_not_a_completed_one(self):
         """Zero boxes is not "every box ticked" — that state holds between the
@@ -505,7 +576,7 @@ class WorkerStateTestCase(unittest.TestCase):
         self.write_fixture(labels=IMPL)
         self.child_in(self.worktree)
 
-        line = self.tick(expect=EXIT_NOTHING)
+        line = self.ask(expect=EXIT_NOTHING)
 
         self.assertTrue(line.startswith("nothing:"), line)
         self.assertIn("0 of 0 boxes ticked", line)
@@ -519,7 +590,7 @@ class WorkerStateTestCase(unittest.TestCase):
         self.write_fixture(labels=IMPL)
         self.write_gates(self.gate_run(QUICK), self.gate_run(FULL))
 
-        line = self.tick(*GATES, expect=EXIT_DUE)
+        line = self.ask(required=REQUIRED)
 
         self.assertTrue(line.startswith("implementation-complete:"), line)
         self.assertNotIn("gates-unproven", line)
@@ -530,7 +601,7 @@ class WorkerStateTestCase(unittest.TestCase):
         write(self.checklist, TICKED)
         self.write_fixture(labels=IMPL)
 
-        line = self.tick(*GATES, expect=EXIT_DUE)
+        line = self.ask(required=REQUIRED)
 
         self.assertTrue(line.startswith("gates-unproven:"), line)
         self.assertIn("a missing file", line)
@@ -545,7 +616,7 @@ class WorkerStateTestCase(unittest.TestCase):
             self.gate_run(QUICK), "make full exited 0", self.gate_run(FULL)
         )
 
-        line = self.tick(*GATES, expect=EXIT_DUE)
+        line = self.ask(required=REQUIRED)
 
         self.assertTrue(line.startswith("gates-unproven:"), line)
         self.assertIn("a malformed line", line)
@@ -553,7 +624,7 @@ class WorkerStateTestCase(unittest.TestCase):
 
         # A line that is JSON and drops one of the four keys is malformed too.
         self.write_gates(json.dumps({"command": QUICK, "exit": 0}))
-        self.assertIn("a malformed line", self.tick(*GATES, expect=EXIT_DUE))
+        self.assertIn("a malformed line", self.ask(required=REQUIRED))
 
     def test_a_non_zero_exit_is_unproven(self):
         """Cause three. The gate ran, at this commit, and it was red. So the record
@@ -562,7 +633,7 @@ class WorkerStateTestCase(unittest.TestCase):
         self.write_fixture(labels=IMPL)
         self.write_gates(self.gate_run(QUICK, code=1), self.gate_run(FULL))
 
-        line = self.tick(*GATES, expect=EXIT_DUE)
+        line = self.ask(required=REQUIRED)
 
         self.assertIn("a non-zero exit", line)
         self.assertIn(repr(QUICK), line)
@@ -574,7 +645,7 @@ class WorkerStateTestCase(unittest.TestCase):
             self.gate_run(QUICK, code=1), self.gate_run(QUICK), self.gate_run(FULL)
         )
         self.assertTrue(
-            self.tick(*GATES, expect=EXIT_DUE).startswith("implementation-complete:")
+            self.ask(required=REQUIRED).startswith("implementation-complete:")
         )
 
     def test_a_stale_head_sha_is_unproven(self):
@@ -585,7 +656,7 @@ class WorkerStateTestCase(unittest.TestCase):
         stale = "0" * 40
         self.write_gates(self.gate_run(QUICK, sha=stale), self.gate_run(FULL))
 
-        line = self.tick(*GATES, expect=EXIT_DUE)
+        line = self.ask(required=REQUIRED)
 
         self.assertIn("a stale head_sha", line)
         self.assertIn(stale, line)
@@ -596,7 +667,7 @@ class WorkerStateTestCase(unittest.TestCase):
             self.gate_run(QUICK, sha=self.rev("HEAD")[:7]), self.gate_run(FULL)
         )
         self.assertTrue(
-            self.tick(*GATES, expect=EXIT_DUE).startswith("implementation-complete:")
+            self.ask(required=REQUIRED).startswith("implementation-complete:")
         )
 
     def test_a_required_layer_with_no_line_is_unproven(self):
@@ -606,7 +677,7 @@ class WorkerStateTestCase(unittest.TestCase):
         self.write_fixture(labels=IMPL)
         self.write_gates(self.gate_run(QUICK))
 
-        line = self.tick(*GATES, expect=EXIT_DUE)
+        line = self.ask(required=REQUIRED)
 
         self.assertIn("a missing line", line)
         self.assertIn(repr(FULL), line)
@@ -619,9 +690,7 @@ class WorkerStateTestCase(unittest.TestCase):
         self.write_fixture(labels=IMPL)
         self.write_gates(self.gate_run(QUICK, code=1, sha="0" * 40))
 
-        self.assertTrue(
-            self.tick(expect=EXIT_DUE).startswith("implementation-complete:")
-        )
+        self.assertTrue(self.ask().startswith("implementation-complete:"))
 
     def test_gates_unproven_never_competes_with_dead_or_stalled(self):
         """It fires in place of the finish, so it needs a ticked checklist. An
@@ -631,18 +700,18 @@ class WorkerStateTestCase(unittest.TestCase):
 
         # No live process and an unticked checklist: `dead` still owns this tick.
         self.assertTrue(
-            self.tick(*GATES, stall="30m", expect=EXIT_DUE).startswith("dead:")
+            self.ask(required=REQUIRED, stall=HALF_HOUR).startswith("dead:")
         )
 
         # A live process and stale work product: `stalled` still owns it.
         self.child_in(self.worktree)
         self.assertTrue(
-            self.tick(*GATES, stall="30m", expect=EXIT_DUE).startswith("stalled:")
+            self.ask(required=REQUIRED, stall=HALF_HOUR).startswith("stalled:")
         )
 
         # And the ticked checklist is what hands the tick to the record.
         write(self.checklist, TICKED)
-        line = self.tick(*GATES, stall="30m", expect=EXIT_DUE)
+        line = self.ask(required=REQUIRED, stall=HALF_HOUR)
         self.assertTrue(line.startswith("gates-unproven:"), line)
 
     def test_gates_unproven_shares_the_back_off_window(self):
@@ -651,8 +720,8 @@ class WorkerStateTestCase(unittest.TestCase):
         write(self.checklist, TICKED)
         self.write_fixture(labels=IMPL)
 
-        first = self.tick(*GATES, "--back-off", "1h", expect=EXIT_DUE)
-        held = self.tick(*GATES, "--back-off", "1h", expect=EXIT_NOTHING)
+        first = self.ask(required=REQUIRED, back_off=AN_HOUR)
+        held = self.ask(required=REQUIRED, back_off=AN_HOUR, expect=EXIT_NOTHING)
 
         self.assertTrue(first.startswith("gates-unproven:"), first)
         self.assertTrue(held.startswith("suppressed:"), held)
@@ -662,7 +731,7 @@ class WorkerStateTestCase(unittest.TestCase):
         # And a green record fires the finish on the next tick, which is a different
         # pair and therefore a different marker.
         self.write_gates(self.gate_run(QUICK), self.gate_run(FULL))
-        fixed = self.tick(*GATES, "--back-off", "1h", expect=EXIT_DUE)
+        fixed = self.ask(required=REQUIRED, back_off=AN_HOUR)
         self.assertTrue(fixed.startswith("implementation-complete:"), fixed)
 
     def test_the_seam_names_no_gate_command(self):
@@ -680,14 +749,14 @@ class WorkerStateTestCase(unittest.TestCase):
         self.write_fixture(labels=REVIEW)
         self.child_in(self.worktree)
 
-        line = self.tick(expect=EXIT_NOTHING)
+        line = self.ask(expect=EXIT_NOTHING)
         self.assertTrue(line.startswith("nothing:"), line)
         self.assertIn("no Verdict: comment yet", line)
 
         # And the mirror: a verdict does not finish an item in the impl phase.
         write(self.checklist, UNTICKED)
         self.write_fixture(comments=["Verdict: approve"], labels=IMPL)
-        self.assertTrue(self.tick(expect=EXIT_NOTHING).startswith("nothing:"))
+        self.assertTrue(self.ask(expect=EXIT_NOTHING).startswith("nothing:"))
 
     def test_a_comment_with_no_verdict_line_does_not_fire(self):
         """The literal is the signal, so prose about a verdict is not one."""
@@ -699,7 +768,7 @@ class WorkerStateTestCase(unittest.TestCase):
         )
         self.child_in(self.worktree)
 
-        self.assertIn("no Verdict: comment yet", self.tick(expect=EXIT_NOTHING))
+        self.assertIn("no Verdict: comment yet", self.ask(expect=EXIT_NOTHING))
 
     def test_each_verdict_value_is_its_own_due_transition(self):
         """Two verdicts, two responses, so the line must tell them apart."""
@@ -711,7 +780,7 @@ class WorkerStateTestCase(unittest.TestCase):
                 comments=[f"## Findings\n\nnone of note\n\nVerdict: {value}\n"],
                 labels=REVIEW,
             )
-            line = self.tick(expect=EXIT_DUE)
+            line = self.ask()
 
             self.assertTrue(line.startswith(f"{outcome}:"), line)
             self.assertIn(f"Verdict: {value}", line)
@@ -723,17 +792,17 @@ class WorkerStateTestCase(unittest.TestCase):
         3 and not under 5, and two rounds are exhausted under 2."""
         self.write_fixture(comments=[CHANGES] * 3, labels=REVIEW)
 
-        line = self.tick(rounds=3, expect=EXIT_DUE)
+        line = self.ask(rounds=3)
         self.assertTrue(line.startswith("rounds-exhausted:"), line)
         self.assertIn("3 Verdict: comments", line)
         self.assertIn("round bound of 3", line)
 
-        under_five = self.tick(rounds=5, expect=EXIT_DUE)
+        under_five = self.ask(rounds=5)
         self.assertTrue(under_five.startswith("verdict-request-changes:"), under_five)
         self.assertIn("round 3 of 5", under_five)
 
         self.write_fixture(comments=[CHANGES] * 2, labels=REVIEW)
-        line = self.tick(rounds=2, expect=EXIT_DUE)
+        line = self.ask(rounds=2)
         self.assertTrue(line.startswith("rounds-exhausted:"), line)
         self.assertIn("round bound of 2", line)
 
@@ -744,7 +813,7 @@ class WorkerStateTestCase(unittest.TestCase):
             comments=[CHANGES, CHANGES, "Verdict: approve"], labels=REVIEW
         )
 
-        line = self.tick(rounds=3, expect=EXIT_DUE)
+        line = self.ask(rounds=3)
 
         self.assertTrue(line.startswith("verdict-approve:"), line)
         self.assertIn("round 3 of 3", line)
@@ -755,19 +824,19 @@ class WorkerStateTestCase(unittest.TestCase):
         self.write_fixture(comments=[CHANGES], labels=REVIEW)
         before = self.disk_state()
 
-        self.assertIn("round 1 of 3", self.tick(expect=EXIT_DUE))
-        self.assertIn("round 1 of 3", self.tick(expect=EXIT_DUE))
+        self.assertIn("round 1 of 3", self.ask())
+        self.assertIn("round 1 of 3", self.ask())
         self.assertEqual(before, self.disk_state())
 
         self.write_fixture(comments=[CHANGES] * 2, labels=REVIEW)
-        self.assertIn("round 2 of 3", self.tick(expect=EXIT_DUE))
+        self.assertIn("round 2 of 3", self.ask())
 
     def test_a_dead_worker_fires_with_no_stall_window_elapsed(self):
         """Nothing is listening, so a re-prompt cannot help. `dead` needs no stall
         window, so it reports in about a minute rather than in an hour."""
         self.write_fixture(labels=IMPL)
 
-        line = self.tick(stall="4h", expect=EXIT_DUE)
+        line = self.ask(stall=FOUR_HOURS)
 
         self.assertTrue(line.startswith("dead:"), line)
         self.assertIn(str(self.worktree), line)
@@ -779,7 +848,7 @@ class WorkerStateTestCase(unittest.TestCase):
         self.backdate(3600)
         child = self.child_in(self.worktree)
 
-        line = self.tick(stall="30m", expect=EXIT_DUE)
+        line = self.ask(stall=HALF_HOUR)
         self.assertTrue(line.startswith("stalled:"), line)
         self.assertIn(str(child.pid), line)
         self.assertIn("30m", line)
@@ -787,7 +856,7 @@ class WorkerStateTestCase(unittest.TestCase):
         # The same live worker with fresh work product is neither outcome.
         self.checklist.write_text(UNTICKED + "- [ ] a step added just now\n")
         self.assertTrue(
-            self.tick(stall="30m", expect=EXIT_NOTHING).startswith("nothing:")
+            self.ask(stall=HALF_HOUR, expect=EXIT_NOTHING).startswith("nothing:")
         )
 
     def test_dead_and_stalled_never_both_fire(self):
@@ -796,7 +865,7 @@ class WorkerStateTestCase(unittest.TestCase):
         self.write_fixture(labels=IMPL)
         self.backdate(3600)
 
-        line = self.tick(stall="30m", expect=EXIT_DUE)
+        line = self.ask(stall=HALF_HOUR)
 
         self.assertTrue(line.startswith("dead:"), line)
         self.assertNotIn("stalled", line)
@@ -810,7 +879,7 @@ class WorkerStateTestCase(unittest.TestCase):
         self.backdate(3600)
         child = self.child_in(self.worktree)
 
-        line = self.tick(stall="30m", expect=EXIT_NOTHING)
+        line = self.ask(stall=HALF_HOUR, expect=EXIT_NOTHING)
 
         self.assertTrue(line.startswith("nothing:"), line)
         self.assertNotIn("stalled", line)
@@ -818,13 +887,13 @@ class WorkerStateTestCase(unittest.TestCase):
         # The same stale state in the implementation phase is a stall, which is what
         # makes this the phase's rule and not a dropped signal.
         self.write_fixture(labels=IMPL)
-        self.assertTrue(self.tick(stall="30m", expect=EXIT_DUE).startswith("stalled:"))
+        self.assertTrue(self.ask(stall=HALF_HOUR).startswith("stalled:"))
 
         # And dropping the stall clock costs no coverage of the failure that
         # matters: a reviewer with no live process is dead, with no window elapsed.
         self.write_fixture(labels=REVIEW)
         self.stop(child)
-        dead = self.tick(stall="4h", expect=EXIT_DUE)
+        dead = self.ask(stall=FOUR_HOURS)
         self.assertTrue(dead.startswith("dead:"), dead)
         self.assertIn("phase:review", dead)
 
@@ -833,7 +902,7 @@ class WorkerStateTestCase(unittest.TestCase):
         self.write_fixture(labels=IMPL)
         child = self.child_in(self.worktree)
 
-        line = self.tick(stall="4h", expect=EXIT_NOTHING)
+        line = self.ask(stall=FOUR_HOURS, expect=EXIT_NOTHING)
 
         self.assertTrue(line.startswith("nothing:"), line)
         self.assertIn("0 of 3 boxes ticked", line)
@@ -845,7 +914,7 @@ class WorkerStateTestCase(unittest.TestCase):
         write(self.checklist, TICKED)
         self.write_fixture(labels=["to-review"])
 
-        line = self.tick(expect=EXIT_NOTHING)
+        line = self.ask(expect=EXIT_NOTHING)
 
         self.assertTrue(line.startswith("nothing:"), line)
         self.assertIn("no phase:* label", line)
@@ -856,10 +925,10 @@ class WorkerStateTestCase(unittest.TestCase):
         write(self.checklist, TICKED)
         self.write_fixture(labels=IMPL)
 
-        first = self.tick("--back-off", "1h", expect=EXIT_DUE)
+        first = self.ask(back_off=AN_HOUR)
         self.assertTrue(first.startswith("implementation-complete:"), first)
 
-        line = self.tick("--back-off", "1h", expect=EXIT_NOTHING)
+        line = self.ask(back_off=AN_HOUR, expect=EXIT_NOTHING)
         self.assertTrue(line.startswith("suppressed:"), line)
         self.assertIn("implementation-complete", line)
         self.assertIn("1h 0m", line)
@@ -869,7 +938,7 @@ class WorkerStateTestCase(unittest.TestCase):
         self.assertTrue(marker.is_file())
         old = time.time() - 7200
         os.utime(marker, (old, old))
-        again = self.tick("--back-off", "1h", expect=EXIT_DUE)
+        again = self.ask(back_off=AN_HOUR)
         self.assertTrue(again.startswith("implementation-complete:"), again)
 
         # It lives in the worktree, so it dies with the worktree.
@@ -882,10 +951,10 @@ class WorkerStateTestCase(unittest.TestCase):
         earlier, because the two ask for opposite responses."""
         write(self.checklist, TICKED)
         self.write_fixture(labels=IMPL)
-        self.tick("--back-off", "1h", expect=EXIT_DUE)
+        self.ask(back_off=AN_HOUR)
 
         write(self.checklist, UNTICKED)  # no longer complete, and nothing is running
-        line = self.tick("--back-off", "1h", stall="4h", expect=EXIT_DUE)
+        line = self.ask(back_off=AN_HOUR, stall=FOUR_HOURS)
 
         self.assertTrue(line.startswith("dead:"), line)
         self.assertTrue(self.marker("dead").is_file())
@@ -897,11 +966,11 @@ class WorkerStateTestCase(unittest.TestCase):
         other, so one broken read costs one report per window."""
         self.break_fixture()
 
-        line = self.tick("--back-off", "1h", expect=EXIT_DUE)
+        line = self.ask(back_off=AN_HOUR)
 
         self.assertTrue(line.startswith("unreadable:"), line)
         self.assertIn(f"#{ITEM}", line)
-        held = self.tick("--back-off", "1h", expect=EXIT_NOTHING)
+        held = self.ask(back_off=AN_HOUR, expect=EXIT_NOTHING)
         self.assertTrue(held.startswith("suppressed:"), held)
         self.assertIn("unreadable", held)
 
@@ -921,9 +990,7 @@ class WorkerStateTestCase(unittest.TestCase):
         write(self.checklist, TICKED)
         self.write_fixture(labels=IMPL)
 
-        first = self.tick(
-            "--back-off", "1h", "--marker-dir", str(shared), expect=EXIT_DUE
-        )
+        first = self.ask(back_off=AN_HOUR, marker_dir=str(shared))
 
         self.assertTrue(first.startswith("implementation-complete:"), first)
         self.assertTrue(self.marker("implementation-complete", shared).is_file())
@@ -933,11 +1000,9 @@ class WorkerStateTestCase(unittest.TestCase):
         # answered wake stays answered.
         other = self.root / "second-worktree"
         shutil.copytree(self.worktree, other)
-        line = self.tick(
-            "--back-off",
-            "1h",
-            "--marker-dir",
-            str(shared),
+        line = self.ask(
+            back_off=AN_HOUR,
+            marker_dir=str(shared),
             worktree=other,
             expect=EXIT_NOTHING,
         )
@@ -945,7 +1010,7 @@ class WorkerStateTestCase(unittest.TestCase):
 
         # And with no --marker-dir the marker lands where it always did.
         self.write_fixture(labels=E2E)
-        default = self.tick("--back-off", "1h", expect=EXIT_DUE)
+        default = self.ask(back_off=AN_HOUR)
         self.assertTrue(default.startswith("proof-complete:"), default)
         self.assertTrue(self.marker("proof-complete").is_file())
 
@@ -956,7 +1021,7 @@ class WorkerStateTestCase(unittest.TestCase):
         board flag is passed here at all, so the label answers on its own."""
         self.write_fixture(labels=[TO_MERGE])
 
-        line = self.tick(expect=EXIT_DUE)
+        line = self.ask()
 
         self.assertTrue(line.startswith("merge-requested:"), line)
         self.assertIn(f"#{ITEM}", line)
@@ -967,7 +1032,7 @@ class WorkerStateTestCase(unittest.TestCase):
         label, so the card is the whole of the fact."""
         self.write_fixture(labels=HUMAN_REVIEW, board=COLUMN)
 
-        line = self.tick(*BOARD, expect=EXIT_DUE)
+        line = self.ask(**BOARD_ARGS)
 
         self.assertTrue(line.startswith("merge-requested:"), line)
         self.assertIn(COLUMN, line)
@@ -978,13 +1043,13 @@ class WorkerStateTestCase(unittest.TestCase):
         no ask, and an item with no card at all is no ask either."""
         self.write_fixture(labels=HUMAN_REVIEW, board="In review")
 
-        parked = self.tick(*BOARD, expect=EXIT_NOTHING)
+        parked = self.ask(expect=EXIT_NOTHING, **BOARD_ARGS)
         self.assertTrue(parked.startswith("nothing:"), parked)
         self.assertIn("In review", parked)
         self.assertIn(COLUMN, parked)
 
         self.write_fixture(labels=HUMAN_REVIEW)
-        uncarded = self.tick(*BOARD, expect=EXIT_NOTHING)
+        uncarded = self.ask(expect=EXIT_NOTHING, **BOARD_ARGS)
         self.assertTrue(uncarded.startswith("nothing:"), uncarded)
         self.assertIn("no phase:* label", uncarded)
 
@@ -1024,21 +1089,22 @@ class WorkerStateTestCase(unittest.TestCase):
     def test_a_missing_board_flag_skips_the_board_read_and_raises_nothing(self):
         """All three flags or none of the read. A repo with no board section passes no
         board flag, and the label path has to keep working there."""
-        partials = (
-            ("--board-owner", "fixture-owner", "--board-option", COLUMN),
-            ("--board-project", "9", "--board-option", COLUMN),
-            ("--board-project", "9", "--board-owner", "fixture-owner"),
+        # Each of the three coordinates absent in turn, derived from `BOARD_ARGS`. So a
+        # fourth coordinate cannot escape this case.
+        partials = tuple(
+            {name: value for name, value in BOARD_ARGS.items() if name != absent}
+            for absent in BOARD_ARGS
         )
 
         self.write_fixture(labels=HUMAN_REVIEW, board=COLUMN)
         for flags in partials:
-            line = self.tick(*flags, expect=EXIT_NOTHING)
+            line = self.ask(expect=EXIT_NOTHING, **flags)
             self.assertTrue(line.startswith("nothing:"), line)
             self.assertIn("no phase:* label", line)
 
         self.write_fixture(labels=[TO_MERGE], board=COLUMN)
         for flags in partials:
-            fired = self.tick(*flags, expect=EXIT_DUE)
+            fired = self.ask(**flags)
             self.assertTrue(fired.startswith("merge-requested:"), fired)
 
         # And against a real CLI nothing reaches the board: the stub logs one line,
@@ -1075,8 +1141,8 @@ class WorkerStateTestCase(unittest.TestCase):
         an unanswered merge ask does not wake the session every minute."""
         self.write_fixture(labels=[TO_MERGE])
 
-        first = self.tick("--back-off", "1h", expect=EXIT_DUE)
-        held = self.tick("--back-off", "1h", expect=EXIT_NOTHING)
+        first = self.ask(back_off=AN_HOUR)
+        held = self.ask(back_off=AN_HOUR, expect=EXIT_NOTHING)
 
         self.assertTrue(first.startswith("merge-requested:"), first)
         self.assertTrue(held.startswith("suppressed:"), held)
@@ -1099,7 +1165,7 @@ class WorkerStateTestCase(unittest.TestCase):
                 board=COLUMN,
             )
 
-            line = self.tick(*BOARD, expect=EXIT_DUE)
+            line = self.ask(**BOARD_ARGS)
 
             self.assertTrue(line.startswith(f"{outcome}:"), line)
             self.assertNotIn("merge-requested", line)
@@ -1214,7 +1280,7 @@ class WorkerStateTestCase(unittest.TestCase):
         self.backdate(3600)  # old enough to look like a stall, if it were checked
         shutil.rmtree(self.worktree)
 
-        line = self.tick(stall="30m", expect=EXIT_GONE)
+        line = self.ask(stall=HALF_HOUR, expect=EXIT_GONE)
 
         self.assertTrue(line.startswith("gone:"), line)
         self.assertNotIn("stalled", line)
@@ -1534,7 +1600,7 @@ class WorkerStateTestCase(unittest.TestCase):
         head = self.rev("HEAD")
         before = self.disk_state()
 
-        self.tick(expect=EXIT_DUE)  # implementation-complete
+        self.ask()  # implementation-complete
         self.assertEqual(before, self.disk_state())
 
         write(self.checklist, UNTICKED)
@@ -1542,20 +1608,20 @@ class WorkerStateTestCase(unittest.TestCase):
         stalled_head = self.rev("HEAD")
         stalled_state = self.disk_state()
 
-        self.tick(stall="30m", expect=EXIT_DUE)  # stalled
-        self.tick(stall="4h", expect=EXIT_NOTHING)  # nothing to do
+        self.ask(stall=HALF_HOUR)  # stalled
+        self.ask(stall=FOUR_HOURS, expect=EXIT_NOTHING)  # nothing to do
         self.assertEqual(stalled_state, self.disk_state())
 
         self.write_fixture(comments=[CHANGES], labels=REVIEW)
         with_verdict = self.disk_state()
-        self.tick(expect=EXIT_DUE)  # verdict-request-changes
+        self.ask()  # verdict-request-changes
         self.assertEqual(with_verdict, self.disk_state())
 
         # The one file it writes is the marker, and only where --back-off asks.
         self.write_fixture(labels=IMPL)
         write(self.checklist, TICKED)
         paths = {path for path, _ in self.disk_state()}
-        self.tick("--back-off", "1h", expect=EXIT_DUE)
+        self.ask(back_off=AN_HOUR)
         added = {path for path, _ in self.disk_state()} - paths
         self.assertEqual(added, {str(self.marker("implementation-complete"))})
 
@@ -1573,17 +1639,15 @@ class WorkerStateTestCase(unittest.TestCase):
         self.write_fixture(labels=IMPL)
         self.backdate(3600)
 
-        first = self.tick(stall="30m", expect=EXIT_DUE)
-        second = self.tick(stall="30m", expect=EXIT_DUE)
+        first = self.ask(stall=HALF_HOUR)
+        second = self.ask(stall=HALF_HOUR)
 
         self.assertEqual(first, second)
         self.assertTrue(first.startswith("dead:"), first)
         # And a fix reads as a fix, with no memory of the earlier answer.
         write(self.checklist, TICKED)
         self.assertTrue(
-            self.tick(stall="30m", expect=EXIT_DUE).startswith(
-                "implementation-complete:"
-            )
+            self.ask(stall=HALF_HOUR).startswith("implementation-complete:")
         )
 
     def test_the_seam_names_no_harness(self):
@@ -1616,6 +1680,26 @@ class WorkerStateTestCase(unittest.TestCase):
         # And the flag still takes both of them, which is the argv this seam keeps.
         help_text = " ".join(self.run_seam("phase", "--help", lines=400).split())
         self.assertIn("--tracker-cli {gh,glab}", help_text)
+
+    def test_the_seam_builds_one_adapter_and_names_its_long_arguments(self):
+        """The failure mode this item is named for. One call forwarded 15 arguments
+        positionally, so a reordered parameter type-checked and ran. It then printed a
+        plausible wake line. One adapter replaces the four tracker values, and every
+        argument past the eighth is a keyword."""
+        tree = ast.parse((REPO_ROOT / "scripts" / "worker_state.py").read_text())
+        built = 0
+        crowded = {}
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            name = getattr(node.func, "id", "") or getattr(node.func, "attr", "")
+            if name == "Tracker":
+                built += 1
+            if len(node.args) > 8:
+                crowded[name] = len(node.args)
+
+        self.assertEqual(built, 1, "the seam builds one Tracker adapter, in main()")
+        self.assertEqual(crowded, {}, "these calls pass more than 8 positionally")
 
     def test_the_seam_names_no_tool(self):
         """The send command is a template the spawn resolves from the tool file's
