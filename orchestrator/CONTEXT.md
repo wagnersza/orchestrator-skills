@@ -436,7 +436,7 @@ One check with one command and one exit code. A non-zero exit stops the work, an
 _Avoid_: check, hook, step, quality check (each one is broader than a command with an exit code).
 
 **Gate record**:
-What a **Gate** run leaves on disk. Each gate command appends one line to
+What a **Gate** run leaves on disk. `hooks/record.py` appends one line per gate run to
 `.orchestrator/gates-<item>.jsonl` in the **Worker**'s own worktree, beside the
 **Checklist**. The line is one JSON object with four keys: `command` is the gate command
 that ran, `exit` is the code it returned, `utc` is when the run ended, and `head_sha` is
@@ -444,14 +444,19 @@ the commit it saw. `head_sha` is what ties a green run to a commit, because a gr
 against a stale commit proves nothing. The format and its one home are
 [`references/quality-gates.md`](references/quality-gates.md).
 
-**A gate command appends its line whatever the exit code is.** A red run that writes no
-line reads as a run that never happened.
+**The hook is the one writer, and the line is appended whatever the exit code is.** A gate
+command runs and it exits, so a worker records nothing. A red run that writes no line
+reads as a run that never happened.
 
-**It is a record, and not a second enforcement mechanism.** No hook blocks a push, and no
-script rejects a commit. The **Worker watch** reads it as the third fact of the
-**Completion signal**, so an item whose record proves nothing stops before review instead.
-Rationale, the rejected mechanisms and the accepted risk that a line can be forged:
-[`docs/adr/0036-a-gate-run-is-work-product.md`](docs/adr/0036-a-gate-run-is-work-product.md).
+**A green line proves that a command exited zero.** That is why the write sits in the hook
+and not in the gate script: a record a model writes is a record a model can fake. The
+**Worker watch** reads the record as the third fact of the **Completion signal**, so an
+item whose record proves nothing stops before review instead. Rationale, the rejected
+writers and the accepted gap where the hook can read no exit code:
+[`docs/adr/0052-a-gate-blocks-and-a-hook-writes-its-record.md`](docs/adr/0052-a-gate-blocks-and-a-hook-writes-its-record.md).
+It supersedes [`docs/adr/0036-a-gate-run-is-work-product.md`](docs/adr/0036-a-gate-run-is-work-product.md)
+on two claims: a gate run is no longer work product, and the record no longer promises
+that nothing blocks a push.
 _Avoid_: gate log, gate report, audit trail, receipt (each one names a document a human reads, and this is a fact a tick reads).
 
 **Layer**:

@@ -45,10 +45,10 @@ output is the evidence, and the worker makes no claim a reviewer has to trust.
 
 ## The gate record
 
-A gate run leaves work product behind. Each gate command appends one line to
-`.orchestrator/gates-<item>.jsonl` in the worker's own worktree, beside the **Checklist**
-it ticks. This file is the format's one home, and the **Gate record** entry of
-[`../CONTEXT.md`](../CONTEXT.md) holds the term:
+A gate run leaves a machine record behind. `hooks/record.py` appends one line per gate
+run to `.orchestrator/gates-<item>.jsonl` in the worker's own worktree, beside the
+**Checklist** it ticks. This file is the format's one home, and the **Gate record** entry
+of [`../CONTEXT.md`](../CONTEXT.md) holds the term:
 
 ```json
 {"command": "make quick", "exit": 0, "utc": "2026-08-21T09:14:02Z", "head_sha": "1b9f0c2"}
@@ -61,10 +61,15 @@ it ticks. This file is the format's one home, and the **Gate record** entry of
 | `utc` | when the run ended, as `YYYY-MM-DDTHH:MM:SSZ` |
 | `head_sha` | the commit the run saw, from `git rev-parse HEAD`. A short sha reads as a prefix, so either form matches |
 
-**A gate command appends its line whatever the exit code is.** A red run that writes no
-line reads as a run that never happened. The `Makefile` and the `scripts/checks.sh` that
-`/orchestrator-setup` writes hold that append, so the record costs the worker no step of
-its own.
+**`hooks/record.py` is the one writer.** A gate command runs and it exits. The hook reads
+the exit code the harness reports and appends the line, so a green line proves that a
+command exited zero rather than that a model said so. No gate script and no `Makefile`
+writes the record, in this repo or in a repo `/orchestrator-setup` writes. The hook, its
+event and the exception it holds in the plane law are in [`hooks.md`](hooks.md).
+
+**The line is appended whatever the exit code is.** A red run that writes no line reads as
+a run that never happened. So the record costs the worker no step of its own, and a worker
+runs the gate and records nothing.
 
 **The record is the third fact the Completion signal reads.** A ticked checklist, plus a
 green line for every required layer at the current `HEAD`, is a finish. A missing line, a
@@ -72,9 +77,14 @@ malformed line, a non-zero exit or a stale `head_sha` fires the `gates-unproven`
 instead, and the item stops before review. Which layers are required is the spawn's
 answer, and it passes them to the watch as a repeatable flag.
 
-**The record is not a second enforcement mechanism.** No hook blocks a push, and no
-script rejects a commit. Rationale, and the risk that a line can be forged:
-[ADR 0036](../docs/adr/0036-a-gate-run-is-work-product.md).
+**A gate run outside a session writes no record.** CI and a human at a shell each run the
+gate command with no harness that reads its exit code, so no hook fires. The record is a
+fact about a worker's session, which is the only place the **Completion signal** reads it.
+
+Rationale, the rejected writers and the accepted gap where the hook can read no exit code:
+[ADR 0052](../docs/adr/0052-a-gate-blocks-and-a-hook-writes-its-record.md). It supersedes
+[ADR 0036](../docs/adr/0036-a-gate-run-is-work-product.md) on two claims: a gate run is no
+longer work product, and the record no longer promises that nothing blocks a push.
 
 ## The application gate matrix — Python
 

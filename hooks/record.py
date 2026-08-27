@@ -12,6 +12,10 @@ a model writes is a record a model can fake.** It is not a mutation of the track
 It is an append-only note of what a command already did
 (`orchestrator/docs/adr/0051-a-hook-refuses-and-a-seam-performs.md`).
 
+**It is also the one writer of that file.** The gate script runs the command and
+exits, and no script and no `Makefile` appends a line
+(`orchestrator/docs/adr/0052-a-gate-blocks-and-a-hook-writes-its-record.md`).
+
 **A line is written whatever the exit code is.** A red run that writes no line reads
 as a run that never happened.
 
@@ -64,8 +68,8 @@ FAILED = re.compile(r"^Error: Exit code (\d+)\b")
 # Where the record lives, beside the checklist the worker ticks.
 GATE_RECORD = "gates-{item}.jsonl"
 
-# What a commit that cannot be read is recorded as. `scripts/checks.sh` writes the
-# same word, so one reader serves both writers.
+# What a commit that cannot be read is recorded as. A reader that compares it to `HEAD`
+# sees no match, so an unreadable commit reads as not green.
 UNKNOWN_SHA = "unknown"
 
 
