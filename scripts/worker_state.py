@@ -130,10 +130,20 @@ worker's role:
 **The tracker CLI is an argument.** `--tracker-cli` picks which command reads the
 labels and the comments. `--tracker-host` names the server where the tracker is
 self-hosted. The caller resolves both from `docs/agents/issue-tracker.md`, the same
-way it resolves every other configuration value. This seam passes both values to the
-**Tracker adapter** in `scripts/tracker.py`, which holds every command, so this seam
+way it resolves every other configuration value. `main` builds one **Tracker adapter**
+from those two values, `--repo` and `--gh-fixture`. Every function in this module takes
+that one object. The adapter in `scripts/tracker.py` holds every command, so this seam
 names no tracker at all (ADR 0040). A project on the other tracker then needs no
 wrapper script outside this repo.
+
+**The adapter is what makes the predicate callable.** Four values that describe one
+tracker ran down five call levels. Three constructions built the adapter from them, each
+from a different subset. Nothing at the call site named the four, so a reordered pair
+type-checked, ran, and printed a plausible line.
+
+One object replaces the four, and every argument past the fifth is named at each call. A
+test builds one adapter over a fixture file and asks `phase` directly. This suite does
+that for every outcome, so the command line is no longer the only way in.
 
 **`wake`** — the whole body of a tick. It asks the same `phase` predicate, and on a
 due transition it delivers that printed line itself:
@@ -588,7 +598,7 @@ def newest_work_product(worktree, item, current):
 TO_MERGE = "to-merge"
 
 
-def merge_requested(item, labels, project=0, owner="", option="", fixture=None):
+def merge_requested(item, labels, tracker, project=0, owner="", option=""):
     """`(outcome, detail)` where this item asks to be merged, or `(None, detail)`.
 
     The one transition due in human review, and the branch that read as a quiet tick
@@ -597,9 +607,10 @@ def merge_requested(item, labels, project=0, owner="", option="", fixture=None):
 
     1. **the `to-merge` label**, which the caller already read this tick, and which is
        the authoritative fact once a session writes it.
-    2. **the board column**, read through the three `--board-*` flags. The **Tracker
-       adapter** holds that command. It runs only where the label answers nothing,
-       because it is a command that can fail.
+    2. **the board column**, read through the three `--board-*` flags. It runs only
+       where the label answers nothing, because it is a command that can fail. The
+       board read goes through the same **Tracker adapter** the labels came from. So
+       the two reads can never name different repositories.
 
     So a repo with no board still reaches the outcome. The tick after a promotion costs
     no more than the one before it (ADR 0037, ADR 0038).
@@ -618,7 +629,7 @@ def merge_requested(item, labels, project=0, owner="", option="", fixture=None):
     if not (project and owner and option):
         return None, f"{quiet}, so it is in human review and no transition is due"
     try:
-        status = Tracker(fixture=fixture).board_status(item, project, owner)
+        status = tracker.board_status(item, project, owner)
     except (TrackerError, OSError, json.JSONDecodeError) as exc:
         # A tick prints one line, and the standard error of a failed command can hold
         # many, so the cause collapses to one.
@@ -782,18 +793,20 @@ def phase(
     pattern,
     rounds,
     stall_after,
-    repo="",
-    fixture=None,
+    tracker,
     back_off=None,
     marker_dir=None,
-    tracker_cli=GH,
-    tracker_host="",
     required=(),
     board_project=0,
     board_owner="",
     board_option="",
 ):
     """The `phase` answer: `(exit code, the one line to print)`.
+
+    `tracker` is the built **Tracker adapter**, and not the values it is made of. A
+    caller passes the object. So the CLI name, the host, the repository and the fixture
+    are read in one place. That is what makes this predicate callable: a test builds one
+    adapter over a fixture file and asks the question in process (ADR 0040).
 
     A worktree that is gone is answered first, so a torn-down worker is never
     reported as a stall. A tracker read that fails comes next, and it is the
@@ -819,7 +832,6 @@ def phase(
         return EXIT_DUE, f"{outcome}: {detail}"
 
     try:
-        tracker = Tracker(tracker_cli, tracker_host, repo, fixture)
         labels, bodies = tracker.item_facts(item)
     except (TrackerError, OSError, json.JSONDecodeError) as exc:
         # A tick prints one line. The standard error of a failed command can hold
@@ -834,14 +846,14 @@ def phase(
     current = phase_of(labels)
     if not current:
         outcome, detail = merge_requested(
-            item, labels, board_project, board_owner, board_option, fixture
+            item, labels, tracker, board_project, board_owner, board_option
         )
         if not outcome:
             return EXIT_NOTHING, f"nothing: {detail}"
         return fire(outcome, detail)
 
     outcome, detail = transition(
-        item, worktree, current, bodies, rounds, pattern, stall_after, required
+        item, worktree, current, bodies, rounds, pattern, stall_after, required=required
     )
     if not outcome:
         return EXIT_NOTHING, f"nothing: {detail}"
@@ -875,7 +887,7 @@ def attempt(argv):
     return f"{argv[0]} exited {proc.returncode}: {cause}"
 
 
-def wake_targets(line, item, handle, title, send_command, repo, cli, host):
+def wake_targets(line, item, tracker, handle, title, send_command):
     """The wake targets in order, as `(what it is, argv)` pairs.
 
     The terminal handle first, because the tool issued it and no display string can
@@ -883,6 +895,9 @@ def wake_targets(line, item, handle, title, send_command, repo, cli, host):
     comment on the work item last, so a transition is recorded late rather than lost
     (ADR 0024). A target with nothing to address stays out of the list. So a caller
     that passes no handle costs no failed send.
+
+    The predicate read the item through one **Tracker adapter**, and that same object
+    builds the comment. So no wake can go to a repository the tick did not read.
     """
     found = []
     for what, target in (
@@ -891,16 +906,11 @@ def wake_targets(line, item, handle, title, send_command, repo, cli, host):
     ):
         if send_command and target:
             found.append((f"{what} {target}", send_argv(send_command, target, line)))
-    found.append(
-        (
-            f"a comment on work item #{item}",
-            Tracker(cli, host, repo).comment_argv(item, line),
-        )
-    )
+    found.append((f"a comment on work item #{item}", tracker.comment_argv(item, line)))
     return found
 
 
-def deliver(line, item, handle, title, send_command, repo, cli, host):
+def deliver(line, item, tracker, handle, title, send_command):
     """Deliver one line to the first target that succeeds.
 
     Returns `(exit code, the lines to print)`. A delivery that fails everywhere
@@ -908,9 +918,7 @@ def deliver(line, item, handle, title, send_command, repo, cli, host):
     causes ask for three different repairs.
     """
     failures = []
-    for what, argv in wake_targets(
-        line, item, handle, title, send_command, repo, cli, host
-    ):
+    for what, argv in wake_targets(line, item, tracker, handle, title, send_command):
         why = attempt(argv)
         if why is None:
             return EXIT_DELIVERED, [f"delivered: {line} — {what} took it"]
@@ -924,12 +932,9 @@ def wake(
     pattern,
     rounds,
     stall_after,
-    repo="",
-    fixture=None,
+    tracker,
     back_off=None,
     marker_dir=None,
-    tracker_cli=GH,
-    tracker_host="",
     required=(),
     board_project=0,
     board_owner="",
@@ -945,6 +950,10 @@ def wake(
     due it delivers that line itself. Where nothing is due it delivers nothing, and it
     answers exactly what the predicate answered. No path exits 0, so no agent runs on
     a tick (ADR 0027).
+
+    It takes the built **Tracker adapter** and hands the same object to both halves.
+    Every argument past the fifth is named at the call that follows. So no reordering of
+    this signature can print a plausible wake line.
     """
     code, line = phase(
         item,
@@ -952,22 +961,17 @@ def wake(
         pattern,
         rounds,
         stall_after,
-        repo,
-        fixture,
-        back_off,
-        marker_dir,
-        tracker_cli,
-        tracker_host,
-        required,
-        board_project,
-        board_owner,
-        board_option,
+        tracker,
+        back_off=back_off,
+        marker_dir=marker_dir,
+        required=required,
+        board_project=board_project,
+        board_owner=board_owner,
+        board_option=board_option,
     )
     if code != EXIT_DUE:
         return code, [line]
-    return deliver(
-        line, item, handle, title, send_command, repo, tracker_cli, tracker_host
-    )
+    return deliver(line, item, tracker, handle, title, send_command)
 
 
 # --- CLI --------------------------------------------------------------------
@@ -1226,6 +1230,13 @@ def main(argv=None):
     # caller that names no layer requires none (ADR 0036).
     required = tuple(args.require_gate or ())
 
+    # This run builds one **Tracker adapter**, from the four flags that name the
+    # tracker. Every read a tick makes goes through it. So no function past this point
+    # carries a CLI name, a host, a repository or a fixture path (ADR 0040). The
+    # construction reads nothing, so an unreadable fixture is still the `unreadable`
+    # outcome and never a traceback.
+    tracker = Tracker(args.tracker_cli, args.tracker_host, args.repo, args.gh_fixture)
+
     if args.command == "phase":
         code, line = phase(
             args.item,
@@ -1233,16 +1244,13 @@ def main(argv=None):
             args.process,
             args.rounds,
             stall_after,
-            args.repo,
-            args.gh_fixture,
-            back_off,
-            args.marker_dir,
-            args.tracker_cli,
-            args.tracker_host,
-            required,
-            args.board_project,
-            args.board_owner,
-            args.board_option,
+            tracker,
+            back_off=back_off,
+            marker_dir=args.marker_dir,
+            required=required,
+            board_project=args.board_project,
+            board_owner=args.board_owner,
+            board_option=args.board_option,
         )
         print(line)
         return code
@@ -1264,19 +1272,16 @@ def main(argv=None):
         args.process,
         args.rounds,
         stall_after,
-        args.repo,
-        args.gh_fixture,
-        back_off,
-        args.marker_dir,
-        args.tracker_cli,
-        args.tracker_host,
-        required,
-        args.board_project,
-        args.board_owner,
-        args.board_option,
-        args.handle,
-        args.title,
-        args.send_command,
+        tracker,
+        back_off=back_off,
+        marker_dir=args.marker_dir,
+        required=required,
+        board_project=args.board_project,
+        board_owner=args.board_owner,
+        board_option=args.board_option,
+        handle=args.handle,
+        title=args.title,
+        send_command=args.send_command,
     )
     for line in lines:
         print(line)
