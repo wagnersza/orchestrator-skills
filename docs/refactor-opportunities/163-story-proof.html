@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Architecture review — story #163, the story proof</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script>
+  tailwind.config = { darkMode: 'media' };
+</script>
+<style>
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .card { break-inside: avoid; }
+  .beam { background: radial-gradient(circle at 20% 0%, rgba(59,130,246,.18), transparent 60%); }
+  code { font-size: .85em; }
+</style>
+</head>
+<body class="bg-slate-50 text-slate-800 antialiased">
+
+<header class="beam border-b border-slate-200 bg-white">
+  <div class="mx-auto max-w-5xl px-6 py-10">
+    <p class="mono text-xs uppercase tracking-widest text-blue-600">Layer 5 story gate &middot; advisory, stops nothing</p>
+    <h1 class="mt-2 text-3xl font-bold text-slate-900">Prove a user story end to end before its parent closes</h1>
+    <p class="mt-2 text-slate-600">User story <span class="mono">#163</span>, read at commit <span class="mono">34d7b9b</span>. Children <span class="mono">#164</span>, <span class="mono">#165</span>, <span class="mono">#166</span>, <span class="mono">#167</span>, <span class="mono">#168</span>. Plugin version <span class="mono">0.35.0</span>.</p>
+    <div class="mt-6 grid gap-3 sm:grid-cols-4">
+      <div class="rounded-lg border border-slate-200 bg-slate-50 p-3">
+        <p class="mono text-2xl font-bold text-slate-900">166</p>
+        <p class="text-xs text-slate-500">tests, 75.54s, green</p>
+      </div>
+      <div class="rounded-lg border border-slate-200 bg-slate-50 p-3">
+        <p class="mono text-2xl font-bold text-amber-600">2227</p>
+        <p class="text-xs text-slate-500">HTML lines no suite reads</p>
+      </div>
+      <div class="rounded-lg border border-slate-200 bg-slate-50 p-3">
+        <p class="mono text-2xl font-bold text-slate-900">0</p>
+        <p class="text-xs text-slate-500">seam lines changed</p>
+      </div>
+      <div class="rounded-lg border border-slate-200 bg-slate-50 p-3">
+        <p class="mono text-2xl font-bold text-slate-900">2</p>
+        <p class="text-xs text-slate-500">candidates below</p>
+      </div>
+    </div>
+  </div>
+</header>
+
+<main class="mx-auto max-w-5xl px-6 py-10 space-y-10">
+
+<section class="rounded-xl border border-slate-200 bg-white p-6">
+  <h2 class="text-lg font-semibold text-slate-900">What the story left behind</h2>
+  <p class="mt-3 text-slate-600">Story <span class="mono">#163</span> did what it set out to do, and it did it without a line of new code. <span class="mono">scripts/worker_state.py</span>, <span class="mono">scripts/close_item.py</span>, <span class="mono">scripts/merge_train.py</span> and <span class="mono">scripts/tracker.py</span> are byte-identical. The parent story wears the <span class="mono">phase:e2e</span> label a leaf proof already used, so the <strong>Worker watch</strong> reads the new flow through a branch it already had. No new outcome, no new label string, no new exit code, no new config field. That is the claim in <a class="text-blue-600 underline" href="../../orchestrator/docs/adr/0047-the-story-proof-runs-before-the-story-gate.md">ADR 0047</a>, and the suite proves it: 166 tests pass with no new expectation.</p>
+  <p class="mt-3 text-slate-600">So the friction this story introduced is not in a module. It is in the <strong>test surface</strong>. The story's whole deliverable is prose, and it added its largest artifact in the one file format this repo cannot check.</p>
+  <div class="mt-5 rounded-lg bg-slate-900 p-5">
+    <pre class="mono text-xs leading-relaxed text-slate-300">scripts/test_links.py         walks **/*.md                    <span class="text-emerald-400">166 cases, every cross-reference</span>
+docs/architecture.html        1068 lines, 0 tests             <span class="text-amber-400">a human reads it end to end</span>
+docs/skill-state-and-roadmap.html  1159 lines, 0 tests        <span class="text-amber-400">a human reads it end to end</span>
+docs/refactor-opportunities/*.html  1 file today, 0 tests     <span class="text-amber-400">index row written by hand</span></pre>
+  </div>
+  <p class="mt-4 text-slate-600">That gap is not a surprise. It is a <strong>named, accepted limit</strong> in three separate documents. What the gate found is that all three name the same owner, and that owner does not exist.</p>
+</section>
+
+<!-- CANDIDATE 1 -->
+<article class="card rounded-xl border-2 border-emerald-300 bg-white p-6 shadow-sm">
+  <div class="flex flex-wrap items-start justify-between gap-3">
+    <div>
+      <p class="mono text-xs uppercase tracking-widest text-slate-400">Candidate 1</p>
+      <h2 class="mt-1 text-2xl font-bold text-slate-900">No suite reads an HTML file, and three documents promise a work item that is not there</h2>
+    </div>
+    <span class="rounded-full bg-emerald-600 px-4 py-1.5 text-sm font-semibold text-white">Strong</span>
+  </div>
+
+  <h3 class="mt-6 text-sm font-semibold uppercase tracking-wide text-slate-500">Files</h3>
+  <ul class="mt-2 list-disc space-y-1 pl-5 text-slate-600">
+    <li><span class="mono">scripts/test_links.py</span> — 382 lines, walks <span class="mono">**/*.md</span></li>
+    <li><span class="mono">docs/architecture.html</span> — 1068 lines, added by this story</li>
+    <li><span class="mono">docs/skill-state-and-roadmap.html</span> — 1159 lines, rewritten by this story</li>
+    <li><span class="mono">docs/refactor-opportunities/</span> — the report directory <a class="text-blue-600 underline" href="../../orchestrator/docs/adr/0048-the-story-gate-report-is-a-repo-artifact.md">ADR 0048</a> created, plus its hand-written index</li>
+  </ul>
+
+  <h3 class="mt-6 text-sm font-semibold uppercase tracking-wide text-slate-500">Problem</h3>
+  <p class="mt-2 text-slate-600">This repo's stated main failure mode is a dangling cross-reference, and <span class="mono">scripts/test_links.py</span> exists to make that a failing test instead of a merged defect. It walks Markdown only. This story added 2227 lines of HTML that hold the target design and the wave order for the next five stories, and nothing checks a link or an anchor in either page.</p>
+  <p class="mt-3 text-slate-600">Three documents each name this as separate work, and each one assumes another owner has it:</p>
+  <div class="mt-3 overflow-hidden rounded-lg border border-slate-200">
+    <table class="w-full text-left text-sm">
+      <thead class="bg-slate-100 text-slate-600">
+        <tr><th class="px-4 py-2 font-semibold">Where</th><th class="px-4 py-2 font-semibold">What it says</th></tr>
+      </thead>
+      <tbody class="divide-y divide-slate-200 text-slate-600">
+        <tr><td class="px-4 py-2 mono">ADR 0047, Consequences</td><td class="px-4 py-2">&ldquo;A Markdown-plus-HTML link walk is work of its own.&rdquo;</td></tr>
+        <tr><td class="px-4 py-2 mono">#163, Out of Scope</td><td class="px-4 py-2">&ldquo;An HTML link checker. Named above as its own work item.&rdquo;</td></tr>
+        <tr><td class="px-4 py-2 mono">#201, Out of Scope</td><td class="px-4 py-2">&ldquo;That is a named limit in ADR 0047 and its own work item.&rdquo;</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="mt-3 text-slate-600">No such work item exists. A search of every issue, open and closed, returns none. So the promise is the only owner, and a promise has no exit code.</p>
+  <p class="mt-3 rounded-lg border-l-4 border-amber-400 bg-amber-50 p-4 text-slate-700"><strong>The cost is already measured.</strong> The worker on <span class="mono">#168</span> read all 2227 lines by hand, because the item told it to. That read found <strong>four wrong facts</strong> on the roadmap page, including a row that said the bump was a patch while its own table said minor. A human read caught them once. Nothing makes the next read happen.</p>
+
+  <h3 class="mt-6 text-sm font-semibold uppercase tracking-wide text-slate-500">Solution</h3>
+  <p class="mt-2 text-slate-600">Give <span class="mono">scripts/test_links.py</span> a second pass over <span class="mono">docs/**/*.html</span>, reusing the link extraction and the target resolution it already has. Three assertions cover every promise above:</p>
+  <ol class="mt-2 list-decimal space-y-1 pl-5 text-slate-600">
+    <li>every internal anchor on a page resolves to an <span class="mono">id</span> on that page,</li>
+    <li>every relative link target exists on disk,</li>
+    <li>every report in <span class="mono">docs/refactor-opportunities/</span> has a row in that directory's <span class="mono">README.md</span>, and every row points at a file that is there.</li>
+  </ol>
+  <p class="mt-3 text-slate-600">The <strong>shallow version to avoid</strong> is a second module with its own walker. That duplicates the resolution rules, and two walkers that disagree about what a relative path means is a worse failure than no walker at all. The <strong>interface is the test surface</strong> here: one walker, two file extensions.</p>
+
+  <h3 class="mt-6 text-sm font-semibold uppercase tracking-wide text-slate-500">Benefits</h3>
+  <ul class="mt-2 list-disc space-y-1 pl-5 text-slate-600">
+    <li><strong>Locality.</strong> One file answers &ldquo;does every cross-reference in this repo resolve&rdquo;, for both formats. Today the answer is split between a test and a habit.</li>
+    <li><strong>Leverage.</strong> <span class="mono">make quick</span> already runs this suite on every item, so the new pass costs no new command, no new config field and no new gate row.</li>
+    <li><strong>It retires a named limit instead of carrying it.</strong> ADR 0047 and <span class="mono">#201</span> both stop needing their exception.</li>
+    <li><strong>Tests improve where the repo's product is.</strong> The product is prose. Two of its four biggest files are currently unread by any command.</li>
+  </ul>
+
+  <h3 class="mt-6 text-sm font-semibold uppercase tracking-wide text-slate-500">Before / After</h3>
+  <div class="mt-3 grid gap-4 md:grid-cols-2">
+    <div class="rounded-lg border border-amber-300 bg-amber-50 p-4">
+      <p class="mono text-xs uppercase tracking-widest text-amber-700">Before &middot; shallow</p>
+      <div class="mermaid mt-3">
+graph TD
+  A["make quick"] --> B["test_links.py"]
+  B --> C["**/*.md<br/>every link checked"]
+  D["docs/*.html<br/>2227 lines"] -.-> E["a human, once<br/>if the item says so"]
+  style D fill:#fef3c7,stroke:#d97706
+  style E fill:#fee2e2,stroke:#dc2626,stroke-dasharray: 5 5
+      </div>
+      <p class="mt-3 text-sm text-slate-600">The HTML has no edge into any command. The only edge is an instruction in a work item, and the next item may not carry it.</p>
+    </div>
+    <div class="rounded-lg border border-emerald-300 bg-emerald-50 p-4">
+      <p class="mono text-xs uppercase tracking-widest text-emerald-700">After &middot; deepened</p>
+      <div class="mermaid mt-3">
+graph TD
+  A["make quick"] --> B["test_links.py<br/>one walker"]
+  B --> C["**/*.md"]
+  B --> D["docs/**/*.html"]
+  D --> F["anchors resolve<br/>targets exist<br/>index has a row"]
+  style D fill:#d1fae5,stroke:#059669
+  style F fill:#d1fae5,stroke:#059669
+      </div>
+      <p class="mt-3 text-sm text-slate-600">One walker, two extensions. A dangling anchor on either page is a non-zero exit, which is what a <strong>Gate</strong> is.</p>
+    </div>
+  </div>
+</article>
+
+<!-- CANDIDATE 2 -->
+<article class="card rounded-xl border-2 border-sky-300 bg-white p-6 shadow-sm">
+  <div class="flex flex-wrap items-start justify-between gap-3">
+    <div>
+      <p class="mono text-xs uppercase tracking-widest text-slate-400">Candidate 2</p>
+      <h2 class="mt-1 text-2xl font-bold text-slate-900">The story proof is defined in the one repo that can never run it</h2>
+    </div>
+    <span class="rounded-full bg-sky-600 px-4 py-1.5 text-sm font-semibold text-white">Worth exploring</span>
+  </div>
+
+  <h3 class="mt-6 text-sm font-semibold uppercase tracking-wide text-slate-500">Files</h3>
+  <ul class="mt-2 list-disc space-y-1 pl-5 text-slate-600">
+    <li><span class="mono">orchestrator/SKILL.md</span> — <span class="mono">### The story proof</span>, 67 lines, a seven-step flow</li>
+    <li><span class="mono">docs/agents/orchestrator.md</span> — <span class="mono">run_recipe: ""</span>, blank by design</li>
+    <li><span class="mono">orchestrator/references/examples/</span> — the worked traces</li>
+  </ul>
+
+  <h3 class="mt-6 text-sm font-semibold uppercase tracking-wide text-slate-500">Problem</h3>
+  <p class="mt-2 text-slate-600">The reachability gate for a proof is a non-blank <span class="mono">run_recipe</span>, or an <span class="mono">evidence</span> bar that asks for UI proof. This repo has neither, and <span class="mono">#163</span> says so in its own decision: <em>&ldquo;This repo is the blank case, so no story here reaches a story proof.&rdquo;</em> Reusing the existing gate is the right call, and it has one consequence nobody wrote down. The flow's <strong>first real execution happens in a stranger's repo</strong>, on a story that matters, with no rehearsal anywhere.</p>
+  <p class="mt-3 text-slate-600">Every other flow in this skill has been run here at least once. The spawn, the wake, the review loop, the close transaction and the merge train all have live traces. This one has seven ordered steps, two artifacts, a failure path and an automation repoint, and not one of them has ever fired.</p>
+
+  <h3 class="mt-6 text-sm font-semibold uppercase tracking-wide text-slate-500">Solution</h3>
+  <p class="mt-2 text-slate-600">Two shapes, and the cheap one probably wins. Add a worked trace to <span class="mono">orchestrator/references/examples/</span> that walks the seven steps against a named fictional project with a non-blank <span class="mono">run_recipe</span>, the way <span class="mono">routed-run.md</span> already does for the two lanes. That is prose, so <span class="mono">scripts/test_links.py</span> covers its cross-references the moment it lands. The expensive shape is a fixture repo with a bootable app, which buys a real exit code and costs a second project to maintain.</p>
+
+  <h3 class="mt-6 text-sm font-semibold uppercase tracking-wide text-slate-500">Benefits</h3>
+  <ul class="mt-2 list-disc space-y-1 pl-5 text-slate-600">
+    <li><strong>Locality.</strong> A reader who has to run a story proof reads one trace instead of assembling it from four sections and two ADRs.</li>
+    <li>It is the same mitigation this repo already chose for routing, so it introduces no new pattern.</li>
+    <li>The gaps a trace exposes are found before a user finds them.</li>
+  </ul>
+
+  <div class="mt-5 rounded-lg border-l-4 border-slate-400 bg-slate-100 p-4 text-slate-700">
+    <p class="text-sm"><strong>Why this is not <span class="mono">Strong</span>.</strong> The rating is honest about leverage. A trace is documentation about documentation, and <a class="text-blue-600 underline" href="../../orchestrator/docs/adr/0032-quality-gates-are-a-layered-contract.md">ADR 0032</a> already accepts that enforcement here is documentary. It buys confidence, not an exit code. Candidate 1 buys an exit code.</p>
+  </div>
+</article>
+
+<!-- ALREADY OWNED -->
+<section class="rounded-xl border border-slate-200 bg-white p-6">
+  <h2 class="text-lg font-semibold text-slate-900">Dropped, because the migration plan already owns them</h2>
+  <p class="mt-3 text-slate-600">Three further findings are real, and each one is already work. A gate that files them again would put two items on one problem, which is the drift this directory exists to stop.</p>
+  <div class="mt-4 overflow-hidden rounded-lg border border-slate-200">
+    <table class="w-full text-left text-sm">
+      <thead class="bg-slate-100 text-slate-600">
+        <tr><th class="px-4 py-2 font-semibold">Finding</th><th class="px-4 py-2 font-semibold">Owner</th></tr>
+      </thead>
+      <tbody class="divide-y divide-slate-200 text-slate-600">
+        <tr>
+          <td class="px-4 py-2"><span class="mono">orchestrator/SKILL.md</span> reached 1578 lines, and this story added 67 more to it. The two parent flows are the only multi-step concept in this skill with no reference file of its own.</td>
+          <td class="px-4 py-2"><span class="mono">#201</span>, child 2. It names <span class="mono">references/story-flows.md</span> and cuts the body to 120 lines.</td>
+        </tr>
+        <tr>
+          <td class="px-4 py-2">The <span class="mono">proof-complete</span> row of the wake table now holds a two-branch conditional in one table cell, in a section whose own law is &ldquo;the response is a lookup, not an interpretation&rdquo;. The branch turns on <span class="mono">user-story</span>, a label the tick already read.</td>
+          <td class="px-4 py-2"><span class="mono">#200</span>. The tick applies the transition it computed, in the process that read the labels, and the wake is deleted.</td>
+        </tr>
+        <tr>
+          <td class="px-4 py-2"><span class="mono">phase:e2e</span> now names two different things: a leaf item under proof, and a parent story under proof. The reader disambiguates by item number.</td>
+          <td class="px-4 py-2"><span class="mono">#199</span>. One label family, four values.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- TOP RECOMMENDATION -->
+<section class="rounded-xl border-2 border-emerald-400 bg-emerald-50 p-6">
+  <h2 class="text-lg font-semibold text-slate-900">Top recommendation</h2>
+  <p class="mt-3 text-slate-700"><strong>Candidate 1, the HTML pass on <span class="mono">scripts/test_links.py</span>.</strong> It is the only finding here that no existing work item owns, it is the only one that produces an exit code, and it is the smallest of the three by diff. It also reuses a module that already passes 166 tests, so it climbs no new rung.</p>
+  <p class="mt-3 text-slate-700">There is a timing reason too. Waves 1 to 5 move more Markdown files than any story so far, and <span class="mono">#201</span> says to run the link test after every single move. Those waves also keep editing the two HTML pages, because both pages describe the target the waves are walking toward. Landing the HTML pass first means every one of those edits is checked. Landing it after <span class="mono">1.0.0</span> means five waves of unchecked edits to the two documents that define the plan.</p>
+</section>
+
+</main>
+
+<footer class="border-t border-slate-200 bg-white">
+  <div class="mx-auto max-w-5xl px-6 py-8 text-sm text-slate-500">
+    <p>Layer 5 story gate for user story <a class="text-blue-600 underline" href="https://github.com/wagnersza/orchestrator-skills/issues/163">#163</a>. Read at commit <span class="mono">34d7b9b</span>, plugin version <span class="mono">0.35.0</span>. Advisory: this report holds no exit code and stops nothing (<a class="text-blue-600 underline" href="../../orchestrator/docs/adr/0033-the-story-gate-is-advisory.md">ADR 0033</a>).</p>
+    <p class="mt-2">A reading of the code at one commit, and not a live document. See <a class="text-blue-600 underline" href="README.md">the directory README</a>.</p>
+  </div>
+</footer>
+
+<script>
+  mermaid.initialize({ startOnLoad: true, theme: 'neutral' });
+</script>
+</body>
+</html>

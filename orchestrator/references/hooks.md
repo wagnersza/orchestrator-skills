@@ -13,7 +13,7 @@ which is the bar the two seams already hold.
 **The plane law is one sentence: a hook answers, and a seam performs.** A hook never
 writes a label, never merges and never spawns. Rationale, the rejected options, the
 supersession of ADR 0034 and every accepted risk:
-[ADR 0050](../docs/adr/0050-a-hook-refuses-and-a-seam-performs.md).
+[ADR 0051](../docs/adr/0051-a-hook-refuses-and-a-seam-performs.md).
 
 ## One row per hook
 

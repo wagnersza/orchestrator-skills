@@ -15,7 +15,7 @@ position, and whether the gate record is green at `HEAD`. An orchestrator sessio
 owns no work item, so it gets the plugin root and the role alone.
 
 The plane law is `orchestrator/references/hooks.md` and
-`orchestrator/docs/adr/0050-a-hook-refuses-and-a-seam-performs.md`. This hook
+`orchestrator/docs/adr/0051-a-hook-refuses-and-a-seam-performs.md`. This hook
 refuses nothing and performs nothing. It answers with one block of context.
 
     python3 <plugin root>/hooks/context.py < event.json

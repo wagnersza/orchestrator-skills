@@ -681,7 +681,7 @@ The plugin ships a **hook plane**: three hooks that inject the item facts, deny 
 that only a seam makes, and record what a gate command did. They are the one layer that
 can refuse a command before it runs
 ([`../orchestrator/references/hooks.md`](../orchestrator/references/hooks.md);
-[ADR 0050](../orchestrator/docs/adr/0050-a-hook-refuses-and-a-seam-performs.md)).
+[ADR 0051](../orchestrator/docs/adr/0051-a-hook-refuses-and-a-seam-performs.md)).
 
 **This step installs nothing.** The hooks ship with the plugin, so there is no file to
 write and no dependency to add. It reads three facts and reports them.

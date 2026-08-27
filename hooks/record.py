@@ -10,7 +10,7 @@ code, a UTC timestamp and `head_sha`. The format has one home, and that is
 answers, and this one writes a file. The reason is stated and not hidden: **a record
 a model writes is a record a model can fake.** It is not a mutation of the tracker.
 It is an append-only note of what a command already did
-(`orchestrator/docs/adr/0050-a-hook-refuses-and-a-seam-performs.md`).
+(`orchestrator/docs/adr/0051-a-hook-refuses-and-a-seam-performs.md`).
 
 **A line is written whatever the exit code is.** A red run that writes no line reads
 as a run that never happened.

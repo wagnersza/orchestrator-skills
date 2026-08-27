@@ -26,7 +26,7 @@ hook prints nothing and exits 0.
 that guesses denies correct work, and that is worse than a rule a session breaks.
 
 The plane law is `orchestrator/references/hooks.md` and
-`orchestrator/docs/adr/0050-a-hook-refuses-and-a-seam-performs.md`.
+`orchestrator/docs/adr/0051-a-hook-refuses-and-a-seam-performs.md`.
 
     python3 <plugin root>/hooks/refuse.py < event.json
 
