@@ -87,7 +87,11 @@ quick() {
 	# --strict on the command line, so the gate holds where pyproject.toml sets
 	# nothing. The per-module section there relaxes the annotation checks alone.
 	step 'types · layer 1' mypy --strict .
-	step 'tests · layer 2' python3 -m pytest scripts/ -q
+	# The template names one test directory, and this repo has two: the seams under
+	# scripts/ and the hook plane under hooks/. The template keeps its one directory,
+	# because a target repo holds no hook of this plugin's own. Same reference file,
+	# and orchestrator/references/hooks.md holds the plane.
+	step 'tests · layer 2' python3 -m pytest scripts/ hooks/ -q
 	# C901 is the complexity rule, and it reads max-complexity from pyproject.toml.
 	# --select on the command line, so the cap holds whatever the repo's own rule set
 	# selects.
@@ -100,7 +104,7 @@ full() {
 	# through `subprocess`. So in-process line coverage reads 0% while every test passes.
 	# A number that measures nothing is not a threshold. So `gates.thresholds.coverage`
 	# stays blank, and `pyproject.toml` carries no `fail_under`.
-	step 'tests · layer 3' python3 -m pytest scripts/ -q
+	step 'tests · layer 3' python3 -m pytest scripts/ hooks/ -q
 	# The contracts live in .importlinter.
 	step 'import boundaries · layer 3' lint-imports
 	# The rules live in .gitleaks.toml, and the scan reads the whole history.

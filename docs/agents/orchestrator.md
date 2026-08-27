@@ -11,12 +11,13 @@ yolo:     on              # required; the harness ref supplies the actual flag
 
 # --- right model for the job: one (model, effort) pair per role ---
 # Roles, the routing rule, and the cost profiles are in references/models.md.
-# This is `balanced` with heavy raised to xhigh: a wrong edit to a skill body
-# ships bad instructions to every future worker, so heavy items justify the rung.
+# This is plain `balanced`. This repo is markdown plus two small Python seams, so
+# `light` carries most items and `heavy` is the exception. See `role_default`.
 models:
-  heavy:                  # multi-skill change, new skill, contract/vocabulary change
+  role_default: light     # this repo inverts the skill's default; see the models note
+  heavy:                  # contract/vocabulary change, new skill, a seam plus its tests
     model:  opus-5
-    effort: xhigh
+    effort: high
   light:                  # single-file reference or doc edit, fully enumerated criteria
     model:  sonnet-5
     effort: medium
@@ -82,11 +83,29 @@ gates:
   spawn.
 - **models** picks the right model for the job — one `(model, effort)` pair per
   **role**, not one global model. The orchestrator classifies each work item into
-  a role at spawn time (`heavy` / `light`), defaulting to `heavy` and downgrading
-  only on clear signals. The routing rule and the effort ladder live in
-  `references/models.md`.
+  a role at spawn time (`heavy` / `light`). The routing rule and the effort ladder
+  live in `references/models.md`.
+  - **`role_default: light` inverts that rule for this repo.** The skill defaults to
+    `heavy` and drops to `light` on clear signals. It does this because its assumed
+    repo is application code. There, a mis-sized worker costs a whole round trip.
+    This repo is markdown skills plus two small Python seams. Here, a mis-sized
+    `light` worker loses one cheap `sonnet-5` spawn. So the default is `light`, and
+    `heavy` needs a signal. Take `heavy` only when one of these conditions is true:
+    - The item changes a **contract**. This is a `CONTEXT.md` unit, a config schema,
+      a close-transaction step, or a rule that a worker prompt depends on.
+    - The item adds a **new skill**, or a new ADR that reverses an earlier one.
+    - The item touches a **Python seam** (`scripts/*.py`) plus its test suite.
+    - The item spans **three or more files across two or more skills**.
+    - The item leaves a real decision open.
+    - The item is a **re-spawn** after a failed round.
+
+    Every other item is `light`. One reference edit, one ADR that adds a decision, a
+    doc fix, a link repair, a table column, or one test file is `light`. Report the
+    role on every spawn. A wrong call is then visible in one line.
   - **Effort** tunes how much the model *thinks*: `low | medium | high | xhigh | max`.
-    Both frontier models default to `high`.
+    Both frontier models default to `high`, and `heavy` sits at that default. The rung
+    above it is not gone. A re-spawn after a failed round steps up, so a genuinely hard
+    item still reaches `opus-5` at `xhigh`. It is not the first guess.
   - The **harness clamps** what it can express — `codex` tops out at `high`,
     `pi` at `xhigh`, `cursor` bakes effort into the model id. `claude` (this
     config) reaches the whole ladder, so no clamp applies.
@@ -145,8 +164,15 @@ A worker on this repo should also:
   with no home is the thing that rots.
 - Record a decision that reverses or narrows an earlier one as a new ADR under
   `orchestrator/docs/adr/`, rather than silently editing the old one.
-- Bump `version` in `.claude-plugin/plugin.json` only when a user story finishes. The
-  bump lands with the last child of the story, and never once per work item. Minor for a
-  story that changed a contract or a dependency, patch for a docs-only story. A worker on
-  one child leaves the version untouched. Two children that each bump pick the same
-  number, and the merge then keeps one bump and loses the other.
+- Bump `version` in `.claude-plugin/plugin.json` when a user story finishes. The bump lands
+  with the last child of the story, and never once per work item. Minor for a story that
+  changed a contract or a dependency, patch for a docs-only story. The story sets that
+  level, and the file types of its last child never change it. So a documentation-only last
+  child of a contract-changing story still takes the minor. A worker on one child leaves the
+  version untouched. Two children that each bump pick the same number, and the merge then
+  keeps one bump and loses the other.
+- A work item with no `user-story` parent bumps a patch, in its own branch. The condition is
+  that the item changes what an installed session or a seam does. An item that changes only
+  this repo's own files bumps nothing: `CLAUDE.md`, a page under `docs/`, an ADR, or a test.
+  The rationale, the rejected release step and the collision between two standalone items
+  are in [ADR 0050](../../orchestrator/docs/adr/0050-a-standalone-item-bumps-a-patch.md).
