@@ -128,7 +128,7 @@ blank case, so no story here reaches a story proof.
   asserts a page title proves little. Two things mitigate it, and neither is a mechanism.
   The evidence note asks for one line per user story, and a human reviews the spec PR.
 - **Accepted risk: the two HTML overview docs can drift.** `scripts/test_links.py` walks
-  `*.md` only, so nothing checks a link or an anchor in `docs/automated-workflow.html` or
+  `*.md` only, so nothing checks a link or an anchor in `docs/architecture.html` or
   in `docs/skill-state-and-roadmap.html`. A reader must read both by hand. A
   Markdown-plus-HTML link walk is work of its own.
 - **This ADR declares the step and wires nothing.** The flow in

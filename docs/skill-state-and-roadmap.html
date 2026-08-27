@@ -1,0 +1,1159 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>orchestrator-skills · today, and the way to the new architecture</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script type="module">
+      import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+      mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "loose",
+        flowchart: { curve: "basis", padding: 14 } });
+    </script>
+    <style>
+      .band { border-left-width: 6px; }
+      .mermaid { display:flex; justify-content:center; }
+      .mermaid svg { max-width: 100%; height: auto; }
+      table { font-variant-numeric: tabular-nums; }
+      code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+      td, th { vertical-align: top; }
+      a.iss { color:#4338ca; }
+      a.iss:hover { text-decoration: underline; }
+    </style>
+  </head>
+  <body class="bg-stone-50 text-slate-900 font-sans antialiased">
+  <main class="max-w-6xl mx-auto px-6 py-12 space-y-14">
+
+  <!-- ══════════════ HEADER ══════════════ -->
+  <header class="space-y-4">
+    <p class="text-xs uppercase tracking-widest text-slate-500">Migration plan · orchestrator-skills · 0.34.0 today, 1.0.0 at the end</p>
+    <h1 class="font-serif text-4xl leading-tight">Five waves from here to there</h1>
+
+    <p class="text-lg text-slate-600 max-w-3xl">The target design lives in
+      <a class="iss font-mono text-base" href="architecture.html">architecture.html</a>. This page
+      holds the other half: <b>where the repo stands today, what happens to each of the 37 open
+      work items, and the order that gets from one to the other without a half-migrated
+      repo.</b></p>
+
+    <p class="text-slate-600 max-w-3xl">The migration runs in five waves. <b>Each wave leaves the
+      repo working and shippable.</b> No wave depends on the wave after it. The riskiest change,
+      the rewrite of the skill body, is last, because it can only shrink once every rule it holds
+      has a new owner.</p>
+
+    <div class="grid sm:grid-cols-4 gap-4 pt-2">
+      <div class="rounded-lg border border-slate-200 bg-white p-4">
+        <p class="font-mono text-2xl font-bold text-slate-700">37</p>
+        <p class="text-sm text-slate-600">open work items today</p>
+      </div>
+      <div class="rounded-lg border border-slate-200 bg-white p-4">
+        <p class="font-mono text-2xl font-bold text-emerald-700">19</p>
+        <p class="text-sm text-slate-600">unaffected · the language columns</p>
+      </div>
+      <div class="rounded-lg border border-slate-200 bg-white p-4">
+        <p class="font-mono text-2xl font-bold text-amber-600">12</p>
+        <p class="text-sm text-slate-600">rescoped · they survive, smaller</p>
+      </div>
+      <div class="rounded-lg border border-slate-200 bg-white p-4">
+        <p class="font-mono text-2xl font-bold text-rose-600">6</p>
+        <p class="text-sm text-slate-600">closed as absorbed or out of date</p>
+      </div>
+      <div class="rounded-lg border border-slate-200 bg-white p-4">
+        <p class="font-mono text-2xl font-bold text-sky-700">15</p>
+        <p class="text-sm text-slate-600">new items to file</p>
+      </div>
+      <div class="rounded-lg border border-slate-200 bg-white p-4">
+        <p class="font-mono text-2xl font-bold text-sky-700">5</p>
+        <p class="text-sm text-slate-600">waves · each one shippable</p>
+      </div>
+      <div class="rounded-lg border border-slate-200 bg-white p-4">
+        <p class="font-mono text-2xl font-bold text-indigo-700">10</p>
+        <p class="text-sm text-slate-600">ADRs retired · 7 new</p>
+      </div>
+      <div class="rounded-lg border border-slate-200 bg-white p-4">
+        <p class="font-mono text-2xl font-bold text-indigo-700">1</p>
+        <p class="text-sm text-slate-600">wave you can start today</p>
+      </div>
+    </div>
+  </header>
+
+  <!-- ══════════════ WHERE WE ARE ══════════════ -->
+  <section class="space-y-5">
+    <div class="flex items-baseline gap-3">
+      <h2 class="font-serif text-3xl">Where the repo stands today</h2>
+      <span class="text-xs uppercase tracking-wider text-slate-500">version 0.34.0</span>
+    </div>
+
+    <p class="text-slate-600 max-w-3xl">The parts work. The problem is the shape. Every number in
+      the left column below is a real count in the repo right now, and every one of them is a place
+      a rule can be skipped.</p>
+
+    <div class="overflow-x-auto rounded-lg border border-slate-200 bg-white">
+      <table class="w-full text-sm">
+        <thead class="bg-slate-50 text-slate-600">
+          <tr>
+            <th class="text-left px-4 py-3">What</th>
+            <th class="text-right px-4 py-3">Today</th>
+            <th class="text-right px-4 py-3">Target</th>
+            <th class="text-left px-4 py-3">Why the number is the problem</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-100">
+          <tr>
+            <td class="px-4 py-3"><code>orchestrator/SKILL.md</code></td>
+            <td class="px-4 py-3 text-right font-mono">1578</td>
+            <td class="px-4 py-3 text-right font-mono text-emerald-700">120</td>
+            <td class="px-4 py-3">Every turn loads all of it. A model that must hold 1578 lines
+              of rules drops rows, which is the bug that started this.</td>
+          </tr>
+          <tr>
+            <td class="px-4 py-3"><code>orchestrator-setup/SKILL.md</code></td>
+            <td class="px-4 py-3 text-right font-mono">686</td>
+            <td class="px-4 py-3 text-right font-mono text-emerald-700">~300</td>
+            <td class="px-4 py-3">It is not loaded on a worker turn, so the length costs nothing.
+              The problem is that half of it configures things the target design deletes: the review
+              policy, the gate profile, five board ids and a terminal title.</td>
+          </tr>
+          <tr>
+            <td class="px-4 py-3">Setup interview questions</td>
+            <td class="px-4 py-3 text-right font-mono">8</td>
+            <td class="px-4 py-3 text-right font-mono text-emerald-700">6</td>
+            <td class="px-4 py-3">Two of the eight ask about a thing that stops existing. Every
+              answer a human gives is a value some machine must later read.</td>
+          </tr>
+          <tr>
+            <td class="px-4 py-3">Label families</td>
+            <td class="px-4 py-3 text-right font-mono">2</td>
+            <td class="px-4 py-3 text-right font-mono text-emerald-700">1</td>
+            <td class="px-4 py-3">The <code>phase:*</code> family caches a position that is
+              already computable, so the cache can disagree with the truth.</td>
+          </tr>
+          <tr>
+            <td class="px-4 py-3">Tick outcomes</td>
+            <td class="px-4 py-3 text-right font-mono">9</td>
+            <td class="px-4 py-3 text-right font-mono text-emerald-700">5</td>
+            <td class="px-4 py-3">Nine rows, each with a label write and a follow-up the session
+              performs by hand from a table.</td>
+          </tr>
+          <tr>
+            <td class="px-4 py-3">Places that write a board card</td>
+            <td class="px-4 py-3 text-right font-mono">4</td>
+            <td class="px-4 py-3 text-right font-mono text-emerald-700">0</td>
+            <td class="px-4 py-3">Four write sites for a value derived from one label. Any one of
+              them can be forgotten.</td>
+          </tr>
+          <tr>
+            <td class="px-4 py-3">Label writes the session performs</td>
+            <td class="px-4 py-3 text-right font-mono">7</td>
+            <td class="px-4 py-3 text-right font-mono text-emerald-700">0</td>
+            <td class="px-4 py-3">This is the reported bug, exactly. A write a session performs is
+              a write a session can skip.</td>
+          </tr>
+          <tr>
+            <td class="px-4 py-3">Gates a model reports on</td>
+            <td class="px-4 py-3 text-right font-mono">4</td>
+            <td class="px-4 py-3 text-right font-mono text-emerald-700">0</td>
+            <td class="px-4 py-3">The record exists, and a model writes it. So a green record
+              proves a model said so, and not that a command exited zero.</td>
+          </tr>
+          <tr>
+            <td class="px-4 py-3">Gates that block anything</td>
+            <td class="px-4 py-3 text-right font-mono">0</td>
+            <td class="px-4 py-3 text-right font-mono text-emerald-700">4</td>
+            <td class="px-4 py-3">ADR 0036 says a gate run is work product, so nothing stops a
+              push that skipped it.</td>
+          </tr>
+          <tr>
+            <td class="px-4 py-3">Hooks</td>
+            <td class="px-4 py-3 text-right font-mono">0</td>
+            <td class="px-4 py-3 text-right font-mono text-emerald-700">3</td>
+            <td class="px-4 py-3">There is no layer in the stack that can refuse a command. Every
+              rule is advice.</td>
+          </tr>
+          <tr>
+            <td class="px-4 py-3">Seams · Python with an exit code</td>
+            <td class="px-4 py-3 text-right font-mono">4</td>
+            <td class="px-4 py-3 text-right font-mono text-emerald-700">3 in the loop</td>
+            <td class="px-4 py-3">All four are good. Two of them are called by a session that has
+              to remember to call them.</td>
+          </tr>
+          <tr>
+            <td class="px-4 py-3">ADRs</td>
+            <td class="px-4 py-3 text-right font-mono">42</td>
+            <td class="px-4 py-3 text-right font-mono text-emerald-700">39</td>
+            <td class="px-4 py-3">Ten retire and seven land. The count barely moves, and the rules
+              they hold get much smaller.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="grid md:grid-cols-3 gap-4">
+      <div class="band border-emerald-500 bg-white rounded-r-lg p-5 space-y-2">
+        <p class="font-semibold text-sm">What already works, and stays</p>
+        <p class="text-sm text-slate-600">The gate layer model and its config block. The gate
+          record format. <code>close_item.py</code> with its dirty-tree refusal.
+          <code>merge_train.py</code>. The item schedule that outlives a session. The delegation
+          cap. The browser surface rule. All of it is kept.</p>
+      </div>
+      <div class="band border-amber-500 bg-white rounded-r-lg p-5 space-y-2">
+        <p class="font-semibold text-sm">What is half done today</p>
+        <p class="text-sm text-slate-600">Story <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/143">#143</a>,
+          one tracker adapter, <b>closed on 2026-08-25</b>, so
+          <code>scripts/tracker.py</code> already holds it. Story
+          <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/178">#178</a>,
+          the automatic story start, is four items and it is already most of the target's wave 4.
+          Story <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/163">#163</a>
+          has one child left, and it is this page.</p>
+      </div>
+      <div class="band border-rose-500 bg-white rounded-r-lg p-5 space-y-2">
+        <p class="font-semibold text-sm">The three bugs the target deletes</p>
+        <p class="text-sm text-slate-600"><a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/155">#155</a>
+          two stacked work states.
+          <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/156">#156</a>
+          an undelivered wake burning its window.
+          <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/157">#157</a>
+          an answered fix round re-firing. All three are one class of bug: a fact stored in a
+          marker file, a delivery, or a session's memory.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════════ THE FIVE WAVES ══════════════ -->
+  <section class="space-y-5">
+    <div class="flex items-baseline gap-3">
+      <h2 class="font-serif text-3xl">The five waves</h2>
+      <span class="text-xs uppercase tracking-wider text-slate-500">each one ships on its own</span>
+    </div>
+
+    <p class="text-slate-600 max-w-3xl">The order is not a preference. It is forced by one rule:
+      <b>a rule can only leave the skill body after its new owner exists.</b> So the owners come
+      first, in the order that keeps the repo working after every single wave.</p>
+
+    <div class="rounded-lg border border-slate-200 bg-white p-6">
+      <pre class="mermaid">
+flowchart LR
+  W1["Wave 1 · 0.36.0<br/><b>Enforce today</b><br/>3 hooks · push block<br/>no loop change"]
+  W2["Wave 2 · 0.37.0<br/><b>Shrink the vocabulary</b><br/>4 labels · 5 outcomes<br/>zero board writes"]
+  W3["Wave 3 · 0.38.0<br/><b>The tick writes</b><br/>transition seam<br/>the merge is act two"]
+  W4["Wave 4 · 0.39.0<br/><b>The tick spawns</b><br/>template · spawn_item.py<br/>queue schedule"]
+  W5["Wave 5 · 1.0.0<br/><b>Delete the prose</b><br/>SKILL.md to 120 lines<br/>7 ADRs"]
+  L["The four language columns<br/>#100 #101 #102 #103 · 19 items<br/>untouched by the migration"]
+
+  W1 --> W2 --> W3 --> W4 --> W5
+  W5 -.->|"then"| L
+
+  classDef now fill:#e0f2fe,stroke:#0284c7,font-weight:bold
+  classDef mid fill:#eef2ff,stroke:#4f46e5
+  classDef last fill:#ecfdf5,stroke:#059669,font-weight:bold
+  classDef park fill:#f8fafc,stroke:#94a3b8,color:#475569
+  class W1 now
+  class W2,W3,W4 mid
+  class W5 last
+  class L park
+      </pre>
+    </div>
+
+    <div class="overflow-x-auto rounded-lg border border-slate-200 bg-white">
+      <table class="w-full text-sm">
+        <thead class="bg-slate-50 text-slate-600">
+          <tr>
+            <th class="text-left px-4 py-3">Wave</th>
+            <th class="text-left px-4 py-3">What lands</th>
+            <th class="text-left px-4 py-3">What you can do after it that you cannot do now</th>
+            <th class="text-left px-4 py-3">Risk</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-100">
+          <tr class="bg-sky-50/50">
+            <td class="px-4 py-3"><b>1</b><br/><code class="text-xs">0.36.0</code><br/>Enforce today</td>
+            <td class="px-4 py-3">The three hooks. A callable interface for the tick predicate.
+              Setup gains the hook check and the gate smoke run. The tracker adapter every hook
+              reads is already on disk.</td>
+            <td class="px-4 py-3"><b>Every gate becomes deterministic.</b> A machine writes the
+              record, and a push with a red record is denied. This works against the skill exactly
+              as it is written today, so you get the value before any rewrite.</td>
+            <td class="px-4 py-3 text-emerald-700">Low. Nothing in the loop changes. A hook that
+              misfires is removed by deleting one key from the manifest.</td>
+          </tr>
+          <tr>
+            <td class="px-4 py-3"><b>2</b><br/><code class="text-xs">0.37.0</code><br/>Shrink the vocabulary</td>
+            <td class="px-4 py-3">Add <code>needs-human</code>. Delete <code>to-merge</code>, the
+              <code>To merge</code> column, and the <code>phase:*</code> family. Delete every
+              board write. Setup gains the label migration and drops to a two-coordinate board
+              read.</td>
+            <td class="px-4 py-3">The tick's outcome table drops from nine rows to five. Three
+              open bug reports close, because the thing that failed no longer exists.</td>
+            <td class="px-4 py-3 text-amber-600">Medium. Two vocabularies must not be live at
+              once, so this is one item, not four. Nothing in flight while it lands.</td>
+          </tr>
+          <tr>
+            <td class="px-4 py-3"><b>3</b><br/><code class="text-xs">0.38.0</code><br/>The tick writes</td>
+            <td class="px-4 py-3">The transition write path inside <code>worker_state.py</code>.
+              The tick reads the PR state and calls <code>close_item.py</code>. The board flags
+              leave the close. Setup stops titling the terminal, because the wake dies here.</td>
+            <td class="px-4 py-3"><b>The reported bug becomes impossible.</b> The session writes
+              no label, so it cannot forget one. Your merge on GitHub becomes act two, and no
+              close is ever typed.</td>
+            <td class="px-4 py-3 text-amber-600">Medium. A seam now mutates the tracker on a
+              schedule. The test bar is one test per transition, plus the one-label assertion.</td>
+          </tr>
+          <tr>
+            <td class="px-4 py-3"><b>4</b><br/><code class="text-xs">0.39.0</code><br/>The tick spawns</td>
+            <td class="px-4 py-3">The prompt template and its render test.
+              <code>spawn_item.py</code>. The queue subcommand and the queue schedule at setup
+              time.</td>
+            <td class="px-4 py-3"><b>Act one becomes a drag.</b> Label an item, drag its card to
+              <code>To do</code>, walk away. No session in the middle of the loop at all.</td>
+            <td class="px-4 py-3 text-rose-600">Highest. A schedule now starts workers with no
+              human in the turn. The two roofs and the touch-set gate are what bound it.</td>
+          </tr>
+          <tr class="bg-emerald-50/50">
+            <td class="px-4 py-3"><b>5</b><br/><code class="text-xs">1.0.0</code><br/>Delete the prose</td>
+            <td class="px-4 py-3">Adversarial review and the merge train become verbs.
+              <code>SKILL.md</code> falls to 120 lines. The setup body falls to about 300. The
+              reference moves. Ten ADRs retire and seven land.</td>
+            <td class="px-4 py-3">Every turn loads a twelfth of what it loads today. A new rule
+              lands in one file instead of four.</td>
+            <td class="px-4 py-3 text-emerald-700">Low, by then. Every rule being deleted already
+              has an owner that a test covers.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="rounded-lg border-2 border-sky-300 bg-sky-50 p-5 space-y-2">
+      <p class="text-xs uppercase tracking-wider text-sky-800">Why wave 1 comes first, and not the rewrite</p>
+      <p class="text-sm text-sky-900"><b>Wave 1 is the only wave that pays off against the current
+        design.</b> The hooks make gates deterministic without touching one line of the loop. So if
+        the migration stalls after wave 1, the repo is still better off, and nothing is
+        half-migrated. Every later wave depends on a piece wave 1 lands: the callable predicate,
+        or the record hook.</p>
+    </div>
+  </section>
+
+  <!-- ══════════════ EVERY OPEN ITEM ══════════════ -->
+  <section class="space-y-5">
+    <div class="flex items-baseline gap-3">
+      <h2 class="font-serif text-3xl">Every open item, and its fate</h2>
+      <span class="text-xs uppercase tracking-wider text-slate-500">37 rows · read once, then act</span>
+    </div>
+
+    <p class="text-slate-600 max-w-3xl">Nineteen items are untouched, because the language columns
+      describe what goes inside <code>make quick</code> and <code>make full</code>, and the
+      migration never changes that. Twelve survive with a smaller scope. Six close. Do the closes
+      first, so the board stops showing work nobody will do.</p>
+
+    <h3 class="font-serif text-xl pt-2">Close these six, with a comment naming the ADR</h3>
+    <div class="overflow-x-auto rounded-lg border border-rose-200 bg-white">
+      <table class="w-full text-sm">
+        <thead class="bg-rose-50 text-rose-900">
+          <tr>
+            <th class="text-left px-4 py-3">Item</th>
+            <th class="text-left px-4 py-3">Reason</th>
+            <th class="text-left px-4 py-3">Wave</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-100">
+          <tr>
+            <td class="px-4 py-3"><a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/155">#155</a> two stacked work states</td>
+            <td class="px-4 py-3"><b>Absorbed.</b> One function owns every label swap, and one test
+              asserts exactly one work-state label after each transition.</td>
+            <td class="px-4 py-3">3</td>
+          </tr>
+          <tr>
+            <td class="px-4 py-3"><a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/156">#156</a> an undelivered wake burns its window</td>
+            <td class="px-4 py-3"><b>Out of date.</b> There is no delivery, so there is no marker
+              and no window to burn.</td>
+            <td class="px-4 py-3">3</td>
+          </tr>
+          <tr>
+            <td class="px-4 py-3"><a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/157">#157</a> an answered fix round re-fires</td>
+            <td class="px-4 py-3"><b>Out of date.</b> Rounds leave the loop with adversarial
+              review.</td>
+            <td class="px-4 py-3">5</td>
+          </tr>
+          <tr>
+            <td class="px-4 py-3"><a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/87">#87</a> a seam that resolves config to argv</td>
+            <td class="px-4 py-3"><b>Absorbed.</b> The session assembles no command. The context
+              hook exports the plugin root, and <code>spawn_item.py</code> reads the config
+              itself.</td>
+            <td class="px-4 py-3">1 and 4</td>
+          </tr>
+          <tr>
+            <td class="px-4 py-3"><a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/181">#181</a> the merge-order comment on each PR</td>
+            <td class="px-4 py-3"><b>Out of date.</b> The merge train leaves the loop, because you
+              pick the order. There is no train order to publish.</td>
+            <td class="px-4 py-3">2</td>
+          </tr>
+          <tr>
+            <td class="px-4 py-3"><a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/186">#186</a> one board recipe, two implementations</td>
+            <td class="px-4 py-3"><b>Out of date.</b> Nothing writes the board, so there is no
+              second implementation to reconcile.</td>
+            <td class="px-4 py-3">2</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3 class="font-serif text-xl pt-4">Rescope these eight</h3>
+    <div class="overflow-x-auto rounded-lg border border-amber-200 bg-white">
+      <table class="w-full text-sm">
+        <thead class="bg-amber-50 text-amber-900">
+          <tr>
+            <th class="text-left px-4 py-3">Item</th>
+            <th class="text-left px-4 py-3">New scope</th>
+            <th class="text-left px-4 py-3">Wave</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-100">
+          <tr>
+            <td class="px-4 py-3">story <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/163">#163</a>
+              · the story proof</td>
+            <td class="px-4 py-3">Unchanged in substance, and four of its five children are closed.
+              The proof gains an exit code, because its generated spec is wired into
+              <code>gates.full</code>. The parent wears no phase label, since the family is deleted.
+              <b>Its bump is a minor, and it lands with
+              <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/168">#168</a>.</b></td>
+            <td class="px-4 py-3">0 · <code>0.35.0</code></td>
+          </tr>
+          <tr>
+            <td class="px-4 py-3"><a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/184">#184</a> a callable interface for the tick predicate</td>
+            <td class="px-4 py-3"><b>Promoted from a refactor candidate to a prerequisite.</b> The
+              transition write path in wave 3 cannot be tested through 15 positional arguments.
+              Same change, higher priority.</td>
+            <td class="px-4 py-3">1</td>
+          </tr>
+          <tr>
+            <td class="px-4 py-3"><a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/187">#187</a> the tracker test double lives in the production class</td>
+            <td class="px-4 py-3"><b>Stays parked, and its trigger widens.</b> It cannot fold into
+              <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/86">#86</a>,
+              which closed on 2026-08-25. It still contradicts ADR 0040, so it needs a new ADR to
+              narrow it. Reopen when a third tracker arrives, or when a hook needs its own fixture
+              path.</td>
+            <td class="px-4 py-3">none</td>
+          </tr>
+          <tr>
+            <td class="px-4 py-3"><a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/185">#185</a> the close is two writes the caller must order</td>
+            <td class="px-4 py-3">Survives, and gets easier. The close loses its merge steps and
+              its board writes in wave 3, so the ordering rule has less to order.</td>
+            <td class="px-4 py-3">3</td>
+          </tr>
+          <tr>
+            <td class="px-4 py-3">story <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/178">#178</a>
+              · <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/179">#179</a>
+              <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/180">#180</a>
+              <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/182">#182</a></td>
+            <td class="px-4 py-3"><b>This story is already wave 4.</b> The <code>To do</code> gate,
+              the touch-set compare and the two roofs all survive as written. Drop
+              <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/181">#181</a>
+              from it, and the story becomes three children.</td>
+            <td class="px-4 py-3">4</td>
+          </tr>
+          <tr>
+            <td class="px-4 py-3"><a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/88">#88</a> split <code>SKILL.md</code> by flow</td>
+            <td class="px-4 py-3"><b>Becomes the wave 5 rewrite.</b> The old scope was a split. The
+              new scope is mostly a delete, because a seam or a hook owns each flow by then. The
+              target is 120 lines, not a set of smaller flow files.</td>
+            <td class="px-4 py-3">5</td>
+          </tr>
+          <tr>
+            <td class="px-4 py-3"><a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/130">#130</a> "create a ticket" chains into the flow</td>
+            <td class="px-4 py-3">Survives, and shrinks to a routing table. Once the queue tick starts
+              items, <code>/to-tickets</code> only has to write the item, the
+              <code>## Touches</code> block and the type label. It never hands work to a session.
+              It had no body at all, and now it has one.</td>
+            <td class="px-4 py-3">4</td>
+          </tr>
+          <tr>
+            <td class="px-4 py-3"><a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/174">#174</a> the bump rule names no case for a standalone fix</td>
+            <td class="px-4 py-3">Unchanged, and small. Do it inside any wave. It touches the
+              config template and not the loop.</td>
+            <td class="px-4 py-3">any</td>
+          </tr>
+          <tr>
+            <td class="px-4 py-3"><a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/168">#168</a> the roadmap page</td>
+            <td class="px-4 py-3"><b>This page.</b> Its old scope was showing the story proof. Its
+              new scope is showing the migration. It is the last child of story
+              <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/163">#163</a>,
+              and it is documentation only, so it takes a patch and not a minor.</td>
+            <td class="px-4 py-3">0 · <code>0.35.0</code></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3 class="font-serif text-xl pt-4">Leave these nineteen alone</h3>
+    <div class="rounded-lg border border-emerald-200 bg-white p-5 space-y-3">
+      <p class="text-sm text-slate-600">The four language columns describe which tool answers which
+        gate row for a given language. The target design keeps that matrix, as guidance for writing
+        the config. So the migration never touches them, and they never touch the migration.</p>
+      <div class="grid sm:grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+        <div class="rounded border border-slate-200 p-3">
+          <p class="font-semibold"><a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/100">#100</a> Terraform</p>
+          <p class="text-slate-500 text-xs font-mono">120 · 121 · 124 · 125</p>
+        </div>
+        <div class="rounded border border-slate-200 p-3">
+          <p class="font-semibold"><a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/101">#101</a> Kubernetes</p>
+          <p class="text-slate-500 text-xs font-mono">115 · 119 · 127 · 128 · 129</p>
+        </div>
+        <div class="rounded border border-slate-200 p-3">
+          <p class="font-semibold"><a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/102">#102</a> Go</p>
+          <p class="text-slate-500 text-xs font-mono">113 · 116 · 122</p>
+        </div>
+        <div class="rounded border border-slate-200 p-3">
+          <p class="font-semibold"><a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/103">#103</a> TypeScript</p>
+          <p class="text-slate-500 text-xs font-mono">117 · 123 · 126</p>
+        </div>
+      </div>
+      <p class="text-sm text-slate-600"><b>Run them after 1.0.0, not beside it.</b> They could run
+        in parallel, because they touch setup and the gate matrix rather than the loop. They should
+        not. Each column adds config fields, and the migration changes who reads the config. Two
+        moving contracts at once is how a merge loses a bump.</p>
+    </div>
+  </section>
+
+  <!-- ══════════════ THE ITEMS TO FILE ══════════════ -->
+  <section class="space-y-5">
+    <div class="flex items-baseline gap-3">
+      <h2 class="font-serif text-3xl">The fifteen items to file</h2>
+      <span class="text-xs uppercase tracking-wider text-slate-500">five stories, one per wave</span>
+    </div>
+
+    <p class="text-slate-600 max-w-3xl">File one user story per wave, with the children below.
+      Every child names its <code>## Touches</code> block, because the touch-set gate reads it and
+      because two children of one wave often want the same file.</p>
+
+    <p class="text-slate-600 max-w-3xl"><b>No child is only about setup.</b> Each setup edit is
+      named inside the child that changes what setup configures, so the two land in one commit and a
+      repo is never configured for a loop that moved. The single exception is item 15, the setup body
+      trim, which waits for wave 5 with the rest of the prose. The full list is in <b>What setup does
+      differently</b> below.</p>
+
+    <div class="space-y-6">
+
+      <!-- WAVE 1 -->
+      <div class="rounded-lg border-2 border-sky-300 bg-white overflow-hidden">
+        <div class="bg-sky-50 px-5 py-3 flex items-baseline gap-3 flex-wrap">
+          <span class="font-mono text-xs px-2 py-1 rounded bg-sky-200 text-sky-900">wave 1</span>
+          <p class="font-semibold">Enforce the design we already have</p>
+          <span class="text-xs text-slate-500 font-mono">0.36.0 · story #198 · 4 new children</span>
+        </div>
+        <table class="w-full text-sm">
+          <tbody class="divide-y divide-slate-100">
+            <tr>
+              <td class="px-5 py-3 w-8 font-mono text-slate-400">1</td>
+              <td class="px-2 py-3 font-medium">The three hooks, and <code>references/hooks.md</code></td>
+              <td class="px-5 py-3 text-slate-600"><code>hooks/context.py</code>,
+                <code>hooks/refuse.py</code>, <code>hooks/record.py</code>, one
+                <code>hooks/hooks.json</code>, the <code>hooks</code> key in
+                <code>plugin.json</code>, and a test suite per hook. Each hook exits silently
+                without the repo marker. <b>Setup gains a verify step</b> that reads the key, the
+                manifest and the marker back, and names the restart a fresh manifest needs.</td>
+            </tr>
+            <tr>
+              <td class="px-5 py-3 font-mono text-slate-400">2</td>
+              <td class="px-2 py-3 font-medium">The record hook takes over the gate record</td>
+              <td class="px-5 py-3 text-slate-600">The worker stops writing
+                <code>.orchestrator/gates-&lt;item&gt;.jsonl</code>. The checklist boxes lose the
+                write instruction and keep the run instruction. One ADR: a gate blocks, and a hook
+                writes its record. It supersedes ADR 0036.</td>
+            </tr>
+            <tr>
+              <td class="px-5 py-3 font-mono text-slate-400">3</td>
+              <td class="px-2 py-3 font-medium">The push block</td>
+              <td class="px-5 py-3 text-slate-600"><code>git push</code> is denied while any
+                configured gate lacks a green line at <code>HEAD</code>. The denial message names
+                the command to run. This is the item that makes "all gates deterministic"
+                true. <b>Setup gains the smoke run</b> in the same commit: it runs each configured
+                gate command once and reports the exit code, because a config that names a command
+                which does not exist now denies every push in that repo.</td>
+            </tr>
+            <tr>
+              <td class="px-5 py-3 font-mono text-slate-400">4</td>
+              <td class="px-2 py-3 font-medium">A callable interface for the tick predicate, and the bump</td>
+              <td class="px-5 py-3 text-slate-600">This is
+                <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/184">#184</a>,
+                promoted. Fifteen positional arguments stop being the test surface, so wave 3 can
+                add a write path with a test per transition.</td>
+            </tr>
+            <tr class="bg-slate-50/60">
+              <td class="px-5 py-3 font-mono text-slate-400">+</td>
+              <td class="px-2 py-3 font-medium">One small item rides along</td>
+              <td class="px-5 py-3 text-slate-600"><a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/174">#174</a>
+                the bump rule. It touches no seam and no hook, and wave 1 changes nothing in the
+                loop, so this is the cheapest place to put it.
+                <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/130">#130</a> is <b>wave 4</b>, not here: it waits on
+                <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/180">#180</a>.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- WAVE 2 -->
+      <div class="rounded-lg border border-indigo-300 bg-white overflow-hidden">
+        <div class="bg-indigo-50 px-5 py-3 flex items-baseline gap-3 flex-wrap">
+          <span class="font-mono text-xs px-2 py-1 rounded bg-indigo-200 text-indigo-900">wave 2</span>
+          <p class="font-semibold">Shrink the vocabulary</p>
+          <span class="text-xs text-slate-500 font-mono">0.37.0 · story #199 · 2 new children</span>
+        </div>
+        <table class="w-full text-sm">
+          <tbody class="divide-y divide-slate-100">
+            <tr>
+              <td class="px-5 py-3 w-8 font-mono text-slate-400">5</td>
+              <td class="px-2 py-3 font-medium">One label family, four values</td>
+              <td class="px-5 py-3 text-slate-600"><b>One item, not four.</b> Add
+                <code>needs-human</code>. Delete <code>to-merge</code>, the
+                <code>To merge</code> column and the whole <code>phase:*</code> family. Update
+                <code>docs/agents/issue-tracker.md</code> and every reference that names one. Two
+                ADRs: one work-state label with a computed position, and the board is an input
+                rather than a mirror. They supersede 0021, 0009 and 0038. Splitting this leaves two
+                vocabularies live at once, which is worse than a big diff. <b>Setup gains the label
+                migration</b> here, and it is the only step that can run one: it names every item
+                wearing a deleted label, then deletes the family.</td>
+            </tr>
+            <tr>
+              <td class="px-5 py-3 font-mono text-slate-400">6</td>
+              <td class="px-2 py-3 font-medium">Zero board writes, and the bump</td>
+              <td class="px-5 py-3 text-slate-600">Remove the four board write sites. Strip the
+                five board coordinate flags from <code>close_item.py</code>. Close
+                <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/181">#181</a>
+                and <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/186">#186</a>.
+                Confirm the board's built-in <b>item closed to Done</b> workflow is on, and say so
+                in the config template. <b>Setup's board step drops from five ids to two
+                coordinates</b>: owner, project number, and the name of the start column. The
+                <code>Status</code> field id, the option map, the derivation table and the two write
+                calls all go, and the token scope drops to <code>read:project</code>.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- WAVE 3 -->
+      <div class="rounded-lg border border-indigo-300 bg-white overflow-hidden">
+        <div class="bg-indigo-50 px-5 py-3 flex items-baseline gap-3 flex-wrap">
+          <span class="font-mono text-xs px-2 py-1 rounded bg-indigo-200 text-indigo-900">wave 3</span>
+          <p class="font-semibold">The tick writes the transition</p>
+          <span class="text-xs text-slate-500 font-mono">0.38.0 · story #200 · 3 new children</span>
+        </div>
+        <table class="w-full text-sm">
+          <tbody class="divide-y divide-slate-100">
+            <tr>
+              <td class="px-5 py-3 w-8 font-mono text-slate-400">7</td>
+              <td class="px-2 py-3 font-medium">The transition write path inside <code>worker_state.py</code></td>
+              <td class="px-5 py-3 text-slate-600">One function owns every swap. One test per
+                transition, plus a test that asserts exactly one work-state label after each one.
+                The wake ladder and the back-off markers are deleted. Closes
+                <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/155">#155</a>
+                and <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/156">#156</a>.
+                One ADR: the tick applies the transition it computed. It supersedes 0024, 0025,
+                0026 and 0027.</td>
+            </tr>
+            <tr>
+              <td class="px-5 py-3 font-mono text-slate-400">8</td>
+              <td class="px-2 py-3 font-medium">The merge is act two</td>
+              <td class="px-5 py-3 text-slate-600">The item tick reads the PR state, and a merged
+                PR runs <code>close_item.py</code>. Its merge steps and its verb table go. One
+                ADR: the merge is the second act. It supersedes 0016 and narrows 0037. <b>Setup's
+                terminal-title step goes</b> in the same commit, because there is no wake left to
+                give it a fallback target.</td>
+            </tr>
+            <tr>
+              <td class="px-5 py-3 font-mono text-slate-400">9</td>
+              <td class="px-2 py-3 font-medium">One re-prompt, then a human, and the bump</td>
+              <td class="px-5 py-3 text-slate-600">The count is the number of
+                <code>Re-prompt:</code> comments. The first attempt resets and re-sends the
+                unchecked boxes. The second writes <code>needs-human</code> with one comment. The
+                model ladder and the stall diagnosis are deleted.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- WAVE 4 -->
+      <div class="rounded-lg border border-rose-300 bg-white overflow-hidden">
+        <div class="bg-rose-50 px-5 py-3 flex items-baseline gap-3 flex-wrap">
+          <span class="font-mono text-xs px-2 py-1 rounded bg-rose-200 text-rose-900">wave 4</span>
+          <p class="font-semibold">The tick spawns the worker</p>
+          <span class="text-xs text-slate-500 font-mono">0.39.0 · 2 new children + story #178</span>
+        </div>
+        <table class="w-full text-sm">
+          <tbody class="divide-y divide-slate-100">
+            <tr>
+              <td class="px-5 py-3 w-8 font-mono text-slate-400">10</td>
+              <td class="px-2 py-3 font-medium">The prompt template, and its render test</td>
+              <td class="px-5 py-3 text-slate-600"><code>references/prompt.template.md</code>. It
+                takes the item title and body, the checklist, the gate commands from the config,
+                and the skill named by the type label. It renders against a fixture item in a test,
+                and the test fails when a field goes missing.
+                <code>prompt-improver</code> reviews the template once, at build time.</td>
+            </tr>
+            <tr>
+              <td class="px-5 py-3 font-mono text-slate-400">11</td>
+              <td class="px-2 py-3 font-medium"><code>scripts/spawn_item.py</code></td>
+              <td class="px-5 py-3 text-slate-600">Six steps in one order: the worktree, the
+                terminal, the rendered prompt, the readiness gate, the <code>in-progress</code>
+                label, the item schedule. It refuses a harness that fails readiness, so no prompt
+                reaches a process that is not alive.</td>
+            </tr>
+            <tr class="bg-slate-50/60">
+              <td class="px-5 py-3 font-mono text-slate-400">+</td>
+              <td class="px-2 py-3 font-medium">Story <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/178">#178</a>, minus <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/181">#181</a></td>
+              <td class="px-5 py-3 text-slate-600"><a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/179">#179</a>
+                the <code>To do</code> gate,
+                <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/180">#180</a>
+                the touch-set gate, and
+                <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/182">#182</a>
+                the two roofs and the bump. Add one child: the queue subcommand, and the
+                repo-wide <code>orchestrator-queue</code> schedule that setup writes. The per-item
+                schedule is not setup's, because <code>spawn_item.py</code> owns it. Then close
+                <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/130">#130</a>.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- WAVE 5 -->
+      <div class="rounded-lg border-2 border-emerald-300 bg-white overflow-hidden">
+        <div class="bg-emerald-50 px-5 py-3 flex items-baseline gap-3 flex-wrap">
+          <span class="font-mono text-xs px-2 py-1 rounded bg-emerald-200 text-emerald-900">wave 5</span>
+          <p class="font-semibold">Delete the prose</p>
+          <span class="text-xs text-slate-500 font-mono">1.0.0 · story #201 · 4 new children</span>
+        </div>
+        <table class="w-full text-sm">
+          <tbody class="divide-y divide-slate-100">
+            <tr>
+              <td class="px-5 py-3 w-8 font-mono text-slate-400">12</td>
+              <td class="px-2 py-3 font-medium">Adversarial review and the merge train become verbs</td>
+              <td class="px-5 py-3 text-slate-600">Review keeps one entry:
+                <code>review N</code> spawns a reviewer that posts one comment. No rounds, no
+                <code>Verdict:</code> parsing, no fix loop. The train keeps one entry: ask for the
+                order and read the JSON plan. Closes
+                <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/157">#157</a>.
+                One ADR covers both.</td>
+            </tr>
+            <tr>
+              <td class="px-5 py-3 font-mono text-slate-400">13</td>
+              <td class="px-2 py-3 font-medium">The <code>SKILL.md</code> rewrite, and the reference moves</td>
+              <td class="px-5 py-3 text-slate-600">This is
+                <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/88">#88</a>,
+                rescoped. Down to 120 lines. New:
+                <code>references/story-flows.md</code>, <code>references/hooks.md</code>,
+                <code>references/reporting.md</code>. Gone:
+                <code>references/merge-train.md</code>. Merged:
+                <code>references/examples/run.md</code>.</td>
+            </tr>
+            <tr>
+              <td class="px-5 py-3 font-mono text-slate-400">14</td>
+              <td class="px-2 py-3 font-medium">The setup body trim, and the two drift fixes</td>
+              <td class="px-5 py-3 text-slate-600"><code>orchestrator-setup/SKILL.md</code> down to
+                about 300 lines. The review question and its <code>review:</code> block go, along
+                with the second-harness install and the cross-vendor assert. The
+                <code>gates.profile</code> question and field go, because <b>a blank command is
+                already the switch</b>. <b>The config template changes with the skill</b>, in the
+                same commit, so the seed and the interview never disagree. <b>The two family drift
+                fixes are not in this item.</b>
+                <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/113">#113</a>
+                and <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/117">#117</a>
+                already own them.</td>
+            </tr>
+            <tr>
+              <td class="px-5 py-3 font-mono text-slate-400">15</td>
+              <td class="px-2 py-3 font-medium">The ADR ledger, and the 1.0.0 bump</td>
+              <td class="px-5 py-3 text-slate-600">Mark all ten retired ADRs as superseded, each
+                pointing at the ADR that replaced it. No old file is edited in place. Confirm the
+                link test passes over every moved reference. Bump to
+                <code>1.0.0</code>.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ══════════════ SETUP ══════════════ -->
+  <section class="space-y-5">
+    <div class="flex items-baseline gap-3">
+      <h2 class="font-serif text-3xl">What setup does differently</h2>
+      <span class="text-xs uppercase tracking-wider text-slate-500">8 changes · spread across 5 waves · 1 item of its own</span>
+    </div>
+
+    <p class="text-slate-600 max-w-3xl"><code>/orchestrator-setup</code> writes the config, the gate
+      files, the tracker pointer and the schedule. So <b>every wave that changes the loop also
+      changes setup</b>, and the two must land together. A setup that still writes
+      <code>phase:*</code> into a repo whose tick deleted the family produces a repo that was
+      configured wrong on purpose. The target shape of each step is in
+      <a class="iss" href="architecture.html">architecture.html</a>, under <b>Setup is act zero</b>.
+      This table says when each change lands.</p>
+
+    <div class="overflow-x-auto rounded-lg border border-slate-200 bg-white">
+      <table class="w-full text-sm">
+        <thead class="bg-slate-50 text-slate-600">
+          <tr>
+            <th class="text-left px-4 py-3">Change</th>
+            <th class="text-left px-4 py-3">Add or remove</th>
+            <th class="text-left px-4 py-3">Why it cannot land in another wave</th>
+            <th class="text-left px-4 py-3">Wave</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-100">
+          <tr class="bg-sky-50/50">
+            <td class="px-4 py-3">Verify the enforcement is live</td>
+            <td class="px-4 py-3 text-emerald-700">add</td>
+            <td class="px-4 py-3">There is nothing to verify until the <code>hooks</code> key
+              exists. It installs nothing, because the hooks ship with the plugin.</td>
+            <td class="px-4 py-3 font-mono">1</td>
+          </tr>
+          <tr class="bg-sky-50/50">
+            <td class="px-4 py-3">Run each configured gate command once</td>
+            <td class="px-4 py-3 text-emerald-700">add</td>
+            <td class="px-4 py-3">The push block arrives in wave 1. From that commit on, a config
+              naming a command that does not exist denies every push in the repo. Setup is the last
+              moment a human is there.</td>
+            <td class="px-4 py-3 font-mono">1</td>
+          </tr>
+          <tr>
+            <td class="px-4 py-3">Migrate the label vocabulary</td>
+            <td class="px-4 py-3 text-emerald-700">add</td>
+            <td class="px-4 py-3">Setup is the only step that runs once and touches the whole
+              tracker. It must run in the same change that deletes the family, or two vocabularies
+              are live at once.</td>
+            <td class="px-4 py-3 font-mono">2</td>
+          </tr>
+          <tr>
+            <td class="px-4 py-3">Five board ids become two coordinates</td>
+            <td class="px-4 py-3 text-rose-600">remove</td>
+            <td class="px-4 py-3">The ids exist only to write a card. They go with the write sites,
+              not before them, or a live loop loses the ids it still uses.</td>
+            <td class="px-4 py-3 font-mono">2</td>
+          </tr>
+          <tr>
+            <td class="px-4 py-3">Stop titling the orchestrator terminal</td>
+            <td class="px-4 py-3 text-rose-600">remove</td>
+            <td class="px-4 py-3">The title is a wake fallback. It must survive until the wake dies,
+              which is the wave where the tick applies the transition itself.</td>
+            <td class="px-4 py-3 font-mono">3</td>
+          </tr>
+          <tr>
+            <td class="px-4 py-3">Write the <code>orchestrator-queue</code> schedule</td>
+            <td class="px-4 py-3 text-emerald-700">add</td>
+            <td class="px-4 py-3">A queue schedule with no queue subcommand behind it is a schedule
+              that fails every minute. The per-item schedule stays with
+              <code>spawn_item.py</code>.</td>
+            <td class="px-4 py-3 font-mono">4</td>
+          </tr>
+          <tr class="bg-emerald-50/40">
+            <td class="px-4 py-3">The review question, and the <code>review:</code> block</td>
+            <td class="px-4 py-3 text-rose-600">remove</td>
+            <td class="px-4 py-3">The question can only go once review has left the loop. The
+              second-harness install and the cross-vendor assert go with it.</td>
+            <td class="px-4 py-3 font-mono">5</td>
+          </tr>
+          <tr class="bg-emerald-50/40">
+            <td class="px-4 py-3">The <code>gates.profile</code> question and field</td>
+            <td class="px-4 py-3 text-rose-600">remove</td>
+            <td class="px-4 py-3"><b>A blank command already drops the box.</b> Two switches for one
+              behaviour can disagree, so one goes. It waits for wave 5 only because it is prose and
+              nothing depends on it.</td>
+            <td class="px-4 py-3 font-mono">5</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="grid md:grid-cols-3 gap-4">
+      <div class="band border-emerald-500 bg-white rounded-r-lg p-5 space-y-2">
+        <p class="font-semibold text-sm">What setup keeps, exactly as written</p>
+        <p class="text-sm text-slate-600">The update-everything step and its stop-on-a-bump rule.
+          The strip of <code>disable-model-invocation</code>, which is still the only guard that a
+          routed skill is reachable. One question at a time with a recommendation. Installing what is
+          missing instead of printing a command. The rule that <b>setup never rewrites a file it did
+          not create</b>.</p>
+      </div>
+      <div class="band border-amber-500 bg-white rounded-r-lg p-5 space-y-2">
+        <p class="font-semibold text-sm">Two drifts found while reviewing it</p>
+        <p class="text-sm text-slate-600">The body says only the Python gate column has landed, and
+          that a <code>tsconfig.json</code> turns nothing on. <b>The Go and TypeScript columns are
+          both in the matrix now</b>, and the config template already knows it. So detection and the
+          install loop are behind their own template today. <b>Two open items already own the
+          fix:</b> <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/113">#113</a>
+          for Go and <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/117">#117</a>
+          for TypeScript. So the migration files nothing for it, and neither drift is caused by the
+          migration. This is the one place the nineteen untouched items touch this work.</p>
+      </div>
+      <div class="band border-rose-500 bg-white rounded-r-lg p-5 space-y-2">
+        <p class="font-semibold text-sm">Check this before wave 2 lands</p>
+        <p class="text-sm text-slate-600">Nothing writes the board after wave 2, so the board's own
+          <b>item closed to Done</b> workflow becomes the only thing that moves a card to
+          <code>Done</code>. <b>Turn it on in the project settings first.</b> Setup can read whether
+          it is on, and it cannot switch it on, because that switch is not in the API.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════════ THE LABELS ══════════════ -->
+  <section class="space-y-5">
+    <div class="flex items-baseline gap-3">
+      <h2 class="font-serif text-3xl">Reading the plan off the tracker</h2>
+      <span class="text-xs uppercase tracking-wider text-slate-500">2 planning families · 13 labels · both retire at 1.0.0</span>
+    </div>
+
+    <p class="text-slate-600 max-w-3xl">Every open item carries a <code>wave:*</code> label and, where
+      the release is known, a <code>version:*</code> label. So this page is a reading of the tracker
+      and never the only copy of the plan. <b>Neither family is a control surface.</b> Neither moves a
+      board card, neither is read by a seam or a hook, and each swaps rather than stacks. That is the
+      same shape <code>refactor</code> and <code>rating:*</code> already take.</p>
+
+    <div class="grid md:grid-cols-2 gap-6">
+      <div class="overflow-x-auto rounded-lg border border-slate-200 bg-white">
+        <table class="w-full text-sm">
+          <thead class="bg-slate-50 text-slate-600">
+            <tr><th class="text-left px-4 py-3">Wave label</th><th class="text-left px-4 py-3">Story</th><th class="text-left px-4 py-3">Version</th></tr>
+          </thead>
+          <tbody class="divide-y divide-slate-100">
+            <tr><td class="px-4 py-3"><code>wave:0</code></td><td class="px-4 py-3"><a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/163">#163</a> the story proof</td><td class="px-4 py-3 font-mono">0.35.0</td></tr>
+            <tr class="bg-sky-50/50"><td class="px-4 py-3"><code>wave:1</code></td><td class="px-4 py-3"><a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/198">#198</a> enforce today <span class="text-xs text-sky-700">new</span></td><td class="px-4 py-3 font-mono">0.36.0</td></tr>
+            <tr><td class="px-4 py-3"><code>wave:2</code></td><td class="px-4 py-3"><a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/199">#199</a> one label family <span class="text-xs text-sky-700">new</span></td><td class="px-4 py-3 font-mono">0.37.0</td></tr>
+            <tr><td class="px-4 py-3"><code>wave:3</code></td><td class="px-4 py-3"><a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/200">#200</a> the tick writes <span class="text-xs text-sky-700">new</span></td><td class="px-4 py-3 font-mono">0.38.0</td></tr>
+            <tr><td class="px-4 py-3"><code>wave:4</code></td><td class="px-4 py-3"><a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/178">#178</a> the tick spawns</td><td class="px-4 py-3 font-mono">0.39.0</td></tr>
+            <tr class="bg-emerald-50/50"><td class="px-4 py-3"><code>wave:5</code></td><td class="px-4 py-3"><a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/201">#201</a> delete the prose <span class="text-xs text-sky-700">new</span></td><td class="px-4 py-3 font-mono">1.0.0</td></tr>
+            <tr class="bg-slate-50/60"><td class="px-4 py-3 text-slate-500"><code>wave:after-1.0.0</code></td><td class="px-4 py-3 text-slate-500">the four language columns, 19 items</td><td class="px-4 py-3 text-slate-500">not yet fixed</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="space-y-4">
+        <div class="band border-indigo-500 bg-white rounded-r-lg p-5 space-y-2">
+          <p class="font-semibold text-sm">A version label is a claim, and one item per version keeps it</p>
+          <p class="text-sm text-slate-600">The bump lands with the <b>last child</b> of a story, and
+            never once per item. So every child of a wave wears the same <code>version:*</code> label,
+            and exactly one of them carries the bump commit. <b>Check which one before you spawn a
+            wave's last item.</b> Two children that each bump pick the same number, and the merge then
+            keeps one bump and loses the other.</p>
+        </div>
+        <div class="band border-slate-400 bg-white rounded-r-lg p-5 space-y-2">
+          <p class="font-semibold text-sm">One item wears no wave label, on purpose</p>
+          <p class="text-sm text-slate-600"><a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/187">#187</a>, the tracker test
+            double, stays parked. It contradicts ADR 0040 and needs a new ADR to narrow it. <b>An
+            unlabelled item is an honest one</b>: it says the work is real and not scheduled, rather
+            than claiming a wave it will not ship in.</p>
+        </div>
+        <div class="band border-amber-500 bg-white rounded-r-lg p-5 space-y-2">
+          <p class="font-semibold text-sm">Both families retire at 1.0.0</p>
+          <p class="text-sm text-slate-600">They exist to hold this migration, and the migration ends.
+            The last child of <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/201">#201</a> deletes both families along with
+            the ADR ledger. A planning label that outlives its plan is one more thing that can
+            disagree with the truth.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════════ VERSION PLAN ══════════════ -->
+  <section class="space-y-5">
+    <div class="flex items-baseline gap-3">
+      <h2 class="font-serif text-3xl">What ships when</h2>
+      <span class="text-xs uppercase tracking-wider text-slate-500">one story, one bump</span>
+    </div>
+
+    <div class="overflow-x-auto rounded-lg border border-slate-200 bg-white">
+      <table class="w-full text-sm">
+        <thead class="bg-slate-50 text-slate-600">
+          <tr>
+            <th class="text-left px-4 py-3">Version</th>
+            <th class="text-left px-4 py-3">Story</th>
+            <th class="text-left px-4 py-3">What you get</th>
+            <th class="text-right px-4 py-3">Items</th>
+            <th class="text-left px-4 py-3">Bump lands on</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-100">
+          <tr class="bg-slate-50/60">
+            <td class="px-4 py-3 font-mono">0.34.0</td>
+            <td class="px-4 py-3 text-slate-500">shipped</td>
+            <td class="px-4 py-3 text-slate-500">The gate matrix with its language columns, the
+              merge train, the infra gate file.</td>
+            <td class="px-4 py-3 text-right text-slate-500">done</td>
+            <td class="px-4 py-3 text-slate-500">done</td>
+          </tr>
+          <tr>
+            <td class="px-4 py-3 font-mono">0.35.0</td>
+            <td class="px-4 py-3">story <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/163">#163</a>, last child</td>
+            <td class="px-4 py-3">This page and
+              <a class="iss" href="architecture.html">architecture.html</a>. <b>A minor, not a
+              patch:</b> the level follows the story, and this story added the story proof and two
+              ADRs. A documentation-only last child does not make a contract-changing story
+              documentation only.</td>
+            <td class="px-4 py-3 text-right font-mono">1</td>
+            <td class="px-4 py-3 font-mono"><a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/168">#168</a></td>
+          </tr>
+          <tr class="bg-sky-50/50">
+            <td class="px-4 py-3 font-mono font-bold">0.36.0</td>
+            <td class="px-4 py-3"><b>wave 1</b></td>
+            <td class="px-4 py-3"><b>Every gate is deterministic.</b> A machine writes the record,
+              and a push with a red record is denied. Setup runs each gate command once, so a
+              command that does not exist is caught while a human is present.</td>
+            <td class="px-4 py-3 text-right font-mono">4</td>
+            <td class="px-4 py-3">the callable-interface child</td>
+          </tr>
+          <tr>
+            <td class="px-4 py-3 font-mono font-bold">0.37.0</td>
+            <td class="px-4 py-3"><b>wave 2</b></td>
+            <td class="px-4 py-3">One label family with four values. Zero board writes. Three
+              stale items closed.</td>
+            <td class="px-4 py-3 text-right font-mono">2</td>
+            <td class="px-4 py-3">the zero-board-writes child</td>
+          </tr>
+          <tr>
+            <td class="px-4 py-3 font-mono font-bold">0.38.0</td>
+            <td class="px-4 py-3"><b>wave 3</b></td>
+            <td class="px-4 py-3"><b>The session writes no label.</b> Your merge closes the item,
+              removes the worktree and removes the schedule. Nothing is typed.</td>
+            <td class="px-4 py-3 text-right font-mono">3</td>
+            <td class="px-4 py-3">the re-prompt child</td>
+          </tr>
+          <tr>
+            <td class="px-4 py-3 font-mono font-bold">0.39.0</td>
+            <td class="px-4 py-3"><b>wave 4</b> plus story <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/178">#178</a></td>
+            <td class="px-4 py-3"><b>Label it, drag it, walk away.</b> No session sits in the
+              middle of the loop.</td>
+            <td class="px-4 py-3 text-right font-mono">2 + 4</td>
+            <td class="px-4 py-3 font-mono"><a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/182">#182</a></td>
+          </tr>
+          <tr class="bg-emerald-50/60">
+            <td class="px-4 py-3 font-mono font-bold">1.0.0</td>
+            <td class="px-4 py-3"><b>wave 5</b></td>
+            <td class="px-4 py-3">A 120-line skill body, and a 300-line setup body. Ten ADRs retired
+              and seven landed. The body, the setup interview, the label set and the gate contract
+              all agree with <a class="iss" href="architecture.html">architecture.html</a>.</td>
+            <td class="px-4 py-3 text-right font-mono">4</td>
+            <td class="px-4 py-3">the ADR ledger child</td>
+          </tr>
+          <tr class="bg-slate-50/60">
+            <td class="px-4 py-3 font-mono text-slate-500">1.1.0 onward</td>
+            <td class="px-4 py-3 text-slate-500">the four language columns</td>
+            <td class="px-4 py-3 text-slate-500">Terraform, then Kubernetes, then Go and
+              TypeScript. Nineteen items, untouched by the migration.</td>
+            <td class="px-4 py-3 text-right font-mono text-slate-500">19</td>
+            <td class="px-4 py-3 text-slate-500">one per story</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="rounded-lg border border-slate-200 bg-white p-5 space-y-2">
+      <p class="font-semibold text-sm">Two children must never both claim one number</p>
+      <p class="text-sm text-slate-600">The bump lands with the last child of a story, and never
+        once per item. Two children that each bump pick the same number, and the merge then keeps
+        one bump and loses the other. Each wave above names exactly one child that carries the
+        bump. <b>Check that name before you spawn the wave's last item.</b></p>
+    </div>
+  </section>
+
+  <!-- ══════════════ ONE-WAY DOORS ══════════════ -->
+  <section class="space-y-5">
+    <div class="flex items-baseline gap-3">
+      <h2 class="font-serif text-3xl">The one-way doors</h2>
+      <span class="text-xs uppercase tracking-wider text-slate-500">and what protects each one</span>
+    </div>
+
+    <p class="text-slate-600 max-w-3xl">Three changes are hard to walk back. Each one has a
+      guard, and each guard is the reason the wave order is what it is.</p>
+
+    <div class="grid md:grid-cols-3 gap-4">
+      <div class="band border-rose-500 bg-white rounded-r-lg p-5 space-y-2">
+        <p class="font-semibold text-sm">Deleting the <code>phase:*</code> family</p>
+        <p class="text-sm text-slate-600">Every open item wearing one loses it in a single item, so
+          the vocabulary is never half migrated. <b>The guard:</b> land wave 2 with no worker in
+          flight. Read the queue first. An item at <code>to-review</code> is safe. An item at
+          <code>in-progress</code> is not.</p>
+      </div>
+      <div class="band border-rose-500 bg-white rounded-r-lg p-5 space-y-2">
+        <p class="font-semibold text-sm">A seam that writes the tracker on a schedule</p>
+        <p class="text-sm text-slate-600">A wrong transition now lands every minute, with nobody
+          watching. <b>The guard:</b> <code>needs-human</code> plus a hard rule that a tick applies
+          at most one transition per run. Plus the callable interface from wave 1, so each
+          transition has its own test.</p>
+      </div>
+      <div class="band border-rose-500 bg-white rounded-r-lg p-5 space-y-2">
+        <p class="font-semibold text-sm">A schedule that starts workers</p>
+        <p class="text-sm text-slate-600">This is the biggest one. A loop can spawn until the disk
+          fills. <b>The guard:</b> the two roofs, the touch-set gate, and one item per tick. All
+          three are already specified in story
+          <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/178">#178</a>,
+          which is why that story is wave 4 and not wave 1.</p>
+      </div>
+    </div>
+
+    <div class="rounded-lg border-2 border-amber-300 bg-amber-50 p-5 space-y-2">
+      <p class="text-xs uppercase tracking-wider text-amber-800">The rollback for each wave</p>
+      <p class="text-sm text-amber-900"><b>Wave 1:</b> delete the <code>hooks</code> key from
+        <code>plugin.json</code>. Everything else keeps working. <b>Wave 2:</b> a revert, and the
+        labels are re-added by hand on the few open items. <b>Wave 3 and 4:</b> remove the
+        schedule, and the loop falls back to the manual flow the skill body still holds until wave
+        5. <b>That is the real reason the rewrite is last.</b> The prose is the rollback plan for
+        every wave before it.</p>
+    </div>
+  </section>
+
+  <!-- ══════════════ START HERE ══════════════ -->
+  <section class="space-y-5">
+    <div class="flex items-baseline gap-3">
+      <h2 class="font-serif text-3xl">Start here</h2>
+      <span class="text-xs uppercase tracking-wider text-slate-500">in this order</span>
+    </div>
+
+    <div class="rounded-lg border border-slate-200 bg-white divide-y divide-slate-100">
+      <div class="px-5 py-4 flex gap-4">
+        <span class="font-mono text-slate-400">1</span>
+        <div class="space-y-1">
+          <p class="font-medium">Close the six stale items</p>
+          <p class="text-sm text-slate-600">Comment on each one with the ADR that replaces it, then
+            close. Never delete an item. The board stops advertising work nobody will do, and the
+            history keeps the reason.</p>
+        </div>
+      </div>
+      <div class="px-5 py-4 flex gap-4">
+        <span class="font-mono text-slate-400">2</span>
+        <div class="space-y-1">
+          <p class="font-medium">Rescope the eight survivors</p>
+          <p class="text-sm text-slate-600">Edit each body to the new scope in the table above.
+            Drop <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/181">#181</a>
+            out of story <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/178">#178</a>.
+            Promote <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/184">#184</a>
+            out of the refactor backlog.</p>
+        </div>
+      </div>
+      <div class="px-5 py-4 flex gap-4">
+        <span class="font-mono text-slate-400">3</span>
+        <div class="space-y-1">
+          <p class="font-medium">File the four children of story <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/198">#198</a></p>
+          <p class="text-sm text-slate-600">The story is filed and labelled, and it names its four
+            children. Three are new, and the fourth is
+            <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/184">#184</a>, which is already a child of it. Use
+            <code>/to-tickets</code>, and give each new child its <code>## Touches</code> block and its
+            <code>## Blocked by</code> edges. The tracker adapter those children read is already on
+            disk, so nothing blocks the wave.</p>
+        </div>
+      </div>
+      <div class="px-5 py-4 flex gap-4">
+        <span class="font-mono text-slate-400">4</span>
+        <div class="space-y-1">
+          <p class="font-medium">Work wave 1, then read this page again</p>
+          <p class="text-sm text-slate-600">Wave 1 is the only wave whose value does not depend on
+            the ones after it. When it lands, every gate in the repo is deterministic, and the
+            decision to continue is a fresh one.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <footer class="border-t border-slate-200 pt-6 text-sm text-slate-500 space-y-1">
+    <p>The target design is <a class="iss" href="architecture.html">architecture.html</a>. This page
+      holds today's state and the path there. It replaces the design that used to live in
+      <code>docs/automated-workflow.html</code>, which is removed as redundant.</p>
+    <p>Tracker state read 2026-08-27. Written 2026-08-27.</p>
+  </footer>
+
+  </main>
+  </body>
+</html>
