@@ -226,6 +226,92 @@ machine, because this repo has no gate config yet. Five of the nine install into
 project rather than onto the machine, so their check command needs the project
 environment active.
 
+## Go gate tools
+
+One row per tool the Go column of [`quality-gates.md`](quality-gates.md) names. These are
+conditional the same way as the rest of this file: a repo with no `go.mod` needs none of
+them.
+
+| Dep | Why | Check | Install |
+|-----|-----|-------|---------|
+| **go** (the toolchain) | the layer 1 strict-type-check gate (`go build`, `go vet`), the layer 2 unit-tests gate (`go test -race`) and the layer 3 coverage gate (`go test -cover`) | `command -v go` | `brew install go` — <https://go.dev/dl/> |
+| **gofmt** | the layer 1 formatting gate | `command -v gofmt` | nothing of its own. It ships with **go**, so the **go** row installs it |
+| **goimports** | the layer 1 formatting gate, for import order | `command -v goimports` | `go install golang.org/x/tools/cmd/goimports@latest` |
+| **golangci-lint** | the layer 1 static-lint gate, and the binary that runs the four capped linters in this table | `command -v golangci-lint` | `brew install golangci-lint` — <https://golangci-lint.run> |
+| **gocyclo** | the layer 2 cyclomatic-complexity cap. Config writes the number into the `gocyclo` setting of `.golangci.yml` | `golangci-lint linters` | nothing of its own. It ships inside **golangci-lint** |
+| **gocognit** | the layer 2 cognitive-complexity cap. Config writes the number into the `gocognit` setting of `.golangci.yml` | `golangci-lint linters` | nothing of its own. It ships inside **golangci-lint** |
+| **funlen** | the layer 2 function-length cap. Config writes the number into the `funlen` setting of `.golangci.yml` | `golangci-lint linters` | nothing of its own. It ships inside **golangci-lint** |
+| **depguard** | the layer 3 import-boundaries gate, for an illegal import | `golangci-lint linters` | nothing of its own. It ships inside **golangci-lint** |
+| **godog** | the layer 2 BDD-acceptance gate. It is the runner, and how a repo writes its features is that repo's choice | `command -v godog` | `go install github.com/cucumber/godog/cmd/godog@latest` |
+| **go-arch-lint** | the layer 3 import-boundaries gate, for a cycle between packages | `command -v go-arch-lint` | `go install github.com/fe3dback/go-arch-lint@latest` |
+| **go-mutesting** | the layer 4 mutation-score gate | `command -v go-mutesting` | `go install github.com/zimmski/go-mutesting/cmd/go-mutesting@latest` |
+| **gosec** | the layer 4 SAST gate | `command -v gosec` | `brew install gosec` — <https://github.com/securego/gosec> |
+| **semgrep** | the layer 4 SAST gate, beside `gosec` | `command -v semgrep` | `brew install semgrep` — <https://semgrep.dev> |
+| **govulncheck** | the layer 4 dependency-CVE gate | `command -v govulncheck` | `go install golang.org/x/vuln/cmd/govulncheck@latest` |
+
+**`gitleaks` answers the secrets Gate of this column too.** It reads a git history and not
+a language. So its one row stays in the **Python gate tools** table, and this table does
+not repeat it.
+
+Read every install command in this table as **(verify)**. None of them ran on this
+machine, because this repo carries no Go file. Five of the fourteen install nothing of
+their own: `gofmt` ships with the Go toolchain, and `gocyclo`, `gocognit`, `funlen` and
+`depguard` ship inside `golangci-lint`. So the check of those four reads the linter list
+of that one binary.
+
+## TypeScript gate tools
+
+One row per tool the TypeScript column of [`quality-gates.md`](quality-gates.md) names.
+These are conditional the same way as the rest of this file: a repo with no
+`tsconfig.json` needs none of them.
+
+| Dep | Why | Check | Install |
+|-----|-----|-------|---------|
+| **pnpm** | the documented package manager. The layer 4 dependency-CVE gate runs `pnpm audit`, and every project install in this table runs through it | `command -v pnpm` | `npm install -g pnpm` |
+| **biome** | the layer 1 format gate, plus the lint rules it implements. It is the fast linter, so it answers layer 1 | `pnpm exec biome --version` | `pnpm add -D @biomejs/biome` — the package name carries the scope, the binary does not |
+| **tsc** | the layer 1 strict type check, with strict on. The binary ships inside the `typescript` package | `pnpm exec tsc --version` | `pnpm add -D typescript` |
+| **eslint** | the layer 1 lint rules `biome` does not have, plus the three layer 2 caps. `quality-gates.md` maps each cap to its rule | `pnpm exec eslint --version` | `pnpm add -D eslint` |
+| **eslint-plugin-sonarjs** | the layer 2 cognitive-complexity cap. It supplies the `sonarjs/cognitive-complexity` rule, which `eslint` has no built-in for | `pnpm ls eslint-plugin-sonarjs` | `pnpm add -D eslint-plugin-sonarjs` |
+| **vitest** | the layer 2 unit tests (`--related`) and the layer 3 coverage gate (`--coverage`) | `pnpm exec vitest --version` | `pnpm add -D vitest @vitest/coverage-v8` — coverage needs the provider package beside the runner |
+| **@cucumber/cucumber** | the layer 2 BDD acceptance gate | `pnpm exec cucumber-js --version` | `pnpm add -D @cucumber/cucumber` |
+| **dependency-cruiser** | the layer 3 import-boundaries gate. The binary is `depcruise`, and the contracts live in `.dependency-cruiser.js` | `pnpm exec depcruise --version` | `pnpm add -D dependency-cruiser` |
+| **stryker** | the layer 4 mutation-score gate. The binary is `stryker`, and the package name is scoped | `pnpm exec stryker --version` | `pnpm add -D @stryker-mutator/core` |
+| **semgrep** | the layer 4 SAST gate | `command -v semgrep` | `brew install semgrep` |
+| **trivy** | the layer 4 dependency-CVE gate, beside `pnpm audit`. It reads the lockfile, so it catches a transitive dependency the audit command reports differently | `command -v trivy` | `brew install trivy` |
+
+**`gitleaks` gets no second row.** The layer 3 secrets gate is the same tool in every
+column, and the Python table already declares it. One tool, one row.
+
+Read every install command in this table as **(verify)**. None of them ran on this
+machine, because this repo carries no TypeScript file and no gate config. Eight of the
+eleven install into the project rather than onto the machine, so their check command
+needs the project dependencies installed first. When a run proves them, record the
+target repo and the date here.
+
+## Infra gate tools
+
+One row per tool the Terraform column of
+[`quality-gates-infra.md`](quality-gates-infra.md) names. These are conditional the same
+way as the rest of this file: a repo that provisions nothing needs none of them. This
+repo is that case, so every field of `gates.infra` stays blank here.
+
+| Dep | Why | Check | Install |
+|-----|-----|-------|---------|
+| **tofu** | the layer 1 format and validate gates, and the layer 3 plan. The binary is the OpenTofu CLI, and a repo that runs `terraform` uses that binary for the same rows | `tofu version` | `brew install opentofu` |
+| **tflint** | the layer 1 lint gate, and the version-pin check in the same layer | `command -v tflint` | `brew install tflint` |
+| **trivy** | the layer 1 misconfiguration gate (`trivy config`), which reads the `.tf` files and not the plan | `command -v trivy` | `brew install trivy` |
+| **conftest** | the layer 2 fixture gate (`conftest verify`) and the layer 3 **Halt condition** gate (`conftest test`). It runs the rules and the tests for those rules, so one tool covers both | `command -v conftest` | `brew install conftest` |
+| **infracost** | the layer 3 cost-delta gate. It reads the plan JSON, so it needs no second plan run | `command -v infracost` | `brew install infracost` |
+
+Read every install command in this table as **(verify)**. None of them ran on this
+machine, because this repo carries no `.tf` file. All five install onto the machine
+rather than into the project, so their check command needs no project environment.
+
+Layer 3 also needs a credential, and it is the one requirement here that no install
+command can give. `gates.infra.plan_role` names a read-only plan role, and a blank
+`plan_role` means no plan gate. Then layers 1 and 2 still run
+([`quality-gates-infra.md`](quality-gates-infra.md)).
+
 ## Vendor keys
 
 A worker needs the API access its harness/model uses (Anthropic for opus-5/
