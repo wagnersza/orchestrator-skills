@@ -12,23 +12,23 @@
 # The layers, their budgets and their thresholds live in
 # orchestrator/references/quality-gates.md of the orchestrator-skills plugin.
 #
-# Each target names itself in GATE_COMMAND, and the script appends one line under
-# that name to the gate record, whatever the exit code is. So the record reads
-# `make quick` rather than the path of the script. Same reference file, gate record
-# section.
+# No target writes the gate record. The PostToolUse hook hooks/record.py of the
+# orchestrator-skills plugin reads the exit code of the gate command a worker ran. It
+# appends the line, so the record reads `make quick` as the `gates:` block of config
+# names it. Same reference file, gate record section.
 
 .PHONY: quick full deep
 
 # layers 1 and 2 — format, lint, types, tests, complexity. Under 10s.
 quick:
-	GATE_COMMAND='make quick' scripts/checks.sh quick
+	scripts/checks.sh quick
 
 # layer 3 — coverage, import boundaries, secrets. Under 30s.
 full:
-	GATE_COMMAND='make full' scripts/checks.sh full
+	scripts/checks.sh full
 
 # --- layer 4 · the `lite` profile drops this block ---
 # layer 4 — mutation score, SAST, dependency CVEs. 1 to 5 min.
 deep:
-	GATE_COMMAND='make deep' scripts/checks.sh deep
+	scripts/checks.sh deep
 # --- end layer 4 ---

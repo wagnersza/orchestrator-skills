@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Behaviour tests for the gate contract. Two halves, one question each.
+"""Behaviour tests for the gate contract. Three parts, one question each.
 
-The first half reads the gate matrices: three reference files in, the list of tools a
+The first part reads the gate matrices: three reference files in, the list of tools a
 matrix promises and the requirements file does not declare out.
 
 A matrix row that names a tool with no install path is a rule with no home. A worker
@@ -20,7 +20,7 @@ the same file has neither, so `make quick` is a command and never a tool. That
 distinction has its own test, because a walk that reads every table reports `make` as
 an undeclared tool.
 
-The second half reads the `gates:` block of
+The second part reads the `gates:` block of
 `orchestrator-setup/orchestrator.template.md`, and it asks three things. The block
 holds every field the block owes. Every command key is non-empty, or the notes
 document the blank as a drop rather than as a gap. And every threshold the block sets
@@ -29,6 +29,15 @@ threshold and no number may stand twice with two values.
 
 A blank threshold is no cap, so the walk skips it. That is how a key lands before the
 language column that gives it a number.
+
+The third part reads the one writer of the gate record. A gate script that appends the
+line proves that a script the worker ran said the gate passed. The record hook reads the
+exit code the harness reports, so a green line proves that a command exited zero.
+
+The part runs each gate script in a stub directory, and it asserts that the run writes no
+record file. It then drives `hooks/record.py` over that same directory, and it asserts
+that the line is there. So the pair holds: the script writes nothing, and the hook writes
+the record.
 
 Each failure names the file that holds the row, the line, and the tool or the key.
 Each test reports every failure it found in one message, so a maintainer fixes a batch
@@ -43,7 +52,11 @@ every field of the block as absent, which fails loudly.
     python3 -m unittest discover -s scripts -q     # fallback, no pytest
 """
 
+import json
+import os
 import re
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -54,6 +67,58 @@ MATRIX = REPO_ROOT / "orchestrator" / "references" / "quality-gates.md"
 MATRIX_INFRA = REPO_ROOT / "orchestrator" / "references" / "quality-gates-infra.md"
 REQUIREMENTS = REPO_ROOT / "orchestrator" / "references" / "requirements.md"
 TEMPLATE = REPO_ROOT / "orchestrator-setup" / "orchestrator.template.md"
+
+# The one writer of the gate record, and the four files that run a gate command: this
+# repo's own pair, and the pair /orchestrator-setup writes for a target repo.
+RECORD_HOOK = REPO_ROOT / "hooks" / "record.py"
+CHECKS = REPO_ROOT / "scripts" / "checks.sh"
+CHECKS_TEMPLATE = REPO_ROOT / "orchestrator-setup" / "templates" / "checks.sh.template"
+MAKEFILE = REPO_ROOT / "Makefile"
+MAKEFILE_TEMPLATE = REPO_ROOT / "orchestrator-setup" / "templates" / "Makefile.template"
+
+# A gate script the third part runs. The template is a script of its own, so the same
+# run answers the same question for a repo the setup skill wrote.
+GATE_SCRIPTS = (CHECKS, CHECKS_TEMPLATE)
+
+# Every file that runs a gate command. None of them may write the record.
+GATE_RUNNERS = (CHECKS, CHECKS_TEMPLATE, MAKEFILE, MAKEFILE_TEMPLATE)
+
+# A shell append to the gate record. Both gate scripts held one before the record hook
+# took the record over.
+APPEND = re.compile(r">>[^\n]*gates-")
+
+# Each tool the two fast layers name, in either script. A stub exits 0, so a run reaches
+# the end of the layer on a machine that has none of them installed.
+STUB_TOOLS = ("ruff", "mypy", "python3", "coverage", "lint-imports", "gitleaks")
+
+# What a stub holds. A gate step is a green command here, because the third part asks
+# what the script wrote and never what the tool found.
+STUB = "#!/bin/sh\nexit 0\n"
+
+# The layers the third part runs. `deep` is out: its mutation step reads counts from a
+# JSON file, so a stubbed runner writes nothing for it to read.
+STUB_LAYERS = ("quick", "full")
+
+# The work item the fixture worktree implements. The checklist file name carries it, and
+# both the script and the hook read the number from there.
+ITEM = "99"
+
+# The `gates:` block the record hook matches a command against, in the shape the
+# template writes.
+GATE_CONFIG = """# Orchestrator config
+
+```yaml
+tool:     orca
+harness:  claude
+gates:
+  profile: lite
+  langs:   [python]
+  quick:   "make quick"
+  full:    "make full"
+  deep:    ""
+  story:   "/improve-codebase-architecture"
+```
+"""
 
 # Every file that holds a gate matrix. An application Gate reads code and an infra Gate
 # reads a plan, so the two matrices live in two files. The tool rule is one rule, so a
@@ -620,7 +685,7 @@ class GatesBlockTestCase(unittest.TestCase):
         self.assertEqual(undocumented_drops(TEMPLATE), [])
 
     def test_every_real_threshold_matches_the_matrix(self):
-        """The whole point of the second half. No number stands twice with two
+        """The whole point of the second part. No number stands twice with two
         values."""
         reported = threshold_mismatches(TEMPLATE, MATRIX)
 
@@ -628,6 +693,129 @@ class GatesBlockTestCase(unittest.TestCase):
             self.fail(
                 "\n".join(["a threshold stands twice with two values:", *reported])
             )
+
+
+class GateRecordWriterTestCase(unittest.TestCase):
+    """A worktree in a temporary directory, a real gate run, and the record after it.
+
+    The directory holds what a worker's worktree holds while it runs a gate: the config
+    with the `gates:` block, and the checklist that names the item. So a script that
+    appends the line has everything it needs. A run that writes no file wrote none
+    because the script holds no append.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+
+        self.orchestrator = self.root / ".orchestrator"
+        self.orchestrator.mkdir()
+        self.checklist = self.orchestrator / f"checklist-{ITEM}.md"
+        self.checklist.write_text("- [ ] go\n", encoding="utf-8")
+        self.record = self.orchestrator / f"gates-{ITEM}.jsonl"
+
+        config = self.root / "docs" / "agents" / "orchestrator.md"
+        config.parent.mkdir(parents=True)
+        config.write_text(GATE_CONFIG, encoding="utf-8")
+
+        self.bin = self.root / "bin"
+        self.bin.mkdir()
+        for tool in STUB_TOOLS:
+            stub = self.bin / tool
+            stub.write_text(STUB, encoding="utf-8")
+            stub.chmod(0o755)
+
+    # --- the fixture ---------------------------------------------------------
+
+    def run_gate(self, script, layer):
+        """One layer of one gate script, with a stub for every tool it names."""
+        proc = subprocess.run(
+            ["sh", str(script), layer],
+            cwd=str(self.root),
+            capture_output=True,
+            text=True,
+            env={
+                **os.environ,
+                "PATH": f"{self.bin}{os.pathsep}{os.environ['PATH']}",
+            },
+        )
+        self.assertEqual(proc.returncode, 0, f"stderr: {proc.stderr}")
+        return proc
+
+    def run_hook(self, command):
+        """The record hook, driven through a real `PostToolUse` event."""
+        event = {
+            "session_id": "fixture",
+            "cwd": str(self.root),
+            "hook_event_name": "PostToolUse",
+            "tool_name": "Bash",
+            "tool_input": {"command": command},
+            "tool_response": {"stdout": "", "stderr": "", "interrupted": False},
+        }
+        proc = subprocess.run(
+            [sys.executable, str(RECORD_HOOK)],
+            input=json.dumps(event),
+            capture_output=True,
+            text=True,
+            cwd=str(self.root),
+            env={**os.environ, "CLAUDE_PROJECT_DIR": str(self.root)},
+        )
+        self.assertEqual(proc.returncode, 0, f"stderr: {proc.stderr}")
+        return proc
+
+    def records(self):
+        """Every gate record file the fixture holds."""
+        return sorted(self.orchestrator.glob("gates-*.jsonl"))
+
+    # --- the one writer -------------------------------------------------------
+
+    def test_a_gate_run_writes_no_record(self):
+        """The gate command runs and it exits. A file here is a second writer."""
+        for script in GATE_SCRIPTS:
+            for layer in STUB_LAYERS:
+                with self.subTest(script=script.name, layer=layer):
+                    self.run_gate(script, layer)
+
+                    self.assertEqual(
+                        self.records(), [], f"{script.name} wrote a record"
+                    )
+
+    def test_the_record_hook_writes_the_line_after_a_gate_run(self):
+        """The pair, in the order a worker meets it. The script runs the layer, and the
+        hook appends the line the watch reads."""
+        self.run_gate(CHECKS, "quick")
+        self.run_hook("make quick")
+
+        self.assertEqual(self.records(), [self.record])
+        lines = self.record.read_text(encoding="utf-8").splitlines()
+        self.assertEqual(len(lines), 1, lines)
+        held = json.loads(lines[0])
+        self.assertEqual(held["command"], "make quick")
+        self.assertEqual(held["exit"], 0)
+        self.assertEqual(sorted(held), ["command", "exit", "head_sha", "utc"])
+
+    def test_no_gate_runner_appends_to_the_record(self):
+        """The source of every file that runs a gate command. The stubbed run proves the
+        two scripts write nothing, and this test reaches the two Makefiles too."""
+        self.assertTrue(APPEND.search('>>"$GATE_DIR/gates-99.jsonl"'), "the guard")
+
+        reported = [
+            path.name
+            for path in GATE_RUNNERS
+            if APPEND.search(path.read_text(encoding="utf-8"))
+        ]
+
+        if reported:
+            self.fail("\n".join(["a gate runner appends to the record:", *reported]))
+
+    def test_the_record_hook_is_the_one_writer(self):
+        """The hook holds the append the scripts lost. A pass with no append in the hook
+        reads as a repo where nothing writes the record at all."""
+        self.assertTrue(
+            re.search(r"""open\(["']a["']""", RECORD_HOOK.read_text(encoding="utf-8")),
+            "hooks/record.py opens the record in append mode",
+        )
 
 
 if __name__ == "__main__":
