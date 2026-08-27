@@ -213,9 +213,12 @@ For option 1, skip the interview entirely. Do this instead:
 3. **If the orchestrator terminal title is not set yet, set it** (step 5a). A repo
    configured before the tick existed has no titled terminal, so this path is the only
    place an existing user gets one.
-4. **Apply only what the user approves**, one edit at a time. An update must never
+4. **Run step 5c and report whether the hook plane is live.** A plugin update is
+   exactly when a fresh `hooks/hooks.json` arrives, and this path is the only place an
+   existing user reads that. The step installs nothing.
+5. **Apply only what the user approves**, one edit at a time. An update must never
    drop a hand-edited recipe field or flip a review policy on its own.
-5. **Report** as a short table: what updated, what the config needs, what's fine.
+6. **Report** as a short table: what updated, what the config needs, what's fine.
    Then stop — don't continue into steps 1–3.
 
 ## 1. Explore
@@ -671,6 +674,48 @@ a dependency graph nobody read.
 **Report one row per file**: written / already there / needs the user. Give each threshold
 its own row, with the key and the number. Then the report says which command is real, and
 which number reached the tool that reads it.
+
+### 5c. Report whether the enforcement is live
+
+The plugin ships a **hook plane**: three hooks that inject the item facts, deny a write
+that only a seam makes, and record what a gate command did. They are the one layer that
+can refuse a command before it runs
+([`../orchestrator/references/hooks.md`](../orchestrator/references/hooks.md);
+[ADR 0050](../orchestrator/docs/adr/0050-a-hook-refuses-and-a-seam-performs.md)).
+
+**This step installs nothing.** The hooks ship with the plugin, so there is no file to
+write and no dependency to add. It reads three facts and reports them.
+
+Set `ROOT` to the plugin root. Resolve it from the **Base directory for this skill** line
+at the top of this skill:
+
+```bash
+ROOT="<base directory>/.."
+# read 1 — the manifest names the hook file
+python3 -c "import json,sys;print(json.load(open(sys.argv[1])).get('hooks','NO HOOKS KEY'))" \
+  "$ROOT/.claude-plugin/plugin.json"
+# read 2 — that file resolves, and it parses
+python3 -c "import json,sys;print(sorted(json.load(open(sys.argv[1])).get('hooks',{})))" \
+  "$ROOT/hooks/hooks.json"
+# read 3 — the marker that makes a hook do anything at all
+{ [ -f docs/agents/orchestrator.md ] || [ -d .orchestrator ]; } \
+  && echo "marker: present" || echo "marker: absent"
+```
+
+Report one row per read: **live** / **not live**, with what the command printed.
+
+- **Read 1 prints `./hooks/hooks.json`.** Any other value, and the plane is off. The
+  repair is that one key in `.claude-plugin/plugin.json`, and it is also the rollback.
+- **Read 2 prints the three event names.** A file that does not resolve, or that does not
+  parse, is a plane the harness loads nothing from.
+- **Read 3 answers for this repo alone.** With no marker every hook exits at once and
+  costs nothing. Step 5 wrote the config, so a first setup reaches this step with the
+  marker present.
+
+**Name the restart.** A manifest is read once, at session start. So a `hooks/hooks.json`
+that arrived with step 0a reaches this session only after a restart, which is the same
+rule step 0a states for the skill body. Say in one line that the plane is live from the
+next start, and never from this one.
 
 ## 6. Done
 
