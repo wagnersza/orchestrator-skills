@@ -21,5 +21,6 @@
     "./orchestrator",
     "./orchestrator-setup",
     "./playwright-cli"
-  ]
+  ],
+  "hooks": "./hooks/hooks.json"
 }

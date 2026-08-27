@@ -1,0 +1,41 @@
+{
+  "description": "The hook plane of the orchestrator skill. Three hooks: one injects the item facts at session start, one denies a write only a seam may make, and one records what a gate command did. Each one exits silently where the repo carries no orchestrator marker. See orchestrator/references/hooks.md.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/context.py\"",
+            "timeout": 20
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/refuse.py\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/record.py\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}
