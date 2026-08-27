@@ -395,7 +395,7 @@ flowchart LR
       </table>
     </div>
 
-    <h3 class="font-serif text-xl pt-4">Rescope these eight</h3>
+    <h3 class="font-serif text-xl pt-4">Rescope these twelve</h3>
     <div class="overflow-x-auto rounded-lg border border-amber-200 bg-white">
       <table class="w-full text-sm">
         <thead class="bg-amber-50 text-amber-900">
@@ -475,7 +475,9 @@ flowchart LR
             <td class="px-4 py-3"><b>This page.</b> Its old scope was showing the story proof. Its
               new scope is showing the migration. It is the last child of story
               <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/163">#163</a>,
-              and it is documentation only, so it takes a patch and not a minor.</td>
+              so it carries the bump. <b>The bump is a minor and not a patch</b>, because the level
+              follows the story. This child changes documentation only, and that does not lower the
+              level.</td>
             <td class="px-4 py-3">0 · <code>0.35.0</code></td>
           </tr>
         </tbody>
@@ -525,7 +527,7 @@ flowchart LR
 
     <p class="text-slate-600 max-w-3xl"><b>No child is only about setup.</b> Each setup edit is
       named inside the child that changes what setup configures, so the two land in one commit and a
-      repo is never configured for a loop that moved. The single exception is item 15, the setup body
+      repo is never configured for a loop that moved. The single exception is item 14, the setup body
       trim, which waits for wave 5 with the rest of the prose. The full list is in <b>What setup does
       differently</b> below.</p>
 
@@ -536,7 +538,7 @@ flowchart LR
         <div class="bg-sky-50 px-5 py-3 flex items-baseline gap-3 flex-wrap">
           <span class="font-mono text-xs px-2 py-1 rounded bg-sky-200 text-sky-900">wave 1</span>
           <p class="font-semibold">Enforce the design we already have</p>
-          <span class="text-xs text-slate-500 font-mono">0.36.0 · story #198 · 4 new children</span>
+          <span class="text-xs text-slate-500 font-mono">0.36.0 · story #198 · 3 new children + #184</span>
         </div>
         <table class="w-full text-sm">
           <tbody class="divide-y divide-slate-100">
@@ -1115,7 +1117,7 @@ flowchart LR
       <div class="px-5 py-4 flex gap-4">
         <span class="font-mono text-slate-400">2</span>
         <div class="space-y-1">
-          <p class="font-medium">Rescope the eight survivors</p>
+          <p class="font-medium">Rescope the twelve survivors</p>
           <p class="text-sm text-slate-600">Edit each body to the new scope in the table above.
             Drop <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/181">#181</a>
             out of story <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/178">#178</a>.
