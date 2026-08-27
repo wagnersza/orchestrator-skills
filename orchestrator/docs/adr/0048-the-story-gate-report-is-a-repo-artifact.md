@@ -19,7 +19,7 @@ is a claim.
 - **It lands in `docs/refactor-opportunities/`**, one file per story, named
   `<story>-<slug>.html`. The story number comes first, so a file names its story with no
   lookup and two stories never collide. That is the same shape a worktree name takes.
-  `docs/automated-workflow.html` already holds committed HTML under `docs/`, so the file type
+  `docs/architecture.html` already holds committed HTML under `docs/`, so the file type
   needs no new convention.
 - **The session commits it, as a docs-only commit on the default branch.** The gate runs
   `inline`, in the main checkout, and that session already writes issues, labels and board
