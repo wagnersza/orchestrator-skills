@@ -145,8 +145,15 @@ A worker on this repo should also:
   with no home is the thing that rots.
 - Record a decision that reverses or narrows an earlier one as a new ADR under
   `orchestrator/docs/adr/`, rather than silently editing the old one.
-- Bump `version` in `.claude-plugin/plugin.json` only when a user story finishes. The
-  bump lands with the last child of the story, and never once per work item. Minor for a
-  story that changed a contract or a dependency, patch for a docs-only story. A worker on
-  one child leaves the version untouched. Two children that each bump pick the same
-  number, and the merge then keeps one bump and loses the other.
+- Bump `version` in `.claude-plugin/plugin.json` when a user story finishes. The bump lands
+  with the last child of the story, and never once per work item. Minor for a story that
+  changed a contract or a dependency, patch for a docs-only story. The story sets that
+  level, and the file types of its last child never change it. So a documentation-only last
+  child of a contract-changing story still takes the minor. A worker on one child leaves the
+  version untouched. Two children that each bump pick the same number, and the merge then
+  keeps one bump and loses the other.
+- A work item with no `user-story` parent bumps a patch, in its own branch. The condition is
+  that the item changes what an installed session or a seam does. An item that changes only
+  this repo's own files bumps nothing: `CLAUDE.md`, a page under `docs/`, an ADR, or a test.
+  The rationale, the rejected release step and the collision between two standalone items
+  are in [ADR 0050](../../orchestrator/docs/adr/0050-a-standalone-item-bumps-a-patch.md).
