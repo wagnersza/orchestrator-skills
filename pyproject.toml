@@ -34,3 +34,13 @@ disallow_untyped_defs = false
 disallow_incomplete_defs = false
 disallow_untyped_calls = false
 disallow_untyped_decorators = false
+
+# The three hooks and their suites take the same posture as the seams above. One of
+# them also calls the tracker adapter, which carries no annotations either, so the
+# relaxed call check reaches this package too.
+[[tool.mypy.overrides]]
+module = "hooks.*"
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+disallow_untyped_calls = false
+disallow_untyped_decorators = false
