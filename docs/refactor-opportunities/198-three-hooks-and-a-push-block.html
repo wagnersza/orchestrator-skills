@@ -1,0 +1,372 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Architecture review — orchestrator-skills</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script type="module">
+      import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+      mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "loose" });
+    </script>
+    <style>
+      .seam { stroke-dasharray: 4 4; }
+      .deep { background: linear-gradient(135deg, #0f172a, #1e293b); }
+      .lbl { font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.08em; }
+    </style>
+  </head>
+  <body class="bg-stone-50 text-slate-900 font-sans">
+    <main class="max-w-5xl mx-auto px-6 py-12 space-y-14">
+
+      <header class="space-y-4">
+        <p class="text-xs uppercase tracking-widest text-slate-500">Layer 5 story gate</p>
+        <h1 class="text-4xl font-serif">orchestrator-skills</h1>
+        <p class="text-slate-600">
+          User story <span class="font-mono">#198</span> — “Enforce the design that already
+          exists: three hooks, and a push a red gate denies”. Children
+          <span class="font-mono">#202 #203 #204 #184 #174</span>, all closed.
+        </p>
+        <p class="text-sm text-slate-500">
+          Read at commit <span class="font-mono">a80c666</span> · 2026-08-28 · direction:
+          <span class="font-mono">hooks/</span> and the seams in <span class="font-mono">scripts/</span>
+        </p>
+        <div class="flex flex-wrap gap-4 text-xs text-slate-600 pt-2 border-t border-slate-200">
+          <span>solid box = module</span>
+          <span>dashed line = seam</span>
+          <span class="text-red-600">red = leakage</span>
+          <span>thick dark box = deep module</span>
+        </div>
+      </header>
+
+      <section id="candidates" class="space-y-12">
+
+        <!-- CANDIDATE 1 -->
+        <article id="c1" class="rounded-xl border border-slate-200 bg-white p-7 space-y-5">
+          <div class="flex items-start justify-between gap-4">
+            <h2 class="text-2xl font-serif">Collapse the Gate record into one module</h2>
+            <div class="flex gap-2 shrink-0">
+              <span class="rounded-full bg-emerald-100 text-emerald-800 text-xs font-semibold px-3 py-1">Strong</span>
+              <span class="rounded-full bg-slate-100 text-slate-700 text-xs px-3 py-1">in-process</span>
+            </div>
+          </div>
+
+          <ul class="font-mono text-sm text-slate-700 space-y-0.5">
+            <li>hooks/refuse.py <span class="text-slate-400">— not_green, latest_runs, SHA_PREFIX</span></li>
+            <li>hooks/context.py <span class="text-slate-400">— gate_verdict</span></li>
+            <li>scripts/worker_state.py <span class="text-slate-400">— at_head, gate_runs, unproven_gates</span></li>
+          </ul>
+
+          <div class="rounded-lg border-2 border-red-300 bg-red-50 p-5 space-y-2">
+            <p class="lbl text-red-800 font-semibold">Reproduced, not asserted</p>
+            <p class="text-sm text-slate-800">
+              One temp repo. One record line, <span class="font-mono">head_sha: "99c"</span>.
+              HEAD <span class="font-mono">99ceec0d…</span>. Both hooks read the same file:
+            </p>
+            <div class="grid md:grid-cols-2 gap-3 text-sm">
+              <div class="rounded bg-white border border-slate-200 p-3">
+                <p class="lbl text-slate-500 mb-1">context.py · SessionStart</p>
+                <p class="font-mono text-emerald-700">Its gate record is green at HEAD.</p>
+              </div>
+              <div class="rounded bg-white border border-slate-200 p-3">
+                <p class="lbl text-slate-500 mb-1">refuse.py · git push</p>
+                <p class="font-mono text-red-700">DENIED — the `quick` gate has no green line at HEAD</p>
+              </div>
+            </div>
+            <p class="text-sm text-slate-800">
+              The worker is told it is green, then blocked for not being green. It has two
+              contradictory facts and no module to appeal to.
+            </p>
+          </div>
+
+          <div class="grid md:grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="lbl text-slate-500 mb-3">Before — three implementations</p>
+              <pre class="mermaid">
+flowchart TB
+  R["gates-&lt;item&gt;.jsonl"]
+  A["refuse.py<br/>not_green"] --> R
+  B["context.py<br/>gate_verdict"] --> R
+  C["worker_state.py<br/>at_head"] --> R
+  A -.disagree.-> B
+  B -.disagree.-> C
+  classDef bad stroke:#dc2626,stroke-width:2px,fill:#fef2f2;
+  class A,B,C bad
+              </pre>
+              <div class="mt-3 space-y-1 text-xs font-mono text-slate-600">
+                <p>worker_state · len&gt;=7 &amp; head.startswith · 4 keys</p>
+                <p>refuse&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; · len&gt;=7 &amp; head.startswith · no keys</p>
+                <p class="text-red-600">context&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; · no floor &amp; either-way · no keys</p>
+              </div>
+            </div>
+            <div class="rounded-lg border-2 border-slate-900 bg-white p-4">
+              <p class="lbl text-slate-500 mb-3">After — one deep module</p>
+              <pre class="mermaid">
+flowchart TB
+  A["refuse.py"] --> G
+  B["context.py"] --> G
+  C["worker_state.py"] --> G
+  G["scripts/gate_record.py<br/>faults(root, item, required)"] --> R["gates-&lt;item&gt;.jsonl"]
+  classDef deep fill:#0f172a,color:#fff,stroke:#0f172a,stroke-width:3px;
+  class G deep
+              </pre>
+              <p class="mt-3 text-xs text-slate-600">
+                One interface. The sha-prefix floor, the key set and the malformed-line rule
+                move inside the implementation, where no caller can hold a second opinion.
+              </p>
+            </div>
+          </div>
+
+          <div class="grid md:grid-cols-2 gap-6 text-sm">
+            <div>
+              <p class="lbl text-slate-500 mb-1">Problem</p>
+              <p>Three modules each implement “is the record green at HEAD”, and they already disagree.</p>
+            </div>
+            <div>
+              <p class="lbl text-slate-500 mb-1">Solution</p>
+              <p>One module owns the rule; the three become call sites of one interface.</p>
+            </div>
+          </div>
+
+          <div>
+            <p class="lbl text-slate-500 mb-2">Wins</p>
+            <ul class="grid md:grid-cols-2 gap-x-8 gap-y-1 text-sm list-disc list-inside">
+              <li>locality: one rule, one module</li>
+              <li>leverage: one interface, three call sites</li>
+              <li>divergence becomes unrepresentable</li>
+              <li>interface shrinks; implementation absorbs it</li>
+              <li>tests hit one interface, not three</li>
+              <li>delete two readers</li>
+            </ul>
+          </div>
+        </article>
+
+        <!-- CANDIDATE 2 -->
+        <article id="c2" class="rounded-xl border border-slate-200 bg-white p-7 space-y-5">
+          <div class="flex items-start justify-between gap-4">
+            <h2 class="text-2xl font-serif">Deepen the hook preamble into one Session module</h2>
+            <div class="flex gap-2 shrink-0">
+              <span class="rounded-full bg-emerald-100 text-emerald-800 text-xs font-semibold px-3 py-1">Strong</span>
+              <span class="rounded-full bg-slate-100 text-slate-700 text-xs px-3 py-1">in-process</span>
+            </div>
+          </div>
+
+          <ul class="font-mono text-sm text-slate-700 space-y-0.5">
+            <li>hooks/context.py · hooks/refuse.py · hooks/record.py</li>
+          </ul>
+
+          <div class="rounded-lg border border-slate-200 bg-stone-50 p-4">
+            <p class="lbl text-slate-500 mb-2">Copied verbatim into all three hooks</p>
+            <table class="w-full text-sm font-mono">
+              <tbody class="divide-y divide-slate-200">
+                <tr><td class="py-1">CONFIG, ORCHESTRATOR_DIR</td><td class="text-right text-slate-500">3 copies</td></tr>
+                <tr><td class="py-1">project_dir()</td><td class="text-right text-slate-500">3 copies</td></tr>
+                <tr><td class="py-1">orchestrated()</td><td class="text-right text-slate-500">3 copies</td></tr>
+                <tr><td class="py-1">item_number()</td><td class="text-right text-slate-500">3 copies</td></tr>
+                <tr><td class="py-1">head_sha()</td><td class="text-right text-red-600">3 copies, already drifted</td></tr>
+                <tr><td class="py-1">GATE_RECORD</td><td class="text-right text-slate-500">3 copies</td></tr>
+                <tr><td class="py-1">work_state_labels(), LABEL_SECTION, TABLE_LABEL</td><td class="text-right text-slate-500">2 copies</td></tr>
+                <tr><td class="py-1">GATE_LINE, gate_commands()</td><td class="text-right text-slate-500">2 copies, two return shapes</td></tr>
+                <tr><td class="py-1">main() marker-check preamble</td><td class="text-right text-slate-500">3 copies</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="grid md:grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="lbl text-slate-500 mb-3">Before — interface as tall as implementation</p>
+              <div class="space-y-3">
+                <div class="flex items-end gap-2">
+                  <div class="w-1/3"><div class="h-20 bg-slate-300 rounded-t"></div><p class="lbl text-center mt-1">refuse<br/>iface</p></div>
+                  <div class="w-1/3"><div class="h-20 bg-slate-300 rounded-t"></div><p class="lbl text-center mt-1">context<br/>iface</p></div>
+                  <div class="w-1/3"><div class="h-20 bg-slate-300 rounded-t"></div><p class="lbl text-center mt-1">record<br/>iface</p></div>
+                </div>
+                <p class="text-xs text-slate-600">Each hook re-declares the same seven facts before it does its one job. Shallow: the preamble is as large as the decision.</p>
+              </div>
+            </div>
+            <div class="rounded-lg border-2 border-slate-900 bg-white p-4">
+              <p class="lbl text-slate-500 mb-3">After — one thick band, three thin callers</p>
+              <div class="space-y-2">
+                <div class="flex gap-2">
+                  <div class="w-1/3 h-6 bg-slate-200 rounded flex items-center justify-center lbl">refuse</div>
+                  <div class="w-1/3 h-6 bg-slate-200 rounded flex items-center justify-center lbl">context</div>
+                  <div class="w-1/3 h-6 bg-slate-200 rounded flex items-center justify-center lbl">record</div>
+                </div>
+                <div class="h-24 deep rounded flex items-center justify-center">
+                  <p class="lbl text-white">hooks/_session.py — Session(root, item, gates, labels)</p>
+                </div>
+                <p class="text-xs text-slate-600">One module resolves the marker, the root, the item and the config block. Each hook keeps only its own decision.</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="grid md:grid-cols-2 gap-6 text-sm">
+            <div>
+              <p class="lbl text-slate-500 mb-1">Problem</p>
+              <p>Seven facts are re-declared in each of the three hooks, and <span class="font-mono">head_sha()</span> has already drifted.</p>
+            </div>
+            <div>
+              <p class="lbl text-slate-500 mb-1">Solution</p>
+              <p>One module resolves the session; each hook keeps only the decision that is its own.</p>
+            </div>
+          </div>
+
+          <div class="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm">
+            <span class="font-semibold">Deletion test:</span> deleting the shared module concentrates
+            the marker and item rule in one place. It does not move it around — the three hooks each
+            shrink to their own denial, injection or append.
+          </div>
+
+          <div>
+            <p class="lbl text-slate-500 mb-2">Wins</p>
+            <ul class="grid md:grid-cols-2 gap-x-8 gap-y-1 text-sm list-disc list-inside">
+              <li>locality: drift becomes one edit</li>
+              <li>leverage: one interface, three hooks</li>
+              <li>delete ~120 duplicated lines</li>
+              <li>the substrate that let candidate 1 diverge</li>
+            </ul>
+          </div>
+        </article>
+
+        <!-- CANDIDATE 3 -->
+        <article id="c3" class="rounded-xl border border-slate-200 bg-white p-7 space-y-5">
+          <div class="flex items-start justify-between gap-4">
+            <h2 class="text-2xl font-serif">One Config module for the <span class="font-mono text-xl">gates:</span> block</h2>
+            <div class="flex gap-2 shrink-0">
+              <span class="rounded-full bg-amber-100 text-amber-800 text-xs font-semibold px-3 py-1">Worth exploring</span>
+              <span class="rounded-full bg-slate-100 text-slate-700 text-xs px-3 py-1">local-substitutable</span>
+            </div>
+          </div>
+
+          <ul class="font-mono text-sm text-slate-700 space-y-0.5">
+            <li>hooks/refuse.py <span class="text-slate-400">— gate_commands → (layer, command)</span></li>
+            <li>hooks/record.py <span class="text-slate-400">— gate_commands → command</span></li>
+            <li>docs/agents/orchestrator.md <span class="text-slate-400">— the parsed block</span></li>
+          </ul>
+
+          <div class="rounded-lg border border-slate-200 bg-white p-4">
+            <pre class="mermaid">
+flowchart LR
+  CFG["docs/agents/orchestrator.md<br/>gates: block"]
+  A["refuse.py<br/>GATE_LINE regex"] --> CFG
+  B["record.py<br/>GATE_LINE regex"] --> CFG
+  A -.two return shapes.-> B
+  classDef bad stroke:#dc2626,stroke-width:2px,fill:#fef2f2;
+  class A,B bad
+            </pre>
+          </div>
+
+          <div class="grid md:grid-cols-2 gap-6 text-sm">
+            <div>
+              <p class="lbl text-slate-500 mb-1">Problem</p>
+              <p>One YAML block, two hand-rolled regex parsers, two different return shapes.</p>
+            </div>
+            <div>
+              <p class="lbl text-slate-500 mb-1">Solution</p>
+              <p>One <span class="font-mono">config</span> module with one interface: <span class="font-mono">gates(root) -&gt; list[Gate]</span>.</p>
+            </div>
+          </div>
+
+          <div>
+            <p class="lbl text-slate-500 mb-2">Wins</p>
+            <ul class="grid md:grid-cols-2 gap-x-8 gap-y-1 text-sm list-disc list-inside">
+              <li>two adapters justify the seam</li>
+              <li>the blank-command rule lives once</li>
+              <li>interface shrinks to one call</li>
+            </ul>
+          </div>
+
+          <div class="rounded-lg border border-slate-200 bg-stone-50 p-3 text-sm">
+            Overlaps candidate 2. If candidate 2 is taken first, this rides inside it rather than
+            standing alone.
+          </div>
+        </article>
+
+        <!-- CANDIDATE 4 -->
+        <article id="c4" class="rounded-xl border border-slate-200 bg-white p-7 space-y-5">
+          <div class="flex items-start justify-between gap-4">
+            <h2 class="text-2xl font-serif">One fixture for the throwaway git repo</h2>
+            <div class="flex gap-2 shrink-0">
+              <span class="rounded-full bg-amber-100 text-amber-800 text-xs font-semibold px-3 py-1">Worth exploring</span>
+              <span class="rounded-full bg-slate-100 text-slate-700 text-xs px-3 py-1">local-substitutable</span>
+            </div>
+          </div>
+
+          <ul class="font-mono text-sm text-slate-700 space-y-0.5">
+            <li>hooks/test_refuse.py <span class="text-slate-400">442 lines</span></li>
+            <li>hooks/test_context.py <span class="text-slate-400">365 lines</span></li>
+            <li>hooks/test_record.py <span class="text-slate-400">303 lines</span></li>
+            <li>scripts/test_worker_state.py <span class="text-slate-400">1719 lines</span></li>
+          </ul>
+
+          <div class="rounded-lg border border-slate-200 bg-white p-4">
+            <p class="lbl text-slate-500 mb-3">Cross-section — layers every test walks before it asserts</p>
+            <div class="space-y-1">
+              <div class="h-8 border-l-4 border-slate-400 bg-slate-100 flex items-center px-3 text-xs">temp dir</div>
+              <div class="h-8 border-l-4 border-slate-400 bg-slate-100 flex items-center px-3 text-xs">git init + one commit</div>
+              <div class="h-8 border-l-4 border-slate-400 bg-slate-100 flex items-center px-3 text-xs">write docs/agents/orchestrator.md</div>
+              <div class="h-8 border-l-4 border-slate-400 bg-slate-100 flex items-center px-3 text-xs">write .orchestrator/checklist-N.md</div>
+              <div class="h-8 border-l-4 border-slate-400 bg-slate-100 flex items-center px-3 text-xs">write gates-N.jsonl</div>
+              <div class="h-8 border-l-4 border-emerald-600 bg-emerald-50 flex items-center px-3 text-xs font-semibold">the one assertion</div>
+            </div>
+          </div>
+
+          <div class="grid md:grid-cols-2 gap-6 text-sm">
+            <div>
+              <p class="lbl text-slate-500 mb-1">Problem</p>
+              <p>Every case rebuilds a real repo by hand, so the fixture outweighs the assertion.</p>
+            </div>
+            <div>
+              <p class="lbl text-slate-500 mb-1">Solution</p>
+              <p>One stdlib fixture yields a worktree with config, checklist and record already placed.</p>
+            </div>
+          </div>
+
+          <div>
+            <p class="lbl text-slate-500 mb-2">Wins</p>
+            <ul class="grid md:grid-cols-2 gap-x-8 gap-y-1 text-sm list-disc list-inside">
+              <li>the assertion becomes the whole test</li>
+              <li>leverage: one fixture, four suites</li>
+              <li>a new hook costs one test file</li>
+            </ul>
+          </div>
+        </article>
+
+        <!-- CANDIDATE 5 -->
+        <article id="c5" class="rounded-xl border border-slate-200 bg-white p-7 space-y-4 opacity-90">
+          <div class="flex items-start justify-between gap-4">
+            <h2 class="text-2xl font-serif">Widen the stall predicate past the checklist mtime</h2>
+            <div class="flex gap-2 shrink-0">
+              <span class="rounded-full bg-slate-200 text-slate-700 text-xs font-semibold px-3 py-1">Speculative</span>
+            </div>
+          </div>
+          <ul class="font-mono text-sm text-slate-700"><li>scripts/worker_state.py <span class="text-slate-400">— the stalled outcome</span></li></ul>
+          <p class="text-sm">
+            The stall window reads the checklist file's timestamp. A worker that edits six source
+            files for thirty minutes without ticking a box reads as stalled. Observed live on
+            <span class="font-mono">#204</span>: a false <span class="font-mono">stalled</span> wake
+            against a worker with six modified files.
+          </p>
+          <div class="rounded-lg border border-slate-200 bg-stone-50 p-3 text-sm">
+            This is a behaviour defect in one predicate, not shallowness in a module. It wants a
+            bug report, not a deepening.
+          </div>
+        </article>
+
+      </section>
+
+      <section id="top-recommendation">
+        <div class="rounded-xl deep text-white p-8 space-y-3">
+          <p class="lbl text-slate-300">Top recommendation</p>
+          <h2 class="text-3xl font-serif">Collapse the Gate record into one module</h2>
+          <p class="text-slate-200 max-w-2xl">
+            It is the only candidate with a reproduced contradiction: two hooks read one file and
+            give a worker opposite answers. Story #198 exists to make a gate deterministic, and
+            three readers of one record is the last place that promise is still soft.
+          </p>
+          <a href="#c1" class="inline-block text-emerald-300 text-sm underline">Go to the card</a>
+        </div>
+      </section>
+
+    </main>
+  </body>
+</html>
