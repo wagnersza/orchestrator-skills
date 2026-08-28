@@ -8,6 +8,14 @@ loses its box. The writing-pass box is not one of them: it reads no recipe field
 stays on every item. The layer model, with a command and a budget for each layer, is in
 quality-gates.md.
 
+The proof box drops on that same rule, and `run_recipe` is the field it reads. So
+"every box ticked" already covers the browser proof, and the tick needs no separate
+proof signal. `orchestrator-skills` has a blank `run_recipe`, so no item in that repo
+grows a proof box.
+
+This file carries no Markdown link. The orchestrator copies it into a worker's own
+worktree, where a relative path out of this directory resolves to nothing.
+
 The last box ends at the review note. The worker writes no work-state label, and it
 moves no board card. The orchestrator session writes both, in one call with the removal
 of the phase label. See ../docs/adr/0025-the-session-writes-the-review-state.md.
@@ -38,6 +46,12 @@ of the phase label. See ../docs/adr/0025-the-session-writes-the-review-state.md.
 - [ ] if a DB gate is configured, satisfy it (back up, migrate, verify schema)
 - [ ] gate layer 4, deep — when the PR/MR is open, run `make deep` (`gates.deep` in
       config). A non-zero exit is a stop, and there is no warning state.
+- [ ] prove the feature works through the browser surface — boot the app per `run_recipe`
+      on this item's `ports`. Then drive `playwright-cli` through every user story on the
+      work item. Save the Playwright code it emits. Then stop the app. `playwright-cli`
+      is the one sanctioned surface, because its output is code a later test can keep. A
+      browser MCP your session happens to expose is not that surface, whichever one it
+      is.
 - [ ] capture evidence per the evidence bar (`make deep` green + real-data proof). Paste
       the `make deep` summary under Evidence in the review note.
 - [ ] post the review note on the **work item** (What to review / Main changes / How to

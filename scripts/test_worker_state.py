@@ -169,6 +169,10 @@ UNTICKED = """# Checklist — 54
 
 TICKED = UNTICKED.replace("- [ ]", "- [x]")
 
+# The proof box the checklist template ships where `run_recipe` is not blank. It is one
+# more box and nothing else, which is the whole point of it.
+PROOF_BOX = "- [ ] prove the feature works through the browser surface\n"
+
 
 def git(cwd, *args):
     subprocess.run(
@@ -1052,6 +1056,24 @@ class WorkerStateTestCase(unittest.TestCase):
         default = self.ask(back_off=AN_HOUR)
         self.assertTrue(default.startswith("proof-complete:"), default)
         self.assertTrue(self.marker("proof-complete").is_file())
+
+    def test_a_proof_box_is_one_more_box_and_it_needs_no_second_signal(self):
+        """The proof is a checklist box where the project recipe asks for browser proof.
+        So "every box ticked" already covers it. A checklist that ships the box needs one
+        more tick, and one without the box finishes on the boxes it has."""
+        self.write_fixture(labels=IMPL)
+        self.child_in(self.worktree)
+
+        write(self.checklist, TICKED + PROOF_BOX)
+        self.assertIn("3 of 4 boxes ticked", self.ask(expect=EXIT_NOTHING))
+
+        write(self.checklist, TICKED + PROOF_BOX.replace("- [ ]", "- [x]"))
+        self.assertIn("(4 of 4)", self.ask())
+
+        # A checklist with no proof box finishes on the boxes it has, which is every item
+        # in this repo: its `run_recipe` is blank, so the box drops before the send.
+        write(self.checklist, TICKED)
+        self.assertIn("(3 of 3)", self.ask())
 
     # --- the computed Position ----------------------------------------------
 

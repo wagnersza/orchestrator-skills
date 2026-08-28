@@ -503,6 +503,9 @@ file-based **checklist** (works across every harness, unlike claude-only
   supported configuration: a repo with no mutation runner ships no layer 4 box
   ([`references/quality-gates.md`](references/quality-gates.md),
   [`docs/adr/0032-quality-gates-are-a-layered-contract.md`](docs/adr/0032-quality-gates-are-a-layered-contract.md)).
+  **The proof box drops on the same rule**, and `run_recipe` is the field it reads.
+  So "every box ticked" already covers the browser proof. **This repo is that case**: its
+  `run_recipe` is blank, so no item here grows a proof box.
   **The writing-pass box is unconditional** — it depends on no recipe field,
   so it ships on every item, including a pure-code one.
 - The prompt tells the worker to **work the checklist top to bottom, ticking each
