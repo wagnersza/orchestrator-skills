@@ -870,6 +870,16 @@ outcome no label gates: the read that failed is the read that carries the label.
 The on-demand door (`review #N adversarially`) is unchanged, and it writes `phase:review`
 itself.
 
+**The tick also computes the position, and it reads no label to do that.** One function in
+the seam answers where the item sits in its run. It reads the work-state label, the
+`Verdict:` comment list and the last write to the checklist. The rule has one home, the
+**Position** entry in [`CONTEXT.md`](CONTEXT.md), and this table restates no part of it.
+
+**The `phase:*` read stays as the fallback for this wave.** Where the item wears one of
+those labels, that label still picks the row, so no row above moves. The computed position
+answers where no phase label is written. **`needs-human` answers before every fact.** The
+tick reads that label first and stays quiet, so a paused item wakes nobody.
+
 **Five rows write no label, because they are not phase transitions.** ADR 0021 rejected a
 `phase:fix` value, so a fix round stays inside `phase:review`. And `dead` and `stalled` say
 something about the worker rather than about the phase. `unreadable` says something about
