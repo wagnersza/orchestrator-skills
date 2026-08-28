@@ -12,19 +12,20 @@
 # orchestrator/references/quality-gates.md. Both targets here miss the budget of that
 # file, because the suite builds a real git repository per fixture and takes about 35s.
 #
-# Each target names itself in GATE_COMMAND, and the script appends one line under that
-# name to the gate record, whatever the exit code is. So the record reads `make quick`
-# rather than the path of the script. Same reference file, gate record section.
+# Neither target writes the gate record. The PostToolUse hook hooks/record.py reads the
+# exit code of the gate command a worker ran. It appends the line, so the record reads
+# `make quick` as the `gates:` block of config names it. Same reference file, gate record
+# section.
 
 .PHONY: quick full
 
 # layers 1 and 2 — format, lint, types, tests, complexity.
 quick:
-	GATE_COMMAND='make quick' scripts/checks.sh quick
+	scripts/checks.sh quick
 
 # layer 3 — the suite, import boundaries, secrets.
 full:
-	GATE_COMMAND='make full' scripts/checks.sh full
+	scripts/checks.sh full
 
 # There is no `deep` target. This repo runs the `lite` gate profile, so layer 4 is off.
 # `gates.deep` in docs/agents/orchestrator.md is blank. A move to `strict` needs the

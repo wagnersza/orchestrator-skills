@@ -22,9 +22,11 @@
 # here. Layer 3 reads its contracts from .importlinter and its secret rules from
 # .gitleaks.toml.
 #
-# Every run appends one line to the gate record, whatever the exit code is. The record
-# is what the worker watch reads instead of a ticked box. It blocks nothing: this script
-# rejects no commit and stops no push.
+# This script writes no gate record. It runs the gate command and it exits. The
+# PostToolUse hook hooks/record.py then reads that exit code and appends the line. So a
+# green line proves that a command exited zero, rather than that a model said so. The
+# format and its one home are the gate record section of
+# orchestrator/references/quality-gates.md.
 #
 # This repo runs the `lite` profile, so layer 4 is off. The Makefile has no `deep`
 # target, and `gates.deep` in docs/agents/orchestrator.md is blank. So nothing reaches
@@ -32,37 +34,6 @@
 # Makefile block back and nothing else.
 
 set -eu
-
-# --- the gate record ---------------------------------------------------------
-# One line per gate command, appended whatever the exit code is. A red run that writes
-# no line reads as a run that never happened, so the append is a trap and never a step.
-# The four keys and where the file lives are the gate record section of
-# orchestrator/references/quality-gates.md.
-
-GATE_DIR=.orchestrator
-
-# The command the line names. The Makefile passes the target a worker ran, so the record
-# reads `make quick` and not the path of this script. A direct call names this script
-# instead, which is honest and matches no required layer. A quote in the value breaks the
-# JSON, so both quote characters go.
-GATE_COMMAND=$(printf '%s' "${GATE_COMMAND:-$0 ${1:-}}" | tr -d '"\\')
-
-# The item number comes from the checklist the worker already keeps, so no field of
-# config reaches this script. A checkout with no checklist writes no record, which is
-# what leaves a CI run with nothing to append to.
-record_gate() {
-	status=$?
-	set -- "$GATE_DIR"/checklist-*.md
-	[ -f "$1" ] || return 0
-	item=${1##*/}
-	item=${item%.md}
-	printf '{"command": "%s", "exit": %s, "utc": "%s", "head_sha": "%s"}\n' \
-		"$GATE_COMMAND" \
-		"$status" \
-		"$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-		"$(git rev-parse --verify --quiet HEAD || echo unknown)" \
-		>>"$GATE_DIR/gates-${item#checklist-}.jsonl"
-}
 
 # The name of a tool. A machine without it is a stop, never a skipped step.
 need() {
@@ -148,11 +119,8 @@ deep() {
 	step 'dependency CVEs · layer 4' pip-audit
 }
 
-# The trap is installed inside the branch that runs a layer. So a usage error appends no
-# line, and only a real gate run reaches the record.
 case ${1:-} in
 quick | full | deep)
-	trap record_gate EXIT
 	"$1"
 	;;
 *)

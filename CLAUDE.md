@@ -86,4 +86,4 @@ Runs claude workers via orca — `sonnet-5` @ `medium` by default, `opus-5` @ `h
 
 ### Quality gates
 
-The `lite` profile: `make quick` runs layers 1 and 2, `make full` runs layer 3, and layer 4 is off. A non-zero exit is a stop, and each run appends one line to `.orchestrator/gates-<item>.jsonl`. See `orchestrator/references/quality-gates.md`.
+The `lite` profile: `make quick` runs layers 1 and 2, `make full` runs layer 3, and layer 4 is off. A non-zero exit is a stop, and `hooks/record.py` appends one line per run to `.orchestrator/gates-<item>.jsonl`. See `orchestrator/references/quality-gates.md`.

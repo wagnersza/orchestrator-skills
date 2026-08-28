@@ -36,11 +36,14 @@ The line format has one home, and that is the gate record section of
 [`quality-gates.md`](quality-gates.md). This hook writes that exact shape, and it holds
 no second copy of it.
 
-**Two writers reach the record today, on purpose.** `scripts/checks.sh` appends its
-line and this hook appends another. Both lines carry the same four keys and the same
-`head_sha`. So a reader that takes the last line per command reads the same verdict
-either way. The work item that removes the first writer carries the ADR that supersedes
-[ADR 0036](../docs/adr/0036-a-gate-run-is-work-product.md).
+**This hook is the one writer.** `scripts/checks.sh` appended a line of its own until
+[ADR 0052](../docs/adr/0052-a-gate-blocks-and-a-hook-writes-its-record.md) removed it.
+A gate command now runs and exits, and no script and no `Makefile` writes the record. So
+a green line proves that a command exited zero, rather than that a model said so.
+
+**A gate run outside a session writes no record.** CI and a human at a shell fire no
+hook. The record is a fact about a worker's session, which is the only place the
+**Completion signal** reads it.
 
 ## Every hook exits fast where it does not apply
 
@@ -87,10 +90,13 @@ nothing stands behind is worse than no line.
 
 ## What the plane does not do yet
 
-- **No hook denies a `git push`.** That denial needs a gate record no model wrote, and
-  the worker still writes its own. A push denied against a record a worker wrote proves
-  nothing, so the denial lands with the item that makes the record deterministic.
-- **No hook denies the review state.** The same reason holds.
+- **No hook denies a `git push` yet.** The record is now deterministic, so the denial has
+  a fact to read
+  ([ADR 0052](../docs/adr/0052-a-gate-blocks-and-a-hook-writes-its-record.md)). The work
+  item that adds the denial is the next one, and this list loses the bullet with it.
+- **No hook denies the review state.** That denial waits on the tick that applies a
+  transition itself, and no hook writes a label
+  ([ADR 0051](../docs/adr/0051-a-hook-refuses-and-a-seam-performs.md)).
 - **No `Stop` hook.** Nothing writes the board on a stop, so a reconcile there would
   move a field no session touched.
 - **No merge guard.** The maintainer merges
