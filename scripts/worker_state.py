@@ -55,6 +55,19 @@ A work item with no `phase:*` label is in human review. One transition is due th
 to a **Merge queue** fires it: the `to-merge` label, or the item's card in the board
 column that means a maintainer approved the merge (ADR 0037, ADR 0038).
 
+**This tick also computes the position, and it reads no label to do that.**
+`position_of` answers where the item sits in its run, from the work-state label, the
+`Verdict:` comment list and the last write to the **Checklist**. The rule has one home,
+the Position entry of `orchestrator/CONTEXT.md`, and this module restates no part of it.
+**The `phase:*` read stays as the fallback.** Where the item wears one of those labels,
+that label picks the outcome row, so no outcome moves. The computed position answers where
+no phase label is written and no merge is asked for.
+
+**`needs-human` answers before every fact except the tracker read.** The tick reads that
+label and exits quiet, whatever the checklist, the verdicts and the process say. It writes
+no back-off marker there, because a quiet tick is not a fire. Only the maintainer removes
+that label, so a paused item costs one cheap read a minute.
+
 **The label is read first and the board second.** The label arrives with the tracker
 read this tick already made, so it costs nothing. It is also the authoritative fact,
 once a session writes it. The board read is a second command that can fail, so it
@@ -674,6 +687,68 @@ def phase_of(labels):
     return ""
 
 
+# --- the computed Position --------------------------------------------------
+
+# The **Work-state label** that means a human is reading the pull request, and the one
+# label a **Position** reads. Its string and its swap rule are owned by
+# `docs/agents/issue-tracker.md`, the same as every other label this seam reads.
+TO_REVIEW = "to-review"
+
+# The label that stops every tick. Nothing here writes it, and only the maintainer
+# removes it. So a paused item costs one cheap read a minute and wakes nobody.
+NEEDS_HUMAN = "needs-human"
+
+# The three values of a **Position**. The concept has one home, the Position entry of
+# `orchestrator/CONTEXT.md`, and this seam restates no part of the rule.
+HUMAN_REVIEW = "human-review"
+REVIEW_ROUND = "review-round"
+IMPLEMENTATION = "implementation"
+
+# How each **Position** reads on the `phase:*` label the fallback still speaks. One tick
+# answers from a computed fact where the item wears no phase label. `HUMAN_REVIEW` is the
+# empty string, because human review has never been a phase.
+POSITION_PHASES = {
+    HUMAN_REVIEW: "",
+    REVIEW_ROUND: PHASE_REVIEW,
+    IMPLEMENTATION: PHASE_IMPL,
+}
+
+
+def checklist_written(worktree, item):
+    """When the **Checklist** was last written, or None where there is no file.
+
+    One of the three facts a **Position** reads. The tick already reads the same file
+    for the **Completion signal**, so a position needs no fact of its own.
+    """
+    try:
+        return checklist_path(worktree, item).stat().st_mtime
+    except OSError:
+        return None
+
+
+def position_of(labels, bodies, written, verdict_written=None):
+    """The **Position** of one work item, computed from facts and read from no label.
+
+    Three values, and the rule has one home: the Position entry of
+    `orchestrator/CONTEXT.md`. The facts are the ones a tick already read: the
+    **Work-state label**s and the `Verdict:` comment list. `written` is the third one,
+    and it is when the **Checklist** file was last written.
+
+    `verdict_written` is when the newest `Verdict:` comment arrived. The **Tracker
+    adapter** answers comment bodies and no dates, so a tick passes nothing here and a
+    verdict that exists reads as a review round. Where a caller does date the verdict, a
+    checklist written after it means the fix round started, so the position is
+    implementation again.
+    """
+    if TO_REVIEW in labels:
+        return HUMAN_REVIEW
+    if not verdicts_in(bodies):
+        return IMPLEMENTATION
+    if verdict_written is None or written is None or verdict_written > written:
+        return REVIEW_ROUND
+    return IMPLEMENTATION
+
+
 def marker_path(marker_dir, item, outcome):
     """Where the back-off marker for one `(item, outcome)` pair lives.
 
@@ -811,10 +886,15 @@ def phase(
     A worktree that is gone is answered first, so a torn-down worker is never
     reported as a stall. A tracker read that fails comes next, and it is the
     `unreadable` outcome. No phase label gates that outcome, because a read that
-    failed cannot say which phase the item is in. The **Phase** label follows,
+    failed cannot say which phase the item is in. `needs-human` follows, and it stops
+    the tick whatever the other facts say. The **Phase** label comes after that,
     because it decides which of the other outcomes this tick can reach. An item
     that wears none of those labels is in human review, where `merge_requested` is
     the one transition that can be due.
+
+    **`position_of` answers where no phase label is written**, and the label stays the
+    fallback where one is. So an item that wears `in-progress` alone still reaches the
+    outcome its own facts name, and no outcome of a labelled item moves.
     """
     worktree = Path(os.path.realpath(worktree))
     if not worktree.is_dir():
@@ -843,14 +923,23 @@ def phase(
             f"tick can read no transition and the item is unobserved: {cause}",
         )
 
+    if NEEDS_HUMAN in labels:
+        return EXIT_NOTHING, (
+            f"nothing: work item #{item} carries the {NEEDS_HUMAN} label, so this tick "
+            f"reads no further and only the maintainer clears it"
+        )
+
     current = phase_of(labels)
     if not current:
         outcome, detail = merge_requested(
             item, labels, tracker, board_project, board_owner, board_option
         )
-        if not outcome:
+        if outcome:
+            return fire(outcome, detail)
+        position = position_of(labels, bodies, checklist_written(worktree, item))
+        if position == HUMAN_REVIEW:
             return EXIT_NOTHING, f"nothing: {detail}"
-        return fire(outcome, detail)
+        current = POSITION_PHASES[position]
 
     outcome, detail = transition(
         item, worktree, current, bodies, rounds, pattern, stall_after, required=required

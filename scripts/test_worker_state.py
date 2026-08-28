@@ -40,6 +40,7 @@ stall window.
 """
 
 import ast
+import itertools
 import json
 import os
 import re
@@ -97,6 +98,31 @@ CHANGES = "Verdict: request-changes"
 TO_MERGE = "to-merge"
 HUMAN_REVIEW = ["to-review"]
 COLUMN = "Ready to land"
+
+# The one Work-state family, whose four values come from docs/agents/issue-tracker.md.
+# `needs-human` is the one that stops every tick.
+READY_FOR_AGENT = "ready-for-agent"
+IN_PROGRESS = "in-progress"
+TO_REVIEW = "to-review"
+NEEDS_HUMAN = "needs-human"
+WORK_STATES = (READY_FOR_AGENT, IN_PROGRESS, TO_REVIEW, NEEDS_HUMAN)
+
+# The three computed Positions, named by the seam rather than by this file.
+POSITIONS = (
+    worker_state.HUMAN_REVIEW,
+    worker_state.REVIEW_ROUND,
+    worker_state.IMPLEMENTATION,
+)
+
+# How each `phase:*` label reads as a Position. Two phases mean one position, because
+# `phase:e2e` is a second implementation phase. This map is the migration guard: the
+# fallback and the computed answer must agree on every state the flow produces.
+PHASE_POSITIONS = {
+    worker_state.PHASE_IMPL: worker_state.IMPLEMENTATION,
+    worker_state.PHASE_E2E: worker_state.IMPLEMENTATION,
+    worker_state.PHASE_REVIEW: worker_state.REVIEW_ROUND,
+    "": worker_state.HUMAN_REVIEW,
+}
 BOARD_PROJECT = 9
 BOARD_OWNER = "fixture-owner"
 # The same three coordinates, in the two forms a case passes them. A subprocess case
@@ -391,6 +417,19 @@ class WorkerStateTestCase(unittest.TestCase):
         self.assertEqual(code, expect, line)
         self.assertEqual(len(line.splitlines()), 1, line)
         return line
+
+    def position(self, labels, comments=(), verdict_written=None):
+        """The computed Position, over the facts one tick reads.
+
+        The checklist write time comes from the real file in this case's worktree, so
+        the two review branches compare against a timestamp nothing here invented.
+        """
+        return worker_state.position_of(
+            list(labels),
+            list(comments),
+            worker_state.checklist_written(self.worktree, ITEM),
+            verdict_written=verdict_written,
+        )
 
     def wake(
         self,
@@ -1013,6 +1052,126 @@ class WorkerStateTestCase(unittest.TestCase):
         default = self.ask(back_off=AN_HOUR)
         self.assertTrue(default.startswith("proof-complete:"), default)
         self.assertTrue(self.marker("proof-complete").is_file())
+
+    # --- the computed Position ----------------------------------------------
+
+    def test_each_position_is_computed_from_facts_and_not_from_a_label(self):
+        """Three values, three distinct strings, and no `phase:*` label in any of the
+        facts. The label the rule does read is a work-state label."""
+        self.assertEqual(len(set(POSITIONS)), 3)
+
+        self.assertEqual(self.position([TO_REVIEW]), worker_state.HUMAN_REVIEW)
+        self.assertEqual(
+            self.position([IN_PROGRESS], ["Verdict: approve"]),
+            worker_state.REVIEW_ROUND,
+        )
+        self.assertEqual(self.position([IN_PROGRESS]), worker_state.IMPLEMENTATION)
+
+    def test_a_verdict_older_than_the_checklist_write_is_implementation_again(self):
+        """The two review branches. A `Verdict:` comment newer than the last checklist
+        write is a review round. A checklist written after that comment means the fix
+        round started, so the position is implementation again."""
+        written = worker_state.checklist_written(self.worktree, ITEM)
+
+        self.assertEqual(
+            self.position([IN_PROGRESS], [CHANGES], verdict_written=written + 60),
+            worker_state.REVIEW_ROUND,
+        )
+        self.assertEqual(
+            self.position([IN_PROGRESS], [CHANGES], verdict_written=written - 60),
+            worker_state.IMPLEMENTATION,
+        )
+        # A comment with no `Verdict:` line dates nothing, whatever its own age is.
+        self.assertEqual(
+            self.position([IN_PROGRESS], ["nearly done"], verdict_written=written + 60),
+            worker_state.IMPLEMENTATION,
+        )
+
+    def test_the_computed_position_agrees_with_the_phase_label(self):
+        """The migration guard. The fallback and the computed answer say the same thing
+        on every state the flow produces. That agreement is what lets the next item
+        delete the label family. `phase:review` before the first verdict is the one legal
+        state the two disagree on, and the fallback is what covers it until then."""
+        write(self.checklist, TICKED)
+
+        for labels, comments in (
+            (IMPL, ()),
+            (E2E, ()),
+            (REVIEW, ["Verdict: approve"]),
+            (REVIEW, [CHANGES]),
+            (HUMAN_REVIEW, ()),
+            ([*HUMAN_REVIEW, TO_MERGE], ()),
+        ):
+            self.assertEqual(
+                self.position(labels, comments),
+                PHASE_POSITIONS[worker_state.phase_of(labels)],
+                labels,
+            )
+
+    def test_no_position_is_reachable_from_two_work_state_labels_at_once(self):
+        """The guard against the class of bug #155 reported. One work-state label decides
+        the position, so a stacked pair answers what one of the two answers alone. No
+        pair invents a fourth value, and `human-review` is reachable from `to-review` and
+        from no other label."""
+        facts = ["Verdict: approve"]
+
+        for pair in itertools.combinations(WORK_STATES, 2):
+            stacked = self.position(pair, facts)
+            alone = {self.position([label], facts) for label in pair}
+
+            self.assertIn(stacked, POSITIONS, pair)
+            self.assertIn(stacked, alone, pair)
+
+        for label in WORK_STATES:
+            reaches = self.position([label], facts) == worker_state.HUMAN_REVIEW
+            self.assertEqual(reaches, label == TO_REVIEW, label)
+
+    def test_the_computed_position_answers_where_no_phase_label_is_written(self):
+        """The new answer in place. An item that wears `in-progress` alone has no phase
+        label to read, and the tick still reaches the outcome its own facts name. So the
+        next item deletes the fallback and no outcome moves."""
+        write(self.checklist, TICKED)
+        self.write_fixture(labels=[IN_PROGRESS])
+
+        self.assertTrue(self.ask().startswith("implementation-complete:"))
+
+        self.write_fixture(comments=["Verdict: approve"], labels=[IN_PROGRESS])
+        self.assertTrue(self.ask().startswith("verdict-approve:"))
+
+    def test_the_phase_label_stays_the_fallback_so_no_outcome_moves(self):
+        """Nothing changes behaviour in this item. The facts here compute as a review
+        round, and the `phase:impl` label is what the tick reads instead."""
+        write(self.checklist, TICKED)
+        self.write_fixture(comments=["Verdict: approve"], labels=IMPL)
+
+        self.assertEqual(
+            self.position(IMPL, ["Verdict: approve"]), worker_state.REVIEW_ROUND
+        )
+        self.assertTrue(self.ask().startswith("implementation-complete:"))
+
+    def test_a_needs_human_label_keeps_every_tick_quiet(self):
+        """The one label that stops the machine. Every other fact in each case here is a
+        due transition, and the tick still reports nothing. It writes no back-off marker
+        either, because a quiet tick is not a fire."""
+        write(self.checklist, TICKED)
+
+        for labels in (
+            [NEEDS_HUMAN],
+            [*IMPL, NEEDS_HUMAN],
+            [*REVIEW, NEEDS_HUMAN],
+            [NEEDS_HUMAN, TO_MERGE],
+        ):
+            self.write_fixture(
+                comments=["Verdict: approve"], labels=labels, board=COLUMN
+            )
+            before = {path for path, _ in self.disk_state()}
+
+            line = self.ask(expect=EXIT_NOTHING, back_off=AN_HOUR, **BOARD_ARGS)
+
+            self.assertTrue(line.startswith("nothing:"), line)
+            self.assertIn(NEEDS_HUMAN, line)
+            self.assertIn(f"#{ITEM}", line)
+            self.assertEqual({path for path, _ in self.disk_state()}, before, labels)
 
     # --- merge-requested: the one transition due in human review ------------
 
