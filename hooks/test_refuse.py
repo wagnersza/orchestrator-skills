@@ -6,7 +6,7 @@ carries on standard input. The assertions are the exit code and the payload the 
 printed. No test imports the hook and no test reaches for a helper inside it.
 
 **Each denial has a matching allow case.** A hook that denies everything passes a
-deny test and breaks every run. So each of the two denials is paired here with a
+deny test and breaks every run. So each of the three denials is paired here with a
 command that must go through.
 
     python3 -m pytest hooks/ -q
@@ -43,6 +43,24 @@ TRACKER_CONFIG = """# Issue tracker: GitHub
 | review | `phase:review` | A reviewer is reading the diff. |
 """
 
+# The `gates:` block of config, as the template writes it on the `lite` profile. The
+# blank `deep` field is the case that must drop out of the push check.
+GATES_CONFIG = """# Orchestrator config
+
+```yaml
+tool:     orca
+gates:
+  profile: lite           # layers 1 to 3 run; `lite` drops layer 4
+  langs:   [python]
+  quick:   "make quick"   # layers 1 + 2
+  full:    "make full"    # layer 3
+  deep:    "{deep}"       # blank on `lite`
+  story:   "/improve-codebase-architecture"  # layer 5 — advisory, not a Gate
+  thresholds:
+    complexity: 16
+```
+"""
+
 # The seam invocation a close runs. It carries the teardown command as an argument,
 # so it is the case that proves the hook reads the caller and not the words alone.
 CLOSE = (
@@ -74,6 +92,56 @@ class RefuseHook(unittest.TestCase):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8")
         return path
+
+    def worker(self, deep=""):
+        """A worker's worktree: a config with gates, a checklist, and one commit.
+
+        The commit is real, because the push check compares a recorded `head_sha`
+        against `git rev-parse HEAD`. It returns that sha.
+        """
+        self.write("docs/agents/orchestrator.md", GATES_CONFIG.format(deep=deep))
+        self.write(".orchestrator/checklist-204.md", "- [ ] implement + self-test\n")
+        self.git("init", "--quiet")
+        self.git("add", "--all")
+        self.git(
+            "-c",
+            "user.name=fixture",
+            "-c",
+            "user.email=fixture@example.com",
+            "commit",
+            "--quiet",
+            "-m",
+            "the fixture commit",
+        )
+        return self.git("rev-parse", "HEAD").strip()
+
+    def git(self, *arguments):
+        """One `git` command inside the fixture, and what it printed."""
+        proc = subprocess.run(
+            ["git", *arguments],
+            cwd=str(self.root),
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return proc.stdout
+
+    def record(self, *runs):
+        """The gate record of item 204, one line per `(command, exit, sha)` run."""
+        lines = [
+            json.dumps(
+                {
+                    "command": command,
+                    "exit": code,
+                    "utc": "2026-08-28T09:14:02Z",
+                    "head_sha": sha,
+                }
+            )
+            for command, code, sha in runs
+        ]
+        return self.write(
+            ".orchestrator/gates-204.jsonl", "".join(f"{line}\n" for line in lines)
+        )
 
     # --- the hook ------------------------------------------------------------
 
@@ -123,6 +191,7 @@ class RefuseHook(unittest.TestCase):
         self.config.unlink()
         self.allowed('gh issue edit 202 --add-label "in-progress"')
         self.allowed("orca worktree rm --worktree id:W --force")
+        self.allowed("git push -u origin 204-push-block")
 
     def test_a_tool_that_is_not_bash_is_not_read(self):
         """The hook is registered for `Bash` alone. A second registration would
@@ -136,9 +205,9 @@ class RefuseHook(unittest.TestCase):
     # --- the marker is present, and no item is in context --------------------
 
     def test_the_denials_need_no_work_item(self):
-        """Neither denial reads a checklist, so a main checkout with no worker
-        worktree is guarded in the same way. This is what stops a label write from
-        the orchestrator session itself."""
+        """The label denial and the teardown denial read no checklist, so a main
+        checkout with no worker worktree is guarded in the same way. This is what
+        stops a label write from the orchestrator session itself."""
         self.assertNotIn(".orchestrator", [p.name for p in self.root.iterdir()])
         self.assertIn(
             "work-state label",
@@ -238,14 +307,117 @@ class RefuseHook(unittest.TestCase):
         self.allowed("git worktree list")
         self.allowed("orca worktree create --name 202-three-hooks")
 
-    # --- what this hook does not deny ----------------------------------------
+    # --- denial three: a push against a record that is not green -------------
 
-    def test_a_git_push_goes_through(self):
-        """The push block is a separate work item. It needs a gate record a machine
-        wrote, and the worker still writes its own, so a push denied against that
-        record proves nothing."""
-        self.allowed("git push -u origin 202-three-hooks")
-        self.allowed("make full && git push")
+    def test_a_push_with_no_green_line_is_denied(self):
+        """The deciding case. A push that skips a gate is what made "all gates are
+        deterministic" false, because nothing in the stack could stop it."""
+        self.worker()
+        reason = self.denied("git push -u origin 204-push-block")
+        self.assertIn("no green line at HEAD", reason)
+        self.assertIn("the record holds no line of it", reason)
+
+    def test_the_denial_names_each_failing_gate_and_its_command(self):
+        """A worker that reads "denied" and no command guesses. So the message names
+        the gate that failed and the exact command that repairs it, and it leaves out
+        a gate that is already green."""
+        head = self.worker()
+        self.record(("make quick", 0, head))
+        reason = self.denied("git push")
+        self.assertIn("the `full` gate", reason)
+        self.assertIn("run `make full`", reason)
+        self.assertNotIn("`quick`", reason)
+
+    def test_a_blank_gate_command_is_not_a_gate(self):
+        """The `lite` profile leaves `gates.deep` blank, so no `make deep` exists to
+        run. A check that read the blank field would deny every push in that repo."""
+        head = self.worker()
+        self.record(("make quick", 0, head), ("make full", 0, head))
+        self.allowed("git push")
+        # The same record, against a config that fills the field in. The gate is then
+        # read, which is what proves the blank value is what dropped it.
+        self.worker(deep="make deep")
+        self.assertIn("the `deep` gate", self.denied("git push"))
+
+    def test_a_stale_head_sha_is_not_green(self):
+        """A commit made after a gate run means the gate runs again. Otherwise a
+        worker greens the record, commits once more, and pushes the untested code."""
+        self.worker()
+        stale = "0" * 40
+        self.record(("make quick", 0, stale), ("make full", 0, stale))
+        self.assertIn("names another commit", self.denied("git push"))
+
+    def test_a_non_zero_exit_is_not_green(self):
+        """A Gate has no warning state. A non-zero exit is a stop, so the newest run
+        of a red command holds the push."""
+        head = self.worker()
+        self.record(("make quick", 0, head), ("make full", 1, head))
+        self.assertIn("exited 1", self.denied("git push"))
+
+    def test_the_newest_line_of_a_command_is_the_one_that_counts(self):
+        """A worker corrects a fault and runs the command again. The second run is
+        the verdict, in both directions."""
+        head = self.worker()
+        self.record(
+            ("make quick", 0, head), ("make full", 1, head), ("make full", 0, head)
+        )
+        self.allowed("git push")
+        self.record(
+            ("make quick", 0, head), ("make full", 0, head), ("make full", 2, head)
+        )
+        self.assertIn("exited 2", self.denied("git push"))
+
+    def test_a_malformed_line_is_not_green(self):
+        """One line nobody can read puts the lines around it in doubt as well. This
+        is the rule the `gates-unproven` outcome already holds."""
+        head = self.worker()
+        self.record(("make quick", 0, head))
+        with (self.root / ".orchestrator" / "gates-204.jsonl").open("a") as handle:
+            handle.write("make full exited 0, honestly\n")
+        self.assertIn("is not one JSON object", self.denied("git push"))
+
+    def test_the_push_is_read_after_a_global_flag_and_inside_a_chain(self):
+        """`git -C <dir> push` is a push, and so is the tail of `make full &&
+        git push`. A check that read the first two words alone would miss both."""
+        self.worker()
+        self.assertIn("no green line", self.denied(f"git -C {self.root} push --force"))
+        self.assertIn("no green line", self.denied("make full && git push"))
+
+    def test_a_push_with_every_gate_green_goes_through(self):
+        """The allow case for denial three. The block exists to stop an unproven
+        push, and a proven one must cost the worker nothing."""
+        head = self.worker()
+        self.record(("make quick", 0, head), ("make full", 0, head))
+        self.allowed("git push -u origin 204-push-block")
+
+    def test_a_push_from_a_checkout_with_no_work_item_goes_through(self):
+        """The record belongs to one work item, and the checklist names it. A main
+        checkout has neither, so it proves nothing and it is not held."""
+        self.write("docs/agents/orchestrator.md", GATES_CONFIG.format(deep=""))
+        self.allowed("git push origin main")
+
+    def test_a_config_with_no_gates_block_denies_no_push(self):
+        """A repo configured before the gates existed names no gate command. The
+        hook fails open, so that repo keeps every push it runs today."""
+        self.write(".orchestrator/checklist-204.md", "- [ ] implement\n")
+        self.allowed("git push")
+
+    def test_a_git_command_that_is_not_a_push_goes_through(self):
+        """Only the push verb is read. A worker commits, reads and fetches on every
+        item, and a hook that held those would stop the work it protects."""
+        self.worker()
+        self.allowed("git commit -m 'feat: deny an unproven push'")
+        self.allowed("git status --short")
+        self.allowed("git fetch origin main")
+
+    def test_prose_that_names_the_push_goes_through(self):
+        """A review note quotes the rule often. The hook reads the program and its
+        verb, so a quoted sentence that holds the two words is not a push."""
+        self.worker()
+        self.allowed("gh issue comment 204 --body 'the hook denies a git push'")
+        self.allowed("echo 'run git push after make full'")
+
+    # --- what this hook does not deny ----------------------------------------
 
     def test_an_unparsable_command_goes_through(self):
         """The hook fails open. A command it cannot split into words is a command it

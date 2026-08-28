@@ -77,9 +77,18 @@ malformed line, a non-zero exit or a stale `head_sha` fires the `gates-unproven`
 instead, and the item stops before review. Which layers are required is the spawn's
 answer, and it passes them to the watch as a repeatable flag.
 
+**A red record denies the push.** `hooks/refuse.py` reads this file before a `git push`
+runs, and it asks one question per gate command Config names with a non-blank command: is
+there a line with exit `0` at the current `HEAD`? The four answers that read as not green
+are the four this section names, and the denial gives each failing gate the command that
+repairs it. A blank command is not a Gate, so a dropped layer holds no push. The rule and the
+message are in [`hooks.md`](hooks.md).
+
 **A gate run outside a session writes no record.** CI and a human at a shell each run the
 gate command with no harness that reads its exit code, so no hook fires. The record is a
 fact about a worker's session, which is the only place the **Completion signal** reads it.
+A push from a shell outside a session fires no hook either, so the block holds a worker
+and never a maintainer.
 
 Rationale, the rejected writers and the accepted gap where the hook can read no exit code:
 [ADR 0052](../docs/adr/0052-a-gate-blocks-and-a-hook-writes-its-record.md). It supersedes

@@ -20,7 +20,7 @@ supersession of ADR 0034 and every accepted risk:
 | Hook | Event | What it does | Which failure it kills |
 |---|---|---|---|
 | `hooks/context.py` | `SessionStart`, matching `startup\|resume\|clear\|compact` | Exports the **Plugin root** from `CLAUDE_PLUGIN_ROOT`. Reads whether this session is an **Orchestrator** or a **Worker**. Injects the item facts: the work-state label, the **Checklist** position, and whether the **Gate record** is green at `HEAD`. | A session that works from memory, and a session that lost the facts to a compaction. It also removes one caller of the plugin-root glob, because the hook is handed the path. |
-| `hooks/refuse.py` | `PreToolUse` for `Bash` | Denies two commands. A **Work-state label** write from any session, because only a seam writes one. The teardown command outside `scripts/close_item.py`. | A label written by hand. A teardown out of order. |
+| `hooks/refuse.py` | `PreToolUse` for `Bash` | Denies three commands. A **Work-state label** write from any session, because only a seam writes one. The teardown command outside `scripts/close_item.py`. A `git push` while a configured **Gate** has no green line at `HEAD`. | A label written by hand. A teardown out of order. A push that skipped a gate. |
 | `hooks/record.py` | `PostToolUse` for `Bash` | Where the command that just ran is a configured **Gate** command, appends one line to `.orchestrator/gates-<item>.jsonl` with the command, the exit code, a UTC timestamp and `head_sha`. | A forgotten record, which used to read as a failed gate. |
 
 Every term in bold is defined in [`../CONTEXT.md`](../CONTEXT.md).
@@ -44,6 +44,45 @@ a green line proves that a command exited zero, rather than that a model said so
 **A gate run outside a session writes no record.** CI and a human at a shell fire no
 hook. The record is a fact about a worker's session, which is the only place the
 **Completion signal** reads it.
+
+## The push block
+
+**`git push` is denied while any configured Gate lacks a green line at `HEAD`.** This is
+the denial that makes "all gates are deterministic" true. A command exit code is the
+verdict, `record.py` writes the record that proves it, and now nothing pushes past it.
+
+The check asks one question per gate command that the `gates:` block of **Config** names
+with a non-blank command: is there a line with exit `0` at the current `HEAD`? Four
+answers read as not green, and they are the four the `gates-unproven` outcome already
+uses: a missing line, a malformed line, a non-zero exit and a stale `head_sha`
+([`quality-gates.md`](quality-gates.md)). **The newest line of a command is the
+verdict**, because a worker runs a command again after it corrects a fault.
+
+**A blank command is not a Gate.** A layer the profile dropped names no command, so it
+drops out of this check too. Otherwise a repo on the `lite` profile can never push,
+because `gates.deep` is blank there.
+
+**The message names each failing gate and the command to run.** A worker that reads
+"denied" and no command guesses. A message that names the `full` gate and `make full`
+sends the next turn straight at the repair. The gate name and the command both come from
+Config, and the message holds no generic sentence.
+
+**A push is a program and a verb.** The hook reads `git` as the program and `push` as
+the verb it was given, after a global flag such as `-C`, and in each command of a chain.
+So the tail of `make full && git push` is a push, and a review note that quotes the rule
+is not.
+
+Three states permit the push, because each one proves nothing rather than proving a
+fault:
+
+- A repo with no marker.
+- A checkout with no **Checklist** to name the item.
+- A Config with no gate command at all.
+
+**A command that does not exist denies every push in that repo.** So
+`/orchestrator-setup` runs each configured gate command once and reports its exit code,
+and it names this denial as the reason. A typo in Config is then a message at setup time
+rather than a mystery at push time.
 
 ## Every hook exits fast where it does not apply
 
@@ -90,10 +129,6 @@ nothing stands behind is worse than no line.
 
 ## What the plane does not do yet
 
-- **No hook denies a `git push` yet.** The record is now deterministic, so the denial has
-  a fact to read
-  ([ADR 0052](../docs/adr/0052-a-gate-blocks-and-a-hook-writes-its-record.md)). The work
-  item that adds the denial is the next one, and this list loses the bullet with it.
 - **No hook denies the review state.** That denial waits on the tick that applies a
   transition itself, and no hook writes a label
   ([ADR 0051](../docs/adr/0051-a-hook-refuses-and-a-seam-performs.md)).

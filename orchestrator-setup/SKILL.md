@@ -216,6 +216,9 @@ For option 1, skip the interview entirely. Do this instead:
 4. **Run step 5c and report whether the hook plane is live.** A plugin update is
    exactly when a fresh `hooks/hooks.json` arrives, and this path is the only place an
    existing user reads that. The step installs nothing.
+   **Then run step 5d**, the gate smoke run. A plane that just went live denies a push
+   against a gate command that does not exist. So an existing user learns that here,
+   before the next push.
 5. **Apply only what the user approves**, one edit at a time. An update must never
    drop a hand-edited recipe field or flip a review policy on its own.
 6. **Report** as a short table: what updated, what the config needs, what's fine.
@@ -716,6 +719,34 @@ Report one row per read: **live** / **not live**, with what the command printed.
 that arrived with step 0a reaches this session only after a restart, which is the same
 rule step 0a states for the skill body. Say in one line that the plane is live from the
 next start, and never from this one.
+
+### 5d. Run each gate command once
+
+**Why this step exists: a `git push` is denied while a configured gate has no green line
+at `HEAD`** ([`../orchestrator/references/hooks.md`](../orchestrator/references/hooks.md)).
+So a `gates:` field can name a command that does not exist. That field then denies every
+push in this repo, and the message names a command nobody can run. One run per command
+here turns that from a mystery at push time into a message at setup time.
+
+Run each non-blank command of the `gates:` block once, from the repo root. Report the
+exit code of each one:
+
+```bash
+make quick; echo "quick exit: $?"
+make full;  echo "full exit: $?"
+```
+
+- **Read the commands from the config this setup wrote**, and never from this page. A
+  blank field is not a Gate: run nothing for it, and say so in one line. The `story` field
+  is not a Gate either, because it has no exit code
+  ([`references/quality-gates.md`](../orchestrator/references/quality-gates.md)).
+- **A command that does not exist is the fault this step looks for.** `No rule to make
+  target` and `command not found` each mean no push can land. Name the field, the command
+  and the repair, which is either step 5b or the field itself.
+- **A non-zero exit from a command that ran is not a setup fault.** The repo has work to
+  do, and the report says which layer is red. Change no code here.
+- **Report one row per gate**: the field, the command, and the exit code. Then say in one
+  line that a red row holds every push until it is green.
 
 ## 6. Done
 
