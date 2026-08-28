@@ -374,13 +374,44 @@ _Avoid_: board state, column, board label, project status (the field is `Status`
 Per-project commands the completion contract needs but that aren't tool/harness/model: setup command, run-for-evidence recipe + port scheme, optional DB gate, evidence expectations. Stored in Config so the skill body stays abstract ("boot per the run recipe", "if a DB gate is configured, satisfy it").
 
 **Checklist**:
-A persistent, file-based task list that survives context loss and works across every harness (unlike claude-only `TodoWrite`). Both the orchestrator and each worker keep one, so neither forgets a step (the documented "stalls before opening the MR" failure mode). Written as markdown checkboxes (`- [ ]` / `- [x]`) to `.orchestrator/checklist-<item>.md` at the worktree root (gitignored, torn down with the worktree). The worker ticks each step as it completes; the orchestrator reads the file to see exact progress and detect a stall (unchecked items + idle terminal → re-prompt with the remaining steps). **The last box ends at the review note.** A worker posts that note and stops. The **Orchestrator** writes the review state, in one call with the removal of the `phase:review` label, because that pair names one moment (`docs/adr/0025-the-session-writes-the-review-state.md`).
+A persistent, file-based task list that survives context loss and works across every harness (unlike claude-only `TodoWrite`). Both the orchestrator and each worker keep one, so neither forgets a step (the documented "stalls before opening the MR" failure mode). Written as markdown checkboxes (`- [ ]` / `- [x]`) to `.orchestrator/checklist-<item>.md` at the worktree root (gitignored, torn down with the worktree). The worker ticks each step as it completes; the orchestrator reads the file to see exact progress and detect a stall (unchecked items + idle terminal → re-prompt with the remaining steps). **Where the Project recipe asks for browser proof, the proof is one more box.** It drops on the same blank-field rule every other box takes, and `run_recipe` is the field it reads. So "every box ticked" is the whole finish signal, and a worker works one list top to bottom. **The last box ends at the review note.** A worker posts that note and stops. The **Orchestrator** writes the review state, in one call with the removal of the `phase:review` label, because that pair names one moment (`docs/adr/0025-the-session-writes-the-review-state.md`).
 
 **Phase**:
 Which part of an owned run a **Work item** is in. A second label family, worn beside the **Work-state labels** rather than instead of them. Three values, **mutually exclusive inside the family — swap, never stack**: `phase:impl` (a worker is implementing), `phase:review` (a reviewer is reading the diff, fix rounds included), `phase:e2e` (a worker is proving the feature works through the **Browser surface**). So an owned item wears `in-progress` and exactly one `phase:*` label together. **Human review is `to-review` with no phase label**, because human review is already a work state. So removing the label *is* that transition, and no fact is written twice. **The Orchestrator writes that removal and `to-review` in one call**, and a **Worker** writes neither (`docs/adr/0025-the-session-writes-the-review-state.md`).
 
 **The Board status derivation does not read it.** `Status` keeps deriving from the work-state labels alone. So a phase change moves no card, and `docs/adr/0009-labels-drive-board-status.md` needs no edit. **A `user-story` parent also wears `phase:e2e` while its Story proof runs**, and that derivation still reads no phase label (`docs/adr/0047-the-story-proof-runs-before-the-story-gate.md`). The label strings, the swap rule and their `gh label create` lines live with every other label vocabulary, in `docs/agents/issue-tracker.md`. The tracker is the only store: a label survives a restart, a reboot and a teardown, so a session with no memory of the spawn recovers the phase with one read. `phase:e2e` is reachable only where the **Project recipe** boots something, so an item in this repo never wears it. Why a second family and not a second state machine, and the rejected options: `docs/adr/0021-phase-is-a-second-label-family.md`.
 _Avoid_: stage, step, state, status (the last two name the work-state axis this deliberately is not), workflow phase.
+
+**Position**:
+Where a **Work item** sits inside its own run, computed from facts rather than read from a
+label. Three values: **human review**, **review round** and **implementation**. It is the
+answer the **Phase** family cached, and the **Worker watch** computes it in one function.
+
+The rule, in this order:
+
+1. The `to-review` label on the item means human review.
+2. Otherwise, a `Verdict:` comment newer than the last write to the **Checklist** means a
+   review round.
+3. Otherwise the item is in implementation.
+
+**Every fact it reads is a fact the tick already read.** Those facts are the **Work-state
+labels**, the `Verdict:` comment list, and when the **Checklist** file was last written.
+So a position costs no second tracker read and no second file.
+
+**A cached answer can be stale, and a computed one cannot.** The `phase:*` family stored
+this answer beside the facts that make it. So the two can disagree, and nothing repairs a
+disagreement. A computed answer holds no second copy to repair.
+
+**One label answers before every fact, and it is `needs-human`.** The tick reads that
+label first and stays quiet, whatever the other facts say. So a paused item costs one
+cheap read a minute and wakes nobody.
+
+**The `phase:*` read stays for this wave, as the fallback.** Where an item still wears one
+of those labels, that label decides, so no outcome moves. The computed position answers
+where no phase label is written. The label family and this fallback both go with the next
+item of the same story. That item records the decision in an ADR of its own.
+_Avoid_: phase (that names the label family this replaces), stage, state, status (the last
+two name the work-state axis), progress.
 
 **Item automation**:
 One schedule per live **Work item**, owned by the **Tool** rather than by a session's shell, named `orchestrator-item-<N>`. It ticks once a minute. **Its precheck is the whole tick**: the **Worker watch** seam asked as a predicate, plus the delivery of the line that predicate printed. Where a **Phase** transition is due the seam wakes the **Orchestrator** with that line itself. **The target is that session's terminal handle, resolved at spawn.** The terminal title is the second target, and a comment on the work item is the third. The spawn report names which of the three is live (`docs/adr/0024-the-wake-target-is-a-resolved-handle.md`).
