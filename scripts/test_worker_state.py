@@ -1194,7 +1194,12 @@ class WorkerStateTestCase(unittest.TestCase):
         coordinates go together. A flag left in the parser is a flag a caller resolves
         for nothing. The board section of the tracker file no longer feeds a tick."""
         for subcommand in ("phase", "wake"):
-            out = self.run_seam(subcommand, "--help", lines=400)
+            # The usage line carries the path of the checkout that runs, and a worktree
+            # can be named after this migration. So the path is not text this seam
+            # wrote, and it is not what this test reads.
+            out = self.run_seam(subcommand, "--help", lines=400).replace(
+                str(REPO_ROOT), "<repo>"
+            )
 
             for flag in BOARD_FLAGS:
                 self.assertNotIn(flag, out, f"{subcommand} --help still names {flag}")
