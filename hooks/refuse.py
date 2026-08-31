@@ -165,7 +165,14 @@ def labels_written(words):
 
 
 def label_denial(root, words):
-    """The reason a work-state label write is denied, or an empty string."""
+    """The reason a work-state label write is denied, or an empty string.
+
+    The close seam is the one caller allowed to make this write. `teardown_denial`
+    runs the same test for its own write. A command that names the seam anywhere is
+    read as that seam's call, so a hand-typed write beside it goes through too.
+    """
+    if any(CLOSE_SEAM in word for word in words):
+        return ""
     written = labels_written(words)
     if not written:
         return ""

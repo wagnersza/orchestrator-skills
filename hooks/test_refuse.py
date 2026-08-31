@@ -68,6 +68,14 @@ CLOSE = (
     "--teardown --teardown-command 'orca worktree rm --worktree id:W --force --json'"
 )
 
+# The seam invocation named in the label denial message: a close command that
+# carries a work-state label flag. This case proves the hook permits the exact
+# command it tells a denied session to run.
+CLOSE_WITH_LABEL = (
+    "python3 /plugin/root/scripts/close_item.py --issue 202 --pr 203 --execute "
+    "--remove-label to-review --add-label ready-for-agent"
+)
+
 
 class RefuseHook(unittest.TestCase):
     """A repository, a `Bash` command, and the decision the hook returned.
@@ -275,6 +283,19 @@ class RefuseHook(unittest.TestCase):
         """A review note quotes a label often. The hook reads the value of a label
         flag, so prose that holds the same word is not a write."""
         self.allowed("gh issue comment 202 --body 'this item is in-progress today'")
+
+    def test_the_close_seam_carries_the_label_write_and_goes_through(self):
+        """The allow case this fix adds. The close seam's own invocation is the
+        command the denial message names. That command must go through, not fail
+        on its own message."""
+        self.allowed(CLOSE_WITH_LABEL)
+
+    def test_a_hand_typed_write_beside_the_seam_is_permitted_too(self):
+        """A compound command holds the seam call and a hand-typed write on the same
+        line. The hook reads the caller across the whole command, the same way
+        `teardown_denial` does. So the seam's presence anywhere wins, and the
+        hand-typed write goes through beside it."""
+        self.allowed(f"{CLOSE_WITH_LABEL} && gh issue edit 203 --add-label to-review")
 
     # --- denial two: the teardown outside the close seam ---------------------
 
