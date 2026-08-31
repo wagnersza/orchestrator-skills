@@ -209,7 +209,8 @@ For option 1, skip the interview entirely. Do this instead:
      that this version deleted or renamed.
    - **A missing `## Project board` section** in `docs/agents/issue-tracker.md` on a
      GitHub repo that now has a board — run step 2a and offer to add it. If the
-     section is there, re-resolve its ids and report any mismatch.
+     section is there, read the two coordinates back and report any mismatch. **Also
+     read the built-in workflow again**, because a maintainer can turn it off.
 3. **If the orchestrator terminal title is not set yet, set it** (step 5a). A repo
    configured before the tick existed has no titled terminal, so this path is the only
    place an existing user gets one.
@@ -289,13 +290,12 @@ the same for every repo, so a copy in each one drifts from the maintained versio
 ([ADR 0039](../orchestrator/docs/adr/0039-a-tracker-read-has-a-verified-command-in-the-skill.md)).
 On a re-run (step 0d), leave an existing pointer alone.
 
-### 2a. Detect a project board and resolve its ids
+### 2a. Detect a project board and read its two coordinates
 
-The orchestrator writes a card's `Status` at every label transition, deriving it from
-the labels (`orchestrator/docs/adr/0009-labels-drive-board-status.md`). It needs the
-real field and option ids to do that, and those are **per-repo data**, so resolve
-them here and write them into `issue-tracker.md` — never into the orchestrator
-config, same split as the labels.
+**The board is an input, and nothing writes it** (`orchestrator/docs/adr/0054-the-board-is-an-input-not-a-mirror.md`).
+One question is asked of it: is this item's card in the start column. So this step resolves
+two coordinates and no id. Both are **per-repo data**, so write them into
+`issue-tracker.md` and never into the orchestrator config, the same split as the labels.
 
 Only for a GitHub tracker. Look for a board owned by the repo's owner:
 
@@ -304,8 +304,9 @@ gh project list --owner <owner> --format json --jq '.projects[] | {number, title
 ```
 
 Ask which project this repo's issues live on (a personal account often has several
-untitled ones — show `number` + `title` and let the user pick, or say **none**). Then
-resolve the `Status` field and every option id from the live board:
+untitled ones — show `number` + `title` and let the user pick, or say **none**). Then read
+the column names off the live board, and ask which one means "an agent can start this
+now":
 
 ```bash
 gh project field-list <number> --owner <owner> --format json \
@@ -313,25 +314,40 @@ gh project field-list <number> --owner <owner> --format json \
 ```
 
 Write a `## Project board` section into `docs/agents/issue-tracker.md` carrying: the
-`owner` + project `number`, the project id, the `Status` field id, the
-option-name→id map **as resolved** (never the ids from this skill's examples — they
-are one board's), the derivation table, and the two `gh` calls (resolve an issue's
-item id, then `item-edit --single-select-option-id`). Then verify the token has the
-scope — `gh auth status` should list `project`; if not, run
-`gh auth refresh -s project`.
+`owner` + project `number`, the name of the start column, and the one `gh project
+item-list` read. **Write no `Status` field id, no option id and no derivation table.**
+Each one existed to write a card, and nothing writes a card. Then verify the token has
+the scope — `gh auth status` should list `read:project`; if not, run
+`gh auth refresh -s read:project`.
+
+**Then read the board's built-in workflows, and report the one that matters.** Nothing
+writes the board, so the built-in **item closed to Done** workflow is the only thing left
+that moves a card to `Done`:
+
+```bash
+gh api graphql -f owner=<owner> -F number=<number> -f query='
+  query($owner: String!, $number: Int!) {
+    user(login: $owner) { projectV2(number: $number) {
+      workflows(first: 20) { nodes { name enabled } } } } }'
+```
+
+**Say in one line whether it is on.** Where it is off, say plainly that the maintainer
+turns it on in the project settings, and that **this step cannot do it, because the switch
+is not in the API.** Do not try. An `organization` board answers the same query under
+`organization(login:)` instead of `user(login:)`, and a read that fails is one line to the
+user rather than a stop: the workflow is the maintainer's to set either way.
 
 **Handle these three cases explicitly, and say which one applies:**
 
-- **No board, or the user says none** — leave the section out. Every board write
-  becomes a no-op and the orchestrator runs on labels alone. Say so in one line;
-  this is a supported configuration, not a gap.
-- **A board with no `Status` field, or with different option names** — write the
-  section with whatever options exist and map the derivation table onto them by
-  meaning (a board with only `Todo | In Progress | Done` folds `Backlog`/`Ready` onto
-  `Todo` and both work states onto `In Progress`). Say which columns got folded.
-- **The section already exists** (a re-run) — this is the update path (step 0d):
-  re-resolve the ids and **report** a mismatch, don't silently rewrite. Ids change
-  when a field is recreated, and a stale one fails every write.
+- **No board, or the user says none** — leave the section out. The board read then asks
+  nothing and the orchestrator runs on labels alone. Say so in one line; this is a
+  supported configuration, not a gap.
+- **A board with no `Status` field, or with no column that means start** — write the
+  section with the owner and the number, and say that no start column exists. The label
+  alone is then the whole gate, which is the same answer a repo with no board gives.
+- **The section already exists** (a re-run) — this is the update path (step 0d): read the
+  two coordinates back and **report** a mismatch, don't silently rewrite. A renamed column
+  is the one that changes, and a stale name reads every card as outside the start column.
 
 ### 2b. Migrate the label vocabulary
 
@@ -375,9 +391,10 @@ Report that list as a table, then take these three steps in order:
 so `gh label delete` reports one miss per absent label and the step is still complete. Say
 which of the four existed.
 
-**The `To merge` column stays on the board, and the maintainer deletes it.** That is a
-board edit and not a label. This repo stops writing the column, so an empty column costs
-nothing until they remove it.
+**Every column this repo stopped writing stays on the board, and the maintainer deletes
+it.** That is a board edit and not a label. Nothing writes a card at all now, so an unused
+column costs nothing until they remove it
+(`orchestrator/docs/adr/0054-the-board-is-an-input-not-a-mirror.md`).
 
 ## 3. Interview — one choice at a time
 

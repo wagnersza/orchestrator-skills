@@ -105,11 +105,13 @@ gates:
   (`ready-for-agent`, `in-progress`, `to-review`, `needs-human`) — come from
   `docs/agents/issue-tracker.md`, not this file — single source of truth. So do the
   **project board** coordinates, in its `## Project board` section: the project
-  owner/number, the `Status` field id, and the option ids. The board's `Status` is a
-  derived projection of those labels, written at every transition and reconciled when
-  the ready queue is read — not a second state machine. A repo with no board omits
-  that section and every board write becomes a no-op. Rationale:
-  `orchestrator/docs/adr/0009-labels-drive-board-status.md`.
+  owner/number, and the name of the start column. **The board is an input, and nothing
+  writes it.** One question is asked of it: is this item's card in the start column. So
+  the token needs `read:project` and no write scope. A repo with no board omits that
+  section, and the label alone is the whole gate. **The board's own built-in
+  item closed to Done workflow is what moves a card to `Done`, and the maintainer
+  enables it.** Rationale:
+  `orchestrator/docs/adr/0054-the-board-is-an-input-not-a-mirror.md`.
 - **Project recipe** fields are the only place project specifics live. Leave a
   field blank if it doesn't apply (e.g. `db_gate` for a repo with no database).
 - `N` in `ports` is the work-item number, so parallel workers never collide.

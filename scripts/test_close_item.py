@@ -52,19 +52,6 @@ GLAB = ["--tracker-cli", "glab", "--tracker-host", HOST, "--tracker-repo", PROJE
 # A closing reason with no space in it, so one write is one line in the write log.
 REASON = "merged-and-closed"
 
-BOARD = [
-    "--project-number",
-    "6",
-    "--project-owner",
-    "wagnersza",
-    "--project-id",
-    "PVT_fixture",
-    "--status-field-id",
-    "PVTSSF_fixture",
-    "--done-option-id",
-    "98236657",
-]
-
 EXIT_OK = 0
 EXIT_ERROR = 1
 EXIT_PR_NOT_MERGED = 2
@@ -152,18 +139,16 @@ class CloseItemTestCase(unittest.TestCase):
         pr_state="MERGED",
         issue_state="OPEN",
         labels=(REVIEW_LABEL,),
-        card="PVTI_fixture",
         comments=(),
     ):
-        """Stand in for the three tracker reads: the PR, the issue, the card.
+        """Stand in for the two tracker reads: the PR and the issue.
 
         One record for this item and one for its PR, in the one format
         `scripts/tracker.py` documents. `scripts/worker_state.py` reads the same one.
+        There is no card key, because no read here asks for one (ADR 0054).
         """
         self.fixture = self.root / "gh.json"
         item = {"state": issue_state, "labels": list(labels)}
-        if card:
-            item["card"] = card
         if comments:
             item["comments"] = list(comments)
         data = {
@@ -182,7 +167,7 @@ class CloseItemTestCase(unittest.TestCase):
         """A teardown command that leaves proof it ran, and destroys nothing."""
         return f"touch {self.marker}"
 
-    def close(self, *extra, board=True, worktree=True, teardown_command=True, expect=0):
+    def close(self, *extra, worktree=True, teardown_command=True, expect=0):
         """Run the seam and return the parsed plan."""
         argv = [
             sys.executable,
@@ -201,8 +186,6 @@ class CloseItemTestCase(unittest.TestCase):
         ]
         if worktree:
             argv += ["--worktree", str(self.worktree)]
-        if board:
-            argv += BOARD
         if teardown_command:
             argv += ["--teardown-command", self.teardown_command()]
         proc = subprocess.run(
@@ -283,7 +266,7 @@ class CloseItemTestCase(unittest.TestCase):
         self.assertEqual(self.step(plan, 4)["status"], "refused")
         self.assertEqual(plan["refused"]["step"], 4)
         self.assertIn("not merged", plan["refused"]["reason"])
-        self.assertIn("`In review`", plan["refused"]["reason"])
+        self.assertIn("review state", plan["refused"]["reason"])
         self.assertEqual(plan["exit_code"], EXIT_PR_NOT_MERGED)
         # Everything after the refusal is blocked, and each one says why.
         self.assertEqual(self.statuses(plan), ["refused"] + ["blocked"] * 4)
@@ -315,32 +298,24 @@ class CloseItemTestCase(unittest.TestCase):
 
         self.assertNothingMutated(before)
 
-    def test_absent_board_arguments_skip_the_card_and_keep_the_close_valid(self):
-        """A repo with no board is supported, so the card write is a no-op."""
-        plan = self.close(board=False)
+    def test_the_plan_holds_no_card_part_at_all(self):
+        """The board is an input, so step 7 plans no board write (ADR 0054).
 
-        card = self.part(plan, "card")
-        self.assertEqual(card["status"], "skipped")
-        self.assertIn("--project-number", card["note"])
-        self.assertIn("labels alone", card["note"])
-        self.assertEqual(card["argv"], [])
+        A `skipped` card part would still be a part a reader has to read, and a repo
+        with a board would still plan a write. Neither one exists now.
+        """
+        plan = self.close()
+
+        names = [entry["name"] for entry in self.step(plan, 7)["parts"]]
+        self.assertNotIn("card", names)
+        for entry in self.step(plan, 7)["parts"]:
+            self.assertNotIn("project", entry["command"])
         # And the close is still valid: the label and the close still run.
         self.assertIsNone(plan["refused"])
         self.assertEqual(plan["exit_code"], EXIT_OK)
         self.assertEqual(self.step(plan, 7)["status"], "todo")
         self.assertEqual(self.part(plan, "label")["status"], "todo")
         self.assertEqual(self.part(plan, "close")["status"], "todo")
-
-    def test_an_issue_with_no_card_is_skipped_not_failed(self):
-        """An empty item id is the answer a repo with no card for this issue gives."""
-        self.write_fixture(card="")
-        plan = self.close()
-
-        card = self.part(plan, "card")
-        self.assertEqual(card["status"], "skipped")
-        self.assertIn("no card", card["note"])
-        self.assertIsNone(plan["refused"])
-        self.assertEqual(plan["exit_code"], EXIT_OK)
 
     def test_an_already_closed_item_reads_done_and_the_plan_stays_valid(self):
         """Idempotence: a part-applied close is resumable rather than broken."""
@@ -352,13 +327,9 @@ class CloseItemTestCase(unittest.TestCase):
         self.assertIn("already has the merge", self.step(plan, 5)["note"])
         self.assertEqual(self.part(plan, "label")["status"], "done")
         self.assertEqual(self.part(plan, "close")["status"], "done")
-        self.assertEqual(self.step(plan, 7)["status"], "todo")  # the card is left
         self.assertIsNone(plan["refused"])
         self.assertEqual(plan["exit_code"], EXIT_OK)
-
-        # With the card written too, step 7 reads done as a whole.
-        self.write_fixture(issue_state="CLOSED", labels=(), card="")
-        plan = self.close()
+        # Both parts landed, so step 7 reads done as a whole.
         self.assertEqual(self.step(plan, 7)["status"], "done")
         self.assertEqual(self.statuses(plan)[:4], ["done", "done", "done", "done"])
 
@@ -383,14 +354,14 @@ class CloseItemTestCase(unittest.TestCase):
         # for it and no gate above refused.
         self.assertEqual(self.step(plan, 8)["status"], "skipped")
 
-    def test_the_label_the_close_and_the_card_are_one_step(self):
-        """A label that moves without its card cannot happen inside one step."""
+    def test_the_label_and_the_close_are_one_step(self):
+        """An item that closes without its label moving cannot happen in one step."""
         plan = self.close()
 
         self.assertEqual(self.step(plan, 7)["name"], "tracker")
         self.assertEqual(
             [p["name"] for p in self.step(plan, 7)["parts"]],
-            ["label", "close", "card"],
+            ["label", "close"],
         )
         self.assertIn("move together", self.step(plan, 7)["note"])
         self.assertIn(REVIEW_LABEL, self.part(plan, "label")["command"])
@@ -399,7 +370,7 @@ class CloseItemTestCase(unittest.TestCase):
     # --- execute mode -------------------------------------------------------
 
     def test_execute_runs_every_step_in_order(self):
-        """The pull lands, then the three tracker writes, in the plan's order."""
+        """The pull lands, then the two tracker writes, in the plan's order."""
         plan = self.close("--execute")
 
         self.assertEqual(plan["mode"], "execute")
@@ -409,10 +380,13 @@ class CloseItemTestCase(unittest.TestCase):
         self.assertEqual(rev(self.checkout, "main"), self.merge_commit)
         self.assertEqual(
             [w.split()[1:3] for w in self.tracker_writes()],
-            [["issue", "edit"], ["issue", "close"], ["project", "item-edit"]],
+            [["issue", "edit"], ["issue", "close"]],
         )
         self.assertEqual(plan["ran"][0], self.step(plan, 5)["command"])
-        self.assertEqual(len(plan["ran"]), 4)
+        self.assertEqual(len(plan["ran"]), 3)
+        # No write reaches a project board.
+        for line in self.tracker_writes():
+            self.assertNotIn("project", line)
 
     def test_execute_stops_at_the_first_refusal_and_writes_nothing(self):
         """A refused gate means the tracker is never touched at all."""
@@ -465,7 +439,7 @@ class CloseItemTestCase(unittest.TestCase):
         self.assertTrue(self.marker.exists())
         self.assertEqual(plan["ran"][-1], self.teardown_command())
         # And the tracker half of the close happened before it.
-        self.assertEqual(len(self.tracker_writes()), 3)
+        self.assertEqual(len(self.tracker_writes()), 2)
         self.assertEqual(rev(self.checkout, "main"), self.merge_commit)
 
     def test_execute_without_the_teardown_flag_leaves_the_worktree_alone(self):
@@ -477,7 +451,7 @@ class CloseItemTestCase(unittest.TestCase):
         self.assertTrue(self.worktree.exists())
         self.assertFalse(plan["teardown_requested"])
         # The tracker steps did run, so this is a real close minus teardown.
-        self.assertEqual(len(self.tracker_writes()), 3)
+        self.assertEqual(len(self.tracker_writes()), 2)
 
     def test_the_teardown_flag_alone_is_not_destructive_either(self):
         """--teardown with no --execute is still a plan, so nothing runs."""
@@ -528,15 +502,10 @@ class CloseItemTestCase(unittest.TestCase):
         self.assertEqual(self.part(plan, "close")["status"], "done")
         self.assertEqual(self.step(plan, 8)["status"], "done")
         self.assertTrue(self.marker.exists())
-        # The label and the close were not written twice.
+        # Nothing was written twice. The card write was the one repeat, and it is gone.
         self.assertEqual(
             [w.split()[1:3] for w in self.tracker_writes()],
-            [
-                ["issue", "edit"],
-                ["issue", "close"],
-                ["project", "item-edit"],
-                ["project", "item-edit"],
-            ],
+            [["issue", "edit"], ["issue", "close"]],
         )
 
     def test_the_teardown_command_is_only_ever_the_passed_in_string(self):
@@ -569,7 +538,7 @@ class CloseItemTestCase(unittest.TestCase):
         self.assertIn("--teardown-command", self.step(plan, 8)["note"])
         self.assertFalse(self.marker.exists())
         self.assertIsNone(plan["refused"])
-        self.assertEqual(len(self.tracker_writes()), 3)
+        self.assertEqual(len(self.tracker_writes()), 2)
 
     # --- the other tracker --------------------------------------------------
 
@@ -580,8 +549,8 @@ class CloseItemTestCase(unittest.TestCase):
         network and no login. `merged` in lower case passes the same gate, because
         the seam compares the state in its own case.
         """
-        self.write_fixture(pr_state="merged", card="")
-        plan = self.close("--execute", *GLAB, board=False)
+        self.write_fixture(pr_state="merged")
+        plan = self.close("--execute", *GLAB)
 
         self.assertEqual([s["step"] for s in plan["steps"]], [4, 5, 6, 7, 8])
         self.assertEqual(self.step(plan, 4)["status"], "done")
@@ -599,29 +568,13 @@ class CloseItemTestCase(unittest.TestCase):
             ],
         )
 
-    def test_the_other_tracker_with_no_board_arguments_writes_no_card(self):
-        """That tracker has no board of this kind, so the five arguments stay absent."""
-        plan = self.close(*GLAB, board=False)
-
-        card = self.part(plan, "card")
-        self.assertEqual(card["status"], "skipped")
-        self.assertEqual(card["argv"], [])
-        self.assertIn("--project-number", card["note"])
-        # And nothing refused over the absence: the label and the close still run.
-        self.assertIsNone(plan["refused"])
-        self.assertEqual(plan["exit_code"], EXIT_OK)
-        self.assertEqual(self.step(plan, 7)["status"], "todo")
-        self.assertEqual(self.part(plan, "label")["status"], "todo")
-        self.assertEqual(self.part(plan, "close")["status"], "todo")
-
     def test_a_close_reason_is_its_own_write_before_the_close_on_that_tracker(self):
         """Its close command takes no reason, so the note is a part of its own."""
-        self.write_fixture(card="")
-        plan = self.close("--execute", *GLAB, "--close-comment", REASON, board=False)
+        plan = self.close("--execute", *GLAB, "--close-comment", REASON)
 
         self.assertEqual(
             [p["name"] for p in self.step(plan, 7)["parts"]],
-            ["label", "note", "close", "card"],
+            ["label", "note", "close"],
         )
         self.assertEqual(self.part(plan, "note")["status"], "done")
         # The note was written before the close, which is the whole point of the part.
@@ -636,8 +589,8 @@ class CloseItemTestCase(unittest.TestCase):
 
     def test_a_reason_already_on_the_item_is_not_posted_a_second_time(self):
         """A note is not idempotent by itself, so the part reads the comments first."""
-        self.write_fixture(card="", comments=[f"a line, and {REASON}"])
-        plan = self.close("--execute", *GLAB, "--close-comment", REASON, board=False)
+        self.write_fixture(comments=[f"a line, and {REASON}"])
+        plan = self.close("--execute", *GLAB, "--close-comment", REASON)
 
         self.assertEqual(self.part(plan, "note")["status"], "done")
         self.assertIn("already on the item", self.part(plan, "note")["note"])
@@ -651,7 +604,7 @@ class CloseItemTestCase(unittest.TestCase):
         plan = self.close("--close-comment", REASON)
 
         self.assertEqual(
-            [p["name"] for p in self.step(plan, 7)["parts"]], ["label", "close", "card"]
+            [p["name"] for p in self.step(plan, 7)["parts"]], ["label", "close"]
         )
         self.assertIn(f"--comment {REASON}", self.part(plan, "close")["command"])
 
@@ -668,37 +621,33 @@ class CloseItemTestCase(unittest.TestCase):
         )
         self.assertEqual(self.part(plan, "close")["command"], f"gh issue close {ISSUE}")
         self.assertEqual(
-            [p["name"] for p in self.step(plan, 7)["parts"]], ["label", "close", "card"]
+            [p["name"] for p in self.step(plan, 7)["parts"]], ["label", "close"]
         )
 
     # --- the two things the seam must not know ------------------------------
 
-    def test_the_board_coordinates_are_arguments_not_knowledge(self):
-        """Different coordinates give a different command, so none is built in."""
-        command = self.part(self.close(), "card")["command"]
-        for value in ("PVTI_fixture", "PVT_fixture", "PVTSSF_fixture", "98236657"):
-            self.assertIn(value, command)
+    def test_the_seam_takes_no_board_coordinate(self):
+        """The five board flags are gone, because step 7 writes no card (ADR 0054).
 
-        self.write_fixture(card="PVTI_second")
-        second = self.part(
-            self.close(
-                "--project-number",
-                "9",
-                "--project-owner",
-                "someone",
-                "--project-id",
-                "PVT_second",
-                "--status-field-id",
-                "PVTSSF_second",
-                "--done-option-id",
-                "aaaaaaaa",
-                board=False,
-            ),
-            "card",
-        )["command"]
-        self.assertNotEqual(command, second)
-        for value in ("PVTI_second", "PVT_second", "PVTSSF_second", "aaaaaaaa"):
-            self.assertIn(value, second)
+        A flag left in the parser is a flag a caller resolves for nothing. So the
+        argument surface is where this is proven, and the help text is that surface.
+        """
+        proc = subprocess.run(
+            [sys.executable, "-m", "scripts.close_item", "--help"],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            env=GIT_ENV,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        for flag in (
+            "--project-number",
+            "--project-owner",
+            "--project-id",
+            "--status-field-id",
+            "--done-option-id",
+        ):
+            self.assertNotIn(flag, proc.stdout, f"--help still names {flag}")
 
         # And no board id of this repo's own is in the module, nor the Markdown
         # file that owns them.

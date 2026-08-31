@@ -86,8 +86,7 @@ class TrackerTest(unittest.TestCase):
                     "state": "OPEN",
                     "labels": ["in-progress"],
                     "comments": ["Verdict: approve"],
-                    "board": "In review",
-                    "card": "PVTI_x",
+                    "board": "To do",
                 }
             },
             pull_requests={str(PR): {"state": "MERGED", "merge_commit": "a1b2c3d"}},
@@ -102,8 +101,7 @@ class TrackerTest(unittest.TestCase):
             one.issue(ITEM),
             {"state": "OPEN", "labels": ["in-progress"]},
         )
-        self.assertEqual(one.board_status(ITEM, 6, "someone"), "In review")
-        self.assertEqual(one.board_card(ITEM, 6, "someone"), "PVTI_x")
+        self.assertEqual(one.board_status(ITEM, 6, "someone"), "To do")
         self.assertEqual(
             one.pull_request(PR), {"state": "MERGED", "merge_commit": "a1b2c3d"}
         )
@@ -115,7 +113,6 @@ class TrackerTest(unittest.TestCase):
         self.assertEqual(one.item_facts(ITEM), ([], []))
         self.assertEqual(one.issue(ITEM), {"state": None, "labels": []})
         self.assertEqual(one.board_status(ITEM, 6, "someone"), "")
-        self.assertEqual(one.board_card(ITEM, 6, "someone"), "")
         self.assertEqual(one.pull_request(PR), {"state": None, "merge_commit": ""})
 
     def test_a_fixture_write_runs_nothing_and_is_recorded(self):
@@ -160,22 +157,6 @@ class TrackerTest(unittest.TestCase):
             ],
         )
         self.assertEqual(one.close_argv(ITEM), ["gh", "issue", "close", str(ITEM)])
-        self.assertEqual(
-            one.card_argv("PVTI_x", "PVT_y", "PVTSSF_z", "98236657"),
-            [
-                "gh",
-                "project",
-                "item-edit",
-                "--id",
-                "PVTI_x",
-                "--project-id",
-                "PVT_y",
-                "--field-id",
-                "PVTSSF_z",
-                "--single-select-option-id",
-                "98236657",
-            ],
-        )
 
     def test_a_label_swap_with_no_name_builds_no_flag(self):
         """The caller passes names, so an empty pair leaves a bare edit command."""
@@ -367,6 +348,29 @@ class TrackerTest(unittest.TestCase):
         )
 
         self.assertEqual(tracker.Tracker().board_status(ITEM, 6, "someone"), "")
+
+    def test_the_adapter_holds_a_board_read_and_no_board_write(self):
+        """The board is an input, so the two methods that only wrote a card are gone.
+
+        `board_card` answered the id a write addresses, and `card_argv` was the write.
+        Neither one has a caller now (ADR 0054).
+        """
+        one = tracker.Tracker()
+
+        self.assertTrue(hasattr(one, "board_status"))
+        for name in ("board_card", "card_argv"):
+            self.assertFalse(hasattr(one, name), f"{name} is still on the adapter")
+
+    def test_a_board_read_with_no_board_configured_answers_an_empty_name(self):
+        """A tracker file that names no board is a supported configuration.
+
+        The caller then holds no coordinates to pass, and the answer is the same empty
+        name that a card with no status gives. Neither one is an error, so no caller
+        branches on which of the two it got.
+        """
+        path = self.write_fixture(items={str(ITEM): {"state": "OPEN"}})
+
+        self.assertEqual(tracker.Tracker(fixture=path).board_status(ITEM, "", ""), "")
 
     def test_the_comment_argv_differs_by_tracker(self):
         self.assertEqual(
