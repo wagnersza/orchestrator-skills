@@ -137,8 +137,8 @@ nothing stands behind is worse than no line.
   [ADR 0055](../docs/adr/0055-the-label-denial-reads-its-caller.md)).
 - **No `Stop` hook.** Nothing writes the board on a stop, so a reconcile there would
   move a field no session touched.
-- **No merge guard.** The maintainer merges
-  ([ADR 0016](../docs/adr/0016-the-orchestrator-merges-when-asked.md)).
+- **No merge guard.** The maintainer merges, on the tracker
+  ([ADR 0057](../docs/adr/0057-the-merge-is-the-second-act.md)).
 - **No label vocabulary changes.** The four work-state strings are the ones
   `docs/agents/issue-tracker.md` holds today.
 
