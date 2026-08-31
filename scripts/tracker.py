@@ -43,6 +43,7 @@ import json
 import subprocess
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 # The two tracker CLIs a caller can name. Each method below that both of them answer
 # holds one branch per CLI. Nothing outside this module tells one tracker from the
@@ -344,6 +345,10 @@ class Tracker:
         filters on the head branch with a flag of its own. The other takes the branch as
         a query parameter on its API. So the read never touches `glab mr list`, and it
         never meets the flag trap `references/tracker-reads.md` records.
+
+        **The branch is escaped in that query.** A `+` in a branch name reads as a space on
+        the server, and an `&` splits the query. Either one answers an empty list, which a
+        caller reads as a branch with no pull request.
         """
         if self.cli == GLAB:
             if not self.repo:
@@ -355,7 +360,7 @@ class Tracker:
                 GLAB,
                 "api",
                 f"projects/{self.repo.replace('/', '%2F')}/merge_requests"
-                f"?source_branch={branch}&state=all",
+                f"?source_branch={quote(branch, safe='')}&state=all",
             ]
             if self.host:
                 argv += ["--hostname", self.host]

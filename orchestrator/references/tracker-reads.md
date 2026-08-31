@@ -188,6 +188,10 @@ glab api --hostname <host> \
   "projects/<owner>%2F<name>/merge_requests?source_branch=<branch>&state=all"
 ```
 
+**Escape `<branch>` in that query.** A `/` becomes `%2F`, a `+` becomes `%2B`, and an `&`
+becomes `%26`. All three are legal in a branch name. A raw `+` reads as a space on the
+server, and a raw `&` splits the query, so either one answers an empty list.
+
 Read every state, because the caller asks whether one of them is merged. The `glab` form
 goes through the API and never through `glab mr list`. The flag trap in this file is why.
 The API answers `iid`, which is the merge request's own number.

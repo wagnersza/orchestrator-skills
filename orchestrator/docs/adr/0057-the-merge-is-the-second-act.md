@@ -31,7 +31,8 @@ printed line, so the exit code and the reason stay together.
 merging were prose an orchestrator session ran. The maintainer merges on the tracker now, so
 the session runs none of the three. A conflict is visible in the pull request, where the
 tracker already shows it. **`resolving-merge-conflicts` stays available as a verb the
-maintainer asks for**, and the **Skill routing** row for it is unchanged.
+maintainer asks for**, and it stays a declared dependency with the same check. What changes
+is only when it is entered: on the maintainer's ask, and no longer inside a flow.
 
 **`scripts/close_item.py` keeps its five steps and their order.** Its dirty-tree refusal
 survives unchanged: a dirty tree refuses, and it never warns. That refusal is what protects

@@ -246,17 +246,19 @@ class WorkerStateTestCase(unittest.TestCase):
         # asserts on two ticks of one fixture writes the fixture once.
         (self.root / "gh.json.writes").unlink(missing_ok=True)
 
-    def pull_request(self, state="MERGED", head=None):
+    def pull_request(self, state="MERGED", head=None, merge_commit=None):
         """One pull request record for this worktree's branch, in the one format.
 
-        `merge_commit` names the commit `main` already holds. So step 5 of the close reads
-        the merge as landed and pulls nothing, which a fixture worktree with no remote
-        needs.
+        `merge_commit` defaults to the commit `main` already holds, so step 5 of the close
+        reads the merge as landed and pulls nothing. A case that wants that pull to really
+        run passes a commit the checkout does not hold.
         """
         return {
             str(PR): {
                 "state": state,
-                "merge_commit": self.rev("main"),
+                "merge_commit": self.rev("main")
+                if merge_commit is None
+                else merge_commit,
                 "head": BRANCH if head is None else head,
             }
         }
@@ -265,13 +267,65 @@ class WorkerStateTestCase(unittest.TestCase):
         """The file the teardown command touches, so a case reads whether step 8 ran."""
         return self.root / "teardown-ran"
 
-    def close_flags(self, checkout="", branch="main"):
+    def origin(self):
+        """A bare remote behind this worktree, created once."""
+        path = self.root / "origin.git"
+        if not path.exists():
+            subprocess.run(
+                ["git", "init", "-q", "--bare", str(path)], check=True, env=GIT_ENV
+            )
+            git(self.worktree, "remote", "add", "origin", str(path))
+            git(self.worktree, "push", "-q", "origin", "main")
+        return path
+
+    def checkout(self):
+        """The checkout the close pulls the merge into, created once.
+
+        **It is never the item's worktree.** A worker's worktree is a linked one, and
+        `git fetch origin main:main` there exits 128 with `refusing to fetch into branch`,
+        because the sibling checkout holds that branch. So a close case needs the real
+        shape: a checkout on the default branch, with an origin behind it.
+        """
+        path = self.root / "checkout"
+        if not path.exists():
+            subprocess.run(
+                ["git", "clone", "-q", str(self.origin()), str(path)],
+                check=True,
+                env=GIT_ENV,
+            )
+        return path
+
+    def merge_onto_origin(self):
+        """One commit on the remote's default branch, and the sha of it.
+
+        A checkout cloned before this call does not hold it, so step 5 of the close has a
+        real pull to make.
+        """
+        ahead = self.root / "ahead"
+        subprocess.run(
+            ["git", "clone", "-q", str(self.origin()), str(ahead)],
+            check=True,
+            env=GIT_ENV,
+        )
+        write(ahead / "merged.txt", "the merge landed\n")
+        git(ahead, "add", "-A")
+        git(ahead, "commit", "-qm", "the merge landed")
+        git(ahead, "push", "-q", "origin", "main")
+        return subprocess.run(
+            ["git", "-C", str(ahead), "rev-parse", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+            env=GIT_ENV,
+        ).stdout.strip()
+
+    def close_flags(self):
         """The three close flags a tick carries: `(checkout, default branch, teardown)`.
 
         The teardown command is a real shell command. So a case proves step 8 ran by
         reading the file that command leaves, and no case removes a real worktree.
         """
-        return (checkout, branch, f"touch {self.teardown_marker()}")
+        return (str(self.checkout()), "main", f"touch {self.teardown_marker()}")
 
     def gate_run(self, command, code=0, sha=None):
         """One line of the Gate record, as a gate command appends it.
@@ -1130,18 +1184,43 @@ class WorkerStateTestCase(unittest.TestCase):
         self.assertFalse(any("issue close" in one for one in self.writes()))
         self.assertFalse(self.teardown_marker().exists())
 
-    def test_a_tick_with_no_teardown_command_closes_nothing(self):
-        """A close with no teardown leaves a schedule that ticks against a closed item.
+    def test_step_5_really_pulls_the_merge_into_the_checkout(self):
+        """The merge is ahead of the checkout, so the pull is a command and not a no-op.
 
-        So the tick refuses instead, and the line names the flag the precheck is missing.
+        Every other close case names a merge the checkout already holds, which reads step 5
+        as `done`. This one proves the step runs, and it proves the checkout is a real
+        checkout on the default branch rather than the item's linked worktree.
+        """
+        write(self.checklist, TICKED)
+        # The clone comes first, so the checkout is behind when the merge lands.
+        checkout = self.checkout()
+        merged = self.merge_onto_origin()
+        self.assertFalse((checkout / "merged.txt").exists())
+        self.write_fixture(
+            labels=HUMAN_REVIEW, pull_requests=self.pull_request(merge_commit=merged)
+        )
+
+        line = self.apply(close_flags=self.close_flags())
+
+        self.assertIn("5 pull done", line)
+        self.assertTrue((checkout / "merged.txt").is_file())
+        self.assertTrue(self.teardown_marker().is_file())
+
+    def test_a_tick_with_neither_close_flag_closes_nothing(self):
+        """Each flag is a condition for the close, so a missing one refuses and names it.
+
+        A teardown that removes no schedule leaves one ticking against a closed item. And
+        step 5 cannot run in the item's worktree, so the checkout is not optional either.
         """
         write(self.checklist, TICKED)
         self.write_fixture(labels=HUMAN_REVIEW, pull_requests=self.pull_request())
 
         line = self.apply(expect=EXIT_REFUSED)
 
+        self.assertIn("--checkout", line)
         self.assertIn("--teardown-command", line)
         self.assertEqual(self.writes(), [])
+        self.assertFalse(self.teardown_marker().exists())
 
     def test_the_three_close_flags_reach_the_close_through_the_command_line(self):
         """The precheck is a string a tool stores, so the flags must wire through `main`.
@@ -1154,7 +1233,7 @@ class WorkerStateTestCase(unittest.TestCase):
 
         line = self.tick_cli(
             "--checkout",
-            str(self.worktree),
+            str(self.checkout()),
             "--default-branch",
             "main",
             "--teardown-command",

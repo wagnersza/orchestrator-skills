@@ -395,13 +395,24 @@ class TrackerTest(unittest.TestCase):
         self.assertEqual(
             one.pull_request_for_branch(BRANCH), {"number": 7, "state": "merged"}
         )
+        # The branch is escaped in the query, so a `/` reads as one path segment and a
+        # `+` cannot arrive as a space.
         self.assertEqual(
             log.read_text().splitlines(),
             [
-                f"api projects/team%2Fthing/merge_requests?source_branch={BRANCH}"
+                "api projects/team%2Fthing/merge_requests"
+                "?source_branch=someone%2F54-a-branch"
                 f"&state=all --hostname {HOST}"
             ],
         )
+
+    def test_a_branch_name_that_would_break_the_query_is_escaped(self):
+        """A `+` reads as a space on the server, and an `&` splits the query."""
+        argv = tracker.Tracker(cli=tracker.GLAB, repo=REPO).pr_for_branch_argv(
+            "feat/a+b&c"
+        )
+
+        self.assertIn("?source_branch=feat%2Fa%2Bb%26c&state=all", argv[2])
 
     def test_a_glab_branch_read_without_a_repository_says_why_it_cannot_run(self):
         """The project path is part of the command, so the name is not optional."""

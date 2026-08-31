@@ -694,9 +694,14 @@ python3 <plugin root>/scripts/worker_state.py tick --item <N> \
 
 **The last three flags are the close, and they are not optional.** A merged pull request
 fires a whole **Close transaction** on the tick that reads it
-([Close a task](#close-a-task)). A precheck that carries no `--teardown-command` closes
-nothing and says so, so the item then sits at the review state with its pull request
-already merged.
+([Close a task](#close-a-task)). A precheck missing `--checkout` or `--teardown-command`
+closes nothing and names the flag, so the item then sits at the review state with its pull
+request already merged.
+
+**`--checkout` is the main checkout, and never the item's worktree.** That worktree is a
+linked one, so `git fetch origin <branch>:<branch>` inside it exits 128 with `refusing to
+fetch into branch`: the main checkout already holds that branch. Step 5 of the transaction
+is that fetch, so the flag decides whether a close can run at all.
 
 **`<plugin root>` is a literal path in this string, and never a shell variable.** The
 **Tool** stores the precheck and runs it a minute later, in a shell that saw no
@@ -1168,15 +1173,24 @@ Rationale:
 [`docs/adr/0015-close-is-a-deterministic-transaction.md`](docs/adr/0015-close-is-a-deterministic-transaction.md).
 
 **A refused close writes `needs-human` and stops.** The comment on the item carries the
-plan's own reason, so a dirty worktree names its files. Read that comment. Repair the one
-thing it names. Then remove the label, and the next tick runs the close again. **A refused
-item keeps its observer**, because teardown is step 8 and a refusal never reaches it. That is
-deliberate: an item that did not close is exactly the one that must keep watching.
+plan's own reason, so a dirty worktree names its files. Read that comment, then repair the
+one thing it names. **A refused item keeps its observer**, because teardown is step 8 and a
+refusal never reaches it. That is deliberate: an item that did not close is exactly the one
+that must keep watching.
+
+**The recovery goes back through the implementation position, and it takes two ticks.** The
+refusal took `to-review` off the item, so clearing `needs-human` leaves it with no
+work-state label. The next tick then reads implementation, re-proves the finish, and writes
+`to-review` again. The tick after that reads the merge and closes. **Where the repair was a
+commit, the Gate record must go green at the new `HEAD` first**, or the tick fires
+`gates-unproven` instead
+([On the tick](#on-the-tick--what-it-wrote-and-what-is-left-for-you)). A repair that commits
+nothing needs no gate run.
 
 **A close needs three flags on the precheck**, and a spawn is where they are resolved
-([Start the tick](#start-the-tick--one-item-automation-per-worker)). A precheck with no
-`--teardown-command` closes nothing and says so. So an item that sits at the review state
-with a merged pull request is a precheck to repair.
+([Start the tick](#start-the-tick--one-item-automation-per-worker)). A precheck missing
+`--checkout` or `--teardown-command` closes nothing and names the flag. So an item that sits
+at the review state with a merged pull request is a precheck to repair.
 
 ### Parent-close is what is left for you
 

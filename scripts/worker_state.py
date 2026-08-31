@@ -861,8 +861,8 @@ def plan(
     **Position** gates that outcome, because a read that failed cannot say where the item
     sits. `needs-human` follows, and it stops the tick whatever the other facts say. The
     computed position comes after that, because it decides which of the other outcomes
-    this tick can reach. An item in human review reaches none of them, so that branch is a
-    quiet tick.
+    this tick can reach. An item in human review reaches one of them, and that one is the
+    merged pull request `in_human_review` reads.
     """
     worktree = Path(os.path.realpath(worktree))
     if not worktree.is_dir():
@@ -991,20 +991,34 @@ def close_transaction(item, worktree, tracker, answer, close_flags):
     reason, so a dirty tree names its files and the maintainer repairs the one thing that
     stopped the close.
 
-    `close_flags` is `(checkout, default branch, teardown command)`. With no teardown
-    command this tick closes nothing and says so, because a close with no teardown leaves a
-    schedule that ticks against a closed item.
+    `close_flags` is `(checkout, default branch, teardown command)`. **The checkout and the
+    teardown command are both conditions for a close, and neither one has a default.** With
+    one of them missing this tick closes nothing and names the flag it wants.
+
+    A teardown that removes no schedule leaves a schedule that ticks against a closed item.
+    And **step 5 cannot run inside the item's worktree**: that worktree is a linked one, and
+    `git fetch origin <branch>:<branch>` there exits 128 with `refusing to fetch into
+    branch`, because the sibling checkout holds that branch. So the checkout is where the
+    merge lands, and it is never this worktree.
     """
     checkout, default_branch, teardown_command = close_flags
-    if not teardown_command:
+    missing = [
+        flag
+        for flag, value in (
+            ("--checkout", checkout),
+            ("--teardown-command", teardown_command),
+        )
+        if not value
+    ]
+    if missing:
         return EXIT_REFUSED, (
-            f"{answer['line']} — refused: this tick carries no --teardown-command, so it "
+            f"{answer['line']} — refused: this tick carries no {', '.join(missing)}, so it "
             f"closes nothing and work item #{item} stays where it is"
         )
     args = argparse.Namespace(
         issue=item,
         pr=answer["pr"],
-        repo=checkout or str(worktree),
+        repo=checkout,
         default_branch=default_branch,
         worktree=str(worktree),
         remove_label=[name for name in WORK_STATES if name in answer["labels"]],
@@ -1018,7 +1032,15 @@ def close_transaction(item, worktree, tracker, answer, close_flags):
     )
     try:
         closing = close_item.build(args, tracker)
-    except (close_item.GitError, TrackerError) as exc:
+    # The same four causes the tick's own reads catch. `close_item.build` makes three more
+    # tracker reads, and a command that exits 0 with no JSON raises out of the parser. A
+    # traceback here would exit 1, which is the code a quiet tick already owns.
+    except (
+        close_item.GitError,
+        TrackerError,
+        OSError,
+        json.JSONDecodeError,
+    ) as exc:
         cause = " ".join(str(exc).split())
         return needs_human(
             tracker,
@@ -1354,8 +1376,9 @@ def main(argv=None):
         default="",
         help="the checkout that receives the merge, where a merged pull request runs a "
         "close. --repo names the tracker project, so the checkout takes an argument of its "
-        "own. With no value the close reads the worktree, which shares one git directory "
-        "with that checkout",
+        "own. It is never the item's worktree: that worktree is a linked one, and git "
+        "refuses to fetch into a branch a sibling checkout holds. With no value a merged "
+        "pull request closes nothing, and the tick says so",
     )
     applier.add_argument(
         "--default-branch",
