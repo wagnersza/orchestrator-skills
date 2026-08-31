@@ -122,8 +122,8 @@ of its own.
 
 ## The labels and the comments on one work item
 
-The two facts about one item. A flow reads the labels for the work state and the
-**Phase**, and the comments for a count. Where the flows need it: **Resolve the item
+The two facts about one item. A flow reads the labels for the work state, and the
+comments for a count and for a **Position**. Where the flows need it: **Resolve the item
 shape before you pick a flow**, **On the wake**, and **Reporting to the user**.
 
 ```bash

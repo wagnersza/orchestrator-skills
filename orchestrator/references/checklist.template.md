@@ -17,8 +17,8 @@ This file carries no Markdown link. The orchestrator copies it into a worker's o
 worktree, where a relative path out of this directory resolves to nothing.
 
 The last box ends at the review note. The worker writes no work-state label, and it
-moves no board card. The orchestrator session writes both, in one call with the removal
-of the phase label. See ../docs/adr/0025-the-session-writes-the-review-state.md.
+moves no board card. The orchestrator session writes both.
+See ../docs/adr/0025-the-session-writes-the-review-state.md.
 -->
 
 # Checklist — <item>
@@ -57,8 +57,8 @@ of the phase label. See ../docs/adr/0025-the-session-writes-the-review-state.md.
 - [ ] post the review note on the **work item** (What to review / Main changes / How to
       test / Evidence) — cover the substance, no filler sections or redundant summaries.
       **This is the last box. Stop here.** Write no work-state label. Move no board card.
-      The orchestrator session writes the review state, in one call with the removal of
-      the phase label. That pair names one moment.
+      The orchestrator session writes the review state, because one session owns that
+      swap.
 
 Do not end the turn while any box is unchecked. If you catch yourself about to
 stop at "next step is …", that's the stall — keep going and actually do it.

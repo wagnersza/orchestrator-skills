@@ -16,7 +16,7 @@ Every tool reference (`orca.md`, `cmux.md`, `herdr.md`) maps these abstract oper
 | 10| **teardown**         | worktree → removed | Kill terminals + remove git worktree + delete branch, in one step if the tool supports it. |
 | 11| **automation-create** (opt) | item number, precheck command, worktree → automation id | One schedule per live work item, so the tick outlives the session that created it. |
 | 12| **automation-remove** (opt) | automation id → removed | Step 8 of a close transaction removes the schedule with the worktree. |
-| 13| **automation-repoint** (opt) | automation id, precheck command, worktree → repointed | A phase transition moves the work to another worker, so the precheck follows the live one. One schedule per item stands. |
+| 13| **automation-repoint** (opt) | automation id, precheck command, worktree → repointed | A transition moves the work to another worker, so the precheck follows the live one. One schedule per item stands. |
 
 Notes:
 - If a tool lacks a native op (e.g. no `tab-open`), the tool file says so and the skill skips that optional step.

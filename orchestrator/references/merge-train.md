@@ -6,14 +6,16 @@ ordered run over that set. Both terms are defined in [`../CONTEXT.md`](../CONTEX
 A train runs in the **Orchestrator** session. It resolves an order, then runs one full
 **Close transaction** per item in that order, teardown included. Rationale, the rejected
 alternatives and the accepted risk:
-[ADR 0037](../docs/adr/0037-the-merge-queue-is-an-ordered-train.md). Why a dragged card is
-the ask: [ADR 0038](../docs/adr/0038-the-to-merge-column-is-intent.md).
+[ADR 0037](../docs/adr/0037-the-merge-queue-is-an-ordered-train.md). Why no label records
+the ask:
+[ADR 0053](../docs/adr/0053-one-work-state-label-and-a-computed-position.md).
 
 ## The queue
 
-An item is in the queue when it carries the `to-merge` label, or when its card sits in the
-board's `To merge` column. The set is read fresh when a train starts, which is the rule the
-**Ready queue** already takes. A repo with no board has the label as its only entry.
+An item is in the queue when the maintainer's ask names it. The ask is typed, and the set is
+read fresh when a train starts, which is the rule the **Ready queue** already takes. Nothing
+on the tracker records the ask, so a train that runs twice on one ask needs the maintainer to
+type it twice.
 
 ## The ordering
 
