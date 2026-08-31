@@ -101,7 +101,7 @@ read the section itself.
 How many comments hold a fixed string. Two counts take this shape: the **Review
 round** number is the count of `Verdict:` comments, and the stall count is the count of
 `Stall:` comments for the worker's current `(Model, Effort)` pair. Where the flows need
-it: **On the wake** (`stalled`), **Adversarial review**, and **Reporting to the user**.
+it: **On the tick** (`stalled`), **Adversarial review**, and **Reporting to the user**.
 
 Both literals are quoted here, so a writing pass leaves them byte-identical
 ([ADR 0023](../docs/adr/0023-the-stall-count-is-a-tracker-comment.md)).
@@ -124,7 +124,7 @@ of its own.
 
 The two facts about one item. A flow reads the labels for the work state, and the
 comments for a count and for a **Position**. Where the flows need it: **Resolve the item
-shape before you pick a flow**, **On the wake**, and **Reporting to the user**.
+shape before you pick a flow**, **On the tick**, and **Reporting to the user**.
 
 ```bash
 gh issue view <N> --repo <owner>/<name> --json labels,comments \

@@ -17,8 +17,8 @@ This file carries no Markdown link. The orchestrator copies it into a worker's o
 worktree, where a relative path out of this directory resolves to nothing.
 
 The last box ends at the review note. The worker writes no work-state label, and it
-moves no board card. The orchestrator session writes the label, and nothing writes a card.
-See ../docs/adr/0025-the-session-writes-the-review-state.md
+moves no board card. The tick of an Item automation writes the label, and nothing writes a
+card. See ../docs/adr/0056-the-tick-applies-the-transition-it-computed.md
 and ../docs/adr/0054-the-board-is-an-input-not-a-mirror.md.
 -->
 
@@ -58,8 +58,8 @@ and ../docs/adr/0054-the-board-is-an-input-not-a-mirror.md.
 - [ ] post the review note on the **work item** (What to review / Main changes / How to
       test / Evidence) — cover the substance, no filler sections or redundant summaries.
       **This is the last box. Stop here.** Write no work-state label. Move no board card.
-      The orchestrator session writes the review state, because one session owns that
-      swap.
+      The tick writes the review state itself, from this ticked checklist and the green
+      gate record beside it.
 
 Do not end the turn while any box is unchecked. If you catch yourself about to
 stop at "next step is …", that's the stall — keep going and actually do it.

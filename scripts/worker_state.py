@@ -3,9 +3,8 @@
 
 Each one is the same question at a different moment. *Is a real agent at work in
 this worktree, and does that work need a decision now?* Readiness asks it before
-the first prompt. The tick predicate asks it once per **Item automation** tick.
-The wake asks it and delivers the answer. One seam answers all three, for every
-tool and every harness (ADR 0019).
+the first prompt. `phase` asks it and prints the answer. `tick` asks it and applies
+the answer. One seam answers all three, for every tool and every harness (ADR 0019).
 
 **`ready`** — is a live agent process running with its working directory inside
 this worktree? Exit 0 ready, non-zero not:
@@ -14,13 +13,13 @@ this worktree? Exit 0 ready, non-zero not:
         --process '<the pattern the harness reference gives>'
 
 **`phase`** — read three facts on disk and two on the tracker, and answer one
-question: *is a transition due for this work item?* This is the predicate
-an **Item automation** runs as its `--precheck`, so it blocks on nothing:
+question: *is a transition due for this work item?* This is the plan half of the
+seam, and it writes nothing at all:
 
     python3 <plugin root>/scripts/worker_state.py phase --item 62 \\
         --worktree /path/to/worktree \\
         --process '<the pattern the harness reference gives>' \\
-        --rounds 3 --stall-after 30m --back-off 15m --repo OWNER/NAME \\
+        --rounds 3 --stall-after 30m --repo OWNER/NAME \\
         --require-gate '<one command per required layer, from the Config>'
 
 | Code | Meaning |
@@ -56,14 +55,13 @@ A position of human review means the maintainer is reading the pull request. No
 transition is due there, so every read of that branch is a quiet tick.
 
 **`needs-human` answers before every fact except the tracker read.** The tick reads that
-label and exits quiet, whatever the checklist, the verdicts and the process say. It writes
-no back-off marker there, because a quiet tick is not a fire. Only the maintainer removes
-that label, so a paused item costs one cheap read a minute.
+label and exits quiet, whatever the checklist, the verdicts and the process say. Only the
+maintainer removes that label, so a paused item costs one cheap read a minute.
 
 `unreadable` is the one outcome no **Position** gates, because a read that
 failed cannot say where the item sits. It is an outcome and not a silence:
-a broken read for 21 ticks must not look like 21 quiet minutes. It goes through
-the same back-off as every other outcome, so it reports once per window.
+a broken read for 21 ticks must not look like 21 quiet minutes. This seam writes no
+label for it, because a fact it never read cannot decide one.
 
 `dead` and `stalled` can never both fire, because `dead` is the absence of the live
 process `stalled` needs. `dead` needs no stall window, so it reports in about a
@@ -79,20 +77,6 @@ different repairs.
 **The record is a record, and not a second enforcement mechanism.** No hook blocks a
 push and no script rejects a commit. The item stops before review instead, and the
 session re-prompts the worker (ADR 0036).
-
-`--back-off` suppresses a repeat fire of the same outcome for the same work item.
-A marker file in the directory `--marker-dir` names holds that window. One marker
-per `(item, outcome)` pair, so a `dead` tick is never suppressed by a
-`request-changes` fire a moment earlier. The default directory is
-`.orchestrator/` in the watched worktree, so a caller that passes nothing behaves
-as it did before the argument existed. With no `--back-off` this subcommand writes
-nothing at all.
-
-**The directory is an argument because the watched worktree moves.** A schedule can
-follow a work item from the implementation worktree to the reviewer's own worktree.
-The markers move with it, and an answered wake then fires again from a fresh
-directory. So the caller passes one directory that outlives every such move, and
-the markers still die with the work item.
 
 The two signals are work product, so neither can report success for a dead worker
 (ADR 0018). The item's **Position** names which one a tick reads, so no flag carries
@@ -132,50 +116,79 @@ One object replaces the four, and every argument past the fifth is named at each
 test builds one adapter over a fixture file and asks `phase` directly. This suite does
 that for every outcome, so the command line is no longer the only way in.
 
-**`wake`** — the whole body of a tick. It asks the same `phase` predicate, and on a
-due transition it delivers that printed line itself:
+**`tick`** — the same question through the same code path, and then the write. This is
+the execute half, and it is the whole body of an **Item automation** tick:
 
-    python3 <plugin root>/scripts/worker_state.py wake --item 62 \\
-        <every phase flag above> \\
-        --handle '<the orchestrator terminal, from operation 9>' \\
-        --title orchestrator \\
-        --send-command '<operation 4, with {target} and {text} in it>'
+    python3 <plugin root>/scripts/worker_state.py tick --item 62 \\
+        <every phase flag above>
 
 | Code | Meaning |
 |---|---|
-| 4 | delivered — the printed line names the target that took it |
-| 5 | no target took the wake, and the seam prints every failure |
-| 1 or 3 | what the predicate answered, so there was nothing to deliver |
+| 1 | a quiet tick, so the run records as skipped |
+| 2 | refused — an outcome is due, and this seam writes no label for it |
+| 3 | the worktree is gone — nothing left to watch |
+| 4 | applied — the printed line names the transition and the labels it wrote |
 
 **No path exits 0.** An **Item automation** starts its agent on exit 0 alone, so
 every tick records as skipped and the schedule's own prompt and provider never
-load. No agent runs on a tick. The only tokens the loop spends are the ones the
-**Orchestrator** session spends when it answers a wake (ADR 0027).
+load. No agent runs on a tick.
 
-There are three targets, in this order. The first one that succeeds ends the
-delivery:
+**The tick applies the transition it computed.** It stops printing an outcome for a
+session to act on, and it stops delivering that line to a terminal. A status the session
+never writes is a status it cannot forget to write. Three outcomes carry a transition, and
+every other row of the table above writes nothing:
 
-1. **the terminal handle** (`--handle`), which the caller resolves at spawn.
-2. **the terminal title** (`--title`), for a caller that resolved no handle.
-3. **a comment on the work item**, through `--tracker-cli`. So a transition is
-   recorded late rather than lost (ADR 0022, ADR 0024).
+| Outcome | What the tick writes |
+|---|---|
+| `implementation-complete` | the review state, in one label swap. It holds where `--review` says the policy is on |
+| `verdict-approve` | the review state, in one label swap |
+| `rounds-exhausted` | the review state, in one label swap |
+| every other outcome | nothing, so the item stays where it is, and the code is 2 |
 
-`--send-command` is the template the first two targets use. The caller resolves it
-from the tool file's operation 4, so this seam names no tool. `{target}` is where
-the terminal goes and `{text}` is where the line goes. This seam splits the
-template into arguments before it writes either one in. So no shell reads the line,
-and a wake that carries a quote or a space stays one argument.
+**The finish is the one row that can hold its write.** A **Review round** comes next where
+`--review` says the policy is on. A worker still owns the item there, so the review state
+would read as a lie. The hold prints why, and the item stays where it is. The round's own
+verdict writes the review state when the loop concludes.
 
-**Delivery is not action.** The line this seam sends is the line it printed, and
-nothing in it was decided here. Every prohibition below holds for `wake` exactly as
-it holds for `phase`.
+**One function owns every work-state label swap in this seam**, and it runs in the
+process that already read the labels. So no second read can disagree with the first, and
+a grep for a label write finds no second path. **The removals and the addition are one
+tracker write**, so they can never land apart and an item is never left wearing two work
+states. **The removals are computed from the labels the tick read**, and never from a
+hardcoded predecessor. That is what makes the one-label answer hold from every legal
+starting position.
 
-**What this seam refuses to do.** It composes no prompt, kills no process, writes
-no label, moves no card and spawns nothing. Every destructive act stays in a
-session a human can interrupt. It holds no state that changes an answer, which is
-what makes a restart after each re-prompt free. The `--back-off` marker is the one
-file it writes. It is a suppression window and not an answer. It changes whether an
-outcome is reported again, and never which outcome holds.
+**A tick applies at most one transition per run.** One tick reads one item, computes one
+outcome and makes at most one label swap. That is half of what bounds a seam that now
+writes the tracker every minute with nobody watching. The other half is `needs-human`,
+which stops every tick on that item.
+
+**`phase` and `tick` compute through one code path.** `phase` is the plan and `tick` is
+the execute, the same split `scripts/close_item.py` holds. So a test reads a decision with
+no mutation, and a maintainer dry-runs one item against a live tracker before trusting the
+write.
+
+**`tick --claim` is the one named transition this seam reaches from the CLI.** It swaps
+the ready state for the in-progress state on one work item, and computes nothing. An
+**Orchestrator** session claims an item this way, so a claim runs the same writer a tick
+runs and no session assembles a label command of its own:
+
+    python3 <plugin root>/scripts/worker_state.py tick --claim --item 62 \\
+        --repo OWNER/NAME
+
+A claim reads `needs-human` first, the same as every other path here, and it refuses
+where the item wears it. It reads no worktree and no process, so it needs none of the
+worker flags. Every other form of `tick` still requires all four.
+
+**`needs-human` is a transition with a comment.** The writer puts the label on the item
+and posts one comment saying what the seam saw. A label with no reason leaves the
+maintainer to reconstruct one. Only the maintainer removes the label.
+
+**What this seam refuses to do.** It composes no prompt, kills no process, moves no card,
+merges nothing and spawns nothing. It writes one work-state label per run and nothing
+else. Every other destructive act stays in a session a human can interrupt. It holds no
+state that changes an answer, and it writes no file anywhere, so a restart after each
+re-prompt is free.
 
 **The process pattern is an argument.** The caller reads it from
 `references/harnesses/<harness>.md`, so this seam names no harness and a sixth
@@ -187,7 +200,6 @@ import argparse
 import json
 import os
 import re
-import shlex
 import subprocess
 import sys
 import time
@@ -229,18 +241,14 @@ EXIT_NOT_READY = 1
 EXIT_DUE = 0
 EXIT_NOTHING = 1
 
-# `wake` is that same predicate plus the delivery of the line it printed, so no path
-# through it can exit 0. Exit 0 is what loads an **Item automation**'s provider, and
-# an agent on a tick is the cost this subcommand removes (ADR 0027). A delivered wake
-# and an undelivered one both exit non-zero, and they carry different codes because
-# that difference is the first fact a maintainer needs from a run history.
-EXIT_DELIVERED = 4
-EXIT_UNDELIVERED = 5
-
-# The two placeholders `--send-command` carries. The caller resolves that template
-# from the tool file's operation 4, so this seam names no tool.
-TARGET_TOKEN = "{target}"
-TEXT_TOKEN = "{text}"
+# `tick` is that same predicate plus the write it computed, so no path through it can
+# exit 0. Exit 0 is what loads an **Item automation**'s provider, and an agent on a tick
+# is the cost this subcommand removes. A tick that applied a transition and a tick that
+# refused one carry different codes. That difference is the first fact a maintainer needs
+# from a run history. A quiet tick and a gone worktree keep the codes
+# `phase` gives them, so one code has one meaning in both subcommands.
+EXIT_REFUSED = 2
+EXIT_APPLIED = 4
 
 # The literal the review prompt writes and this seam reads. It is quoted in both
 # places, so a writing pass leaves it byte-identical (ADR 0018).
@@ -261,9 +269,9 @@ SHA_PREFIX = 7
 
 UNITS = {"s": 1, "m": 60, "h": 3600}
 
-# The directory a worker's own files live in, inside its worktree: the
-# **Checklist** a tick reads, and the back-off markers a fire writes. It is also
-# the default for `--marker-dir`.
+# The directory a worker's own files live in, inside its worktree: the **Checklist** a
+# tick reads and the **Gate record** it reads beside it. This seam writes neither one, and
+# it writes no other file anywhere.
 ORCHESTRATOR_DIR = ".orchestrator"
 
 
@@ -574,14 +582,23 @@ def newest_work_product(worktree, item):
 
 # --- the computed Position --------------------------------------------------
 
-# The **Work-state label** that means a human is reading the pull request, and the one
-# label a **Position** reads. Its string and its swap rule are owned by
-# `docs/agents/issue-tracker.md`, the same as every other label this seam reads.
+# The **Work-state label** family: one family, four values, and it never stacks. The
+# strings and the swap rule are owned by `docs/agents/issue-tracker.md`, the same as every
+# other label this seam reads. The whole family is named here because a transition removes
+# every value it finds on the item, rather than one hardcoded predecessor.
+READY_FOR_AGENT = "ready-for-agent"
+IN_PROGRESS = "in-progress"
+
+# The value that means a human is reading the pull request, and the one label a
+# **Position** reads.
 TO_REVIEW = "to-review"
 
-# The label that stops every tick. Nothing here writes it, and only the maintainer
-# removes it. So a paused item costs one cheap read a minute and wakes nobody.
+# The value that stops every tick. Only the maintainer removes it, so a paused item costs
+# one cheap read a minute and moves nowhere.
 NEEDS_HUMAN = "needs-human"
+
+WORK_STATES = (READY_FOR_AGENT, IN_PROGRESS, TO_REVIEW, NEEDS_HUMAN)
+
 
 # The three values of a **Position**. The concept has one home, the Position entry of
 # `orchestrator/CONTEXT.md`, and this seam restates no part of the rule.
@@ -623,41 +640,6 @@ def position_of(labels, bodies, written, verdict_written=None):
     if verdict_written is None or written is None or verdict_written > written:
         return REVIEW_ROUND
     return IMPLEMENTATION
-
-
-def marker_path(marker_dir, item, outcome):
-    """Where the back-off marker for one `(item, outcome)` pair lives.
-
-    The directory is an argument (`--marker-dir`), and its default is
-    `.orchestrator/` in the watched worktree. So the marker still dies with the
-    directory that holds it, and no tool-specific run history enters the answer. One
-    file per pair, so a `dead` tick is never suppressed by a `request-changes` fire a
-    moment earlier.
-    """
-    return Path(marker_dir) / f"phase-{item}-{outcome}.fired"
-
-
-def held_back(marker_dir, item, outcome, back_off):
-    """The `suppressed` line where this pair already fired inside the window, or None.
-
-    A fire that is not suppressed refreshes the marker, so the window always runs
-    from the last fire. With no `--back-off` nothing is read and nothing is written.
-    """
-    if not back_off:
-        return None
-    path = marker_path(marker_dir, item, outcome)
-    try:
-        age = time.time() - path.stat().st_mtime
-    except OSError:
-        age = None
-    if age is not None and age < back_off:
-        return (
-            f"suppressed: {outcome} already fired for work item #{item} "
-            f"{human(age)} ago, and the back-off window is {human(back_off)}"
-        )
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("")
-    return None
 
 
 def transition(
@@ -739,46 +721,77 @@ def transition(
     )
 
 
-def phase(
-    item,
-    worktree,
-    pattern,
-    rounds,
-    stall_after,
-    tracker,
-    back_off=None,
-    marker_dir=None,
-    required=(),
+# The outcome that reads a **Completion signal** of a ticked **Checklist**. It is the one
+# outcome whose transition can hold, so it is named rather than repeated.
+FINISH = "implementation-complete"
+
+# The transition each outcome carries: the **Work-state label** the item ends on. An
+# outcome that is absent from this map writes nothing, and the item stays where it is.
+# Three outcomes hand the work to a human, and every other one says something about the
+# worker or about the tracker read rather than about the item.
+APPLIES = {
+    FINISH: TO_REVIEW,
+    "verdict-approve": TO_REVIEW,
+    "rounds-exhausted": TO_REVIEW,
+}
+
+# What one tick does with the outcome it computed. `phase` prints the line and stops at
+# any of the four. `tick` maps each one to its own exit code, so a run history names what
+# happened without parsing prose.
+GONE = "gone"
+QUIET = "quiet"
+REFUSED = "refused"
+APPLIED = "applied"
+
+
+def decision(disposition, outcome, line, labels=(), add=""):
+    """One tick's answer, in the shape both subcommands read.
+
+    `disposition` is one of the four above. `outcome` is the tick's own word, or an empty
+    string where no outcome fired. `line` is the one line to print. `labels` are the
+    **Work-state label**s the item wore when this tick read it, and `add` is the label the
+    transition puts on. The last two are what an `APPLIED` decision hands to the writer,
+    and they are empty on every other one.
+    """
+    return {
+        "disposition": disposition,
+        "outcome": outcome,
+        "line": line,
+        "labels": list(labels),
+        "add": add,
+    }
+
+
+def plan(
+    item, worktree, pattern, rounds, stall_after, tracker, required=(), review=False
 ):
-    """The `phase` answer: `(exit code, the one line to print)`.
+    """What this tick would do, computed and applied by nothing.
 
-    `tracker` is the built **Tracker adapter**, and not the values it is made of. A
-    caller passes the object. So the CLI name, the host, the repository and the fixture
-    are read in one place. That is what makes this predicate callable: a test builds one
-    adapter over a fixture file and asks the question in process (ADR 0040).
+    **This is the one code path both subcommands read.** `phase` prints the line and
+    stops, and `tick` prints the same line and then applies the write. So a dry run can
+    never disagree with the run it stands for, which is the plan and execute split
+    `scripts/close_item.py` already holds.
 
-    A worktree that is gone is answered first, so a torn-down worker is never
-    reported as a stall. A tracker read that fails comes next, and it is the
-    `unreadable` outcome. No **Position** gates that outcome, because a read that
-    failed cannot say where the item sits. `needs-human` follows, and it stops
-    the tick whatever the other facts say. The computed position comes after that,
-    because it decides which of the other outcomes this tick can reach. An item in
-    human review reaches none of them, so that branch is a quiet tick.
+    `tracker` is the built **Tracker adapter**, and not the values it is made of. A caller
+    passes the object. So the CLI name, the host, the repository and the fixture are read
+    in one place. That is what makes this callable: a test builds one adapter over a
+    fixture file and asks the question in process (ADR 0040).
+
+    A worktree that is gone is answered first, so a torn-down worker is never reported as
+    a stall. A tracker read that fails comes next, and it is the `unreadable` outcome. No
+    **Position** gates that outcome, because a read that failed cannot say where the item
+    sits. `needs-human` follows, and it stops the tick whatever the other facts say. The
+    computed position comes after that, because it decides which of the other outcomes
+    this tick can reach. An item in human review reaches none of them, so that branch is a
+    quiet tick.
     """
     worktree = Path(os.path.realpath(worktree))
     if not worktree.is_dir():
-        return EXIT_GONE, (
-            f"gone: there is no worktree at {worktree} — nothing left to watch"
+        return decision(
+            GONE,
+            "",
+            f"gone: there is no worktree at {worktree} — nothing left to watch",
         )
-
-    markers = Path(marker_dir) if marker_dir else worktree / ORCHESTRATOR_DIR
-
-    def fire(outcome, detail):
-        """One fire, through the back-off window every outcome shares."""
-        line = held_back(markers, item, outcome, back_off)
-        if line:
-            return EXIT_NOTHING, line
-        return EXIT_DUE, f"{outcome}: {detail}"
 
     try:
         labels, bodies = tracker.item_facts(item)
@@ -786,139 +799,208 @@ def phase(
         # A tick prints one line. The standard error of a failed command can hold
         # many, so the cause collapses to one.
         cause = " ".join(str(exc).split())
-        return fire(
+        return decision(
+            REFUSED,
             "unreadable",
-            f"the labels and comments on work item #{item} are unreadable, so this "
-            f"tick can read no transition and the item is unobserved: {cause}",
+            f"unreadable: the labels and comments on work item #{item} are unreadable, "
+            f"so this tick can read no transition and the item is unobserved: {cause}",
         )
 
     if NEEDS_HUMAN in labels:
-        return EXIT_NOTHING, (
+        return decision(
+            QUIET,
+            "",
             f"nothing: work item #{item} carries the {NEEDS_HUMAN} label, so this tick "
-            f"reads no further and only the maintainer clears it"
+            f"reads no further and only the maintainer clears it",
         )
 
     current = position_of(labels, bodies, checklist_written(worktree, item))
     if current == HUMAN_REVIEW:
-        return EXIT_NOTHING, (
+        return decision(
+            QUIET,
+            "",
             f"nothing: work item #{item} is in human review, so it waits for the "
-            f"maintainer to read the pull request and no transition is due"
+            f"maintainer to read the pull request and no transition is due",
         )
 
     outcome, detail = transition(
         item, worktree, current, bodies, rounds, pattern, stall_after, required=required
     )
     if not outcome:
-        return EXIT_NOTHING, f"nothing: {detail}"
-    return fire(outcome, detail)
+        return decision(QUIET, "", f"nothing: {detail}")
+    if outcome == FINISH and review:
+        return decision(
+            REFUSED,
+            outcome,
+            f"{outcome}: {detail}, and the review policy is on, so a Review round comes "
+            f"before the review state",
+            labels=labels,
+        )
+    add = APPLIES.get(outcome, "")
+    if not add:
+        return decision(REFUSED, outcome, f"{outcome}: {detail}", labels=labels)
+    return decision(APPLIED, outcome, f"{outcome}: {detail}", labels=labels, add=add)
 
 
-# --- the wake (ADR 0027) ----------------------------------------------------
+# --- the transition writer --------------------------------------------------
 
 
-def send_argv(template, target, text):
-    """The argv for one send: the template split, then its placeholders filled.
+def write_transition(tracker, item, labels, add, comment=""):
+    """Swap the **Work-state label**s on one work item, and answer what it wrote.
 
-    The split runs before the substitution, so a wake line that carries a space, a
-    quote or a `$` stays one argument. Nothing here reaches a shell.
+    **This is the one function in this seam that writes a work-state label.** It runs in
+    the process that already read `labels`, so no second read can disagree with the first.
+    A split into another file would add exactly that second read.
+
+    **The removals and the addition are one tracker write.** Both go into one `label_argv`
+    call, so they can never land apart and an item is never left wearing two work states.
+    **The removals are computed from `labels`**, which is what this run read, and never
+    from a hardcoded predecessor. So the one-label answer holds from every legal starting
+    position, including an item that already wears the label the transition adds.
+
+    `comment` is the one comment a transition carries where it has something to say. It is
+    its own write, because a comment is not a label. `needs-human` is the transition that
+    needs one.
+
+    Returns `(removed, added)`: the label names it took off, and the one it put on or an
+    empty list. Nothing to remove and nothing to add is no write at all. So an item
+    already in the right state costs one read and no command.
     """
-    return [
-        token.replace(TARGET_TOKEN, target).replace(TEXT_TOKEN, text)
-        for token in shlex.split(template)
-    ]
+    remove = [name for name in WORK_STATES if name in labels and name != add]
+    added = [add] if add and add not in labels else []
+    if remove or added:
+        tracker.write(tracker.label_argv(item, remove=remove, add=added))
+    if comment:
+        tracker.write(tracker.comment_argv(item, comment))
+    return remove, added
 
 
-def attempt(argv):
-    """None where this command succeeded, or the one line that says why it did not."""
+def swap_line(item, removed, added):
+    """How one label swap reads, for the line a tick prints."""
+    was = ", ".join(removed) or "no work-state label"
+    now = ", ".join(added) or "the label it already wore"
+    return f"{was} → {now} on work item #{item}"
+
+
+def needs_human(tracker, item, labels, saw):
+    """Write `needs-human` on one work item, plus one comment saying what the seam saw.
+
+    The one label that stops every tick, and the one transition that carries a comment. A
+    label with no reason leaves the maintainer to reconstruct one, so the comment is part
+    of the transition rather than a courtesy.
+
+    Returns `(exit code, the one line to print)`. The code is the refusal, because a seam
+    that asks for a human refused to act. Only the maintainer removes the label.
+    """
+    removed, added = write_transition(
+        tracker, item, labels, NEEDS_HUMAN, comment=f"{NEEDS_HUMAN}: {saw}"
+    )
+    return EXIT_REFUSED, (
+        f"{NEEDS_HUMAN}: {saw} — applied: {swap_line(item, removed, added)}, with one "
+        f"comment that says what this tick saw"
+    )
+
+
+def claim(item, tracker):
+    """The `--claim` answer: the ready state swapped for the in-progress state.
+
+    The one named transition this seam reaches from the CLI, so an **Orchestrator**
+    session's spawn claim runs the same writer a tick runs. It computes nothing and reads
+    no worktree, because a claim happens before there is any work to read.
+
+    `needs-human` answers first here too, so a claim can never restart an item the machine
+    was asked to leave alone.
+    """
     try:
-        proc = subprocess.run(argv, capture_output=True, text=True)
-    except OSError as exc:
-        return f"{argv[0]} did not start: {exc}"
-    if proc.returncode == 0:
-        return None
-    cause = " ".join(proc.stderr.split()) or "it printed nothing"
-    return f"{argv[0]} exited {proc.returncode}: {cause}"
+        labels, _ = tracker.item_facts(item)
+    except (TrackerError, OSError, json.JSONDecodeError) as exc:
+        cause = " ".join(str(exc).split())
+        return EXIT_REFUSED, (
+            f"unreadable: the labels on work item #{item} are unreadable, so this claim "
+            f"can write no label: {cause}"
+        )
+    if NEEDS_HUMAN in labels:
+        return EXIT_REFUSED, (
+            f"refused: work item #{item} carries the {NEEDS_HUMAN} label, so no claim "
+            f"runs until the maintainer clears it"
+        )
+    removed, added = write_transition(tracker, item, labels, IN_PROGRESS)
+    return EXIT_APPLIED, f"claim: applied: {swap_line(item, removed, added)}"
 
 
-def wake_targets(line, item, tracker, handle, title, send_command):
-    """The wake targets in order, as `(what it is, argv)` pairs.
-
-    The terminal handle first, because the tool issued it and no display string can
-    move it. The terminal title second, for a caller that resolved no handle. A
-    comment on the work item last, so a transition is recorded late rather than lost
-    (ADR 0024). A target with nothing to address stays out of the list. So a caller
-    that passes no handle costs no failed send.
-
-    The predicate read the item through one **Tracker adapter**, and that same object
-    builds the comment. So no wake can go to a repository the tick did not read.
-    """
-    found = []
-    for what, target in (
-        ("the terminal handle", handle),
-        ("the terminal title", title),
-    ):
-        if send_command and target:
-            found.append((f"{what} {target}", send_argv(send_command, target, line)))
-    found.append((f"a comment on work item #{item}", tracker.comment_argv(item, line)))
-    return found
+# --- the two subcommands over that one plan ---------------------------------
 
 
-def deliver(line, item, tracker, handle, title, send_command):
-    """Deliver one line to the first target that succeeds.
-
-    Returns `(exit code, the lines to print)`. A delivery that fails everywhere
-    prints every failure. A maintainer who got no wake has to read why, and the three
-    causes ask for three different repairs.
-    """
-    failures = []
-    for what, argv in wake_targets(line, item, tracker, handle, title, send_command):
-        why = attempt(argv)
-        if why is None:
-            return EXIT_DELIVERED, [f"delivered: {line} — {what} took it"]
-        failures.append(f"no wake to {what}: {why}")
-    return EXIT_UNDELIVERED, [f"undelivered: {line} — no target took it", *failures]
-
-
-def wake(
-    item,
-    worktree,
-    pattern,
-    rounds,
-    stall_after,
-    tracker,
-    back_off=None,
-    marker_dir=None,
-    required=(),
-    handle="",
-    title="",
-    send_command="",
+def phase(
+    item, worktree, pattern, rounds, stall_after, tracker, required=(), review=False
 ):
-    """The `wake` answer: `(exit code, the lines to print)`.
+    """The `phase` answer: `(exit code, the one line to print)`.
 
-    The whole body of a tick. It asks `phase()`: the same predicate, the same
-    outcomes, the same order and the same `--back-off` window. Where a transition is
-    due it delivers that line itself. Where nothing is due it delivers nothing, and it
-    answers exactly what the predicate answered. No path exits 0, so no agent runs on
-    a tick (ADR 0027).
-
-    It takes the built **Tracker adapter** and hands the same object to both halves.
-    Every argument past the fifth is named at the call that follows. So no reordering of
-    this signature can print a plausible wake line.
+    The plan half of the seam, so it writes nothing at all: no tracker command and no
+    file. Exit 0 means a transition is due, whichever outcome fired, and the line names
+    it. So a caller reads one bit and a maintainer dry-runs one item against a live
+    tracker.
     """
-    code, line = phase(
+    answer = plan(
         item,
         worktree,
         pattern,
         rounds,
         stall_after,
         tracker,
-        back_off=back_off,
-        marker_dir=marker_dir,
         required=required,
+        review=review,
     )
-    if code != EXIT_DUE:
-        return code, [line]
-    return deliver(line, item, tracker, handle, title, send_command)
+    if answer["disposition"] == GONE:
+        return EXIT_GONE, answer["line"]
+    if answer["disposition"] == QUIET:
+        return EXIT_NOTHING, answer["line"]
+    return EXIT_DUE, answer["line"]
+
+
+def tick(
+    item, worktree, pattern, rounds, stall_after, tracker, required=(), review=False
+):
+    """The `tick` answer: `(exit code, the one line to print)`.
+
+    The execute half. It reads the same plan `phase` reads, and then it applies the one
+    transition that plan carries. **At most one transition per run**: one tick reads one
+    item, computes one outcome and makes at most one label swap. So a wrong computation
+    cannot cascade inside one minute.
+
+    An outcome with no transition is a refusal, and the item stays where it is. Four facts
+    reach that branch:
+
+    1. A **Gate record** that is not green at `HEAD`.
+    2. A dead worker, or a stalled one.
+    3. A fix round, which is still the same worker's own work.
+    4. A tracker read that failed.
+
+    Each one keeps its printed line, so a maintainer reads which it was.
+    """
+    answer = plan(
+        item,
+        worktree,
+        pattern,
+        rounds,
+        stall_after,
+        tracker,
+        required=required,
+        review=review,
+    )
+    if answer["disposition"] == GONE:
+        return EXIT_GONE, answer["line"]
+    if answer["disposition"] == QUIET:
+        return EXIT_NOTHING, answer["line"]
+    if answer["disposition"] == REFUSED:
+        return EXIT_REFUSED, (
+            f"{answer['line']} — refused: this seam writes no label for "
+            f"{answer['outcome']}, so work item #{item} stays where it is"
+        )
+    removed, added = write_transition(tracker, item, answer["labels"], answer["add"])
+    return EXIT_APPLIED, (
+        f"{answer['line']} — applied: {swap_line(item, removed, added)}"
+    )
 
 
 # --- CLI --------------------------------------------------------------------
@@ -937,17 +1019,23 @@ class UsageExitParser(argparse.ArgumentParser):
         sys.exit(EXIT_USAGE if status else status)
 
 
-def add_tick_arguments(parser):
-    """Every flag the predicate reads, added to one subcommand.
+def add_tick_arguments(parser, worker_required=True):
+    """Every flag the plan reads, added to one subcommand.
 
-    `phase` and `wake` both take all of them, because `wake` is that predicate plus
-    a delivery. Written once, so the two can never drift apart (ADR 0027).
+    `phase` and `tick` both take all of them, because the two read one plan. Written
+    once, so the two can never drift apart.
+
+    `worker_required` is False for `tick`, because `tick --claim` names one transition
+    and reads no worker at all. Every other form of `tick` still needs the four, and
+    `main` is where that check lives. So a flag with a typo still exits 64.
     """
     parser.add_argument("--item", required=True, type=int, help="the work item number")
-    parser.add_argument("--worktree", required=True, help="the worker's worktree")
+    parser.add_argument(
+        "--worktree", required=worker_required, help="the worker's worktree"
+    )
     parser.add_argument(
         "--process",
-        required=True,
+        required=worker_required,
         metavar="PATTERN",
         help="a regular expression for the agent's process name. The `dead` outcome "
         "fires when no process that matches it works inside the worktree. The caller "
@@ -956,7 +1044,7 @@ def add_tick_arguments(parser):
     )
     parser.add_argument(
         "--rounds",
-        required=True,
+        required=worker_required,
         type=int,
         metavar="N",
         help="the Review round bound, which the caller resolves from `review.rounds` "
@@ -964,7 +1052,7 @@ def add_tick_arguments(parser):
     )
     parser.add_argument(
         "--stall-after",
-        required=True,
+        required=worker_required,
         metavar="DURATION",
         help="how old the newest work product must be to count as a stall "
         "(`45s`, `30m`, `4h`, or a bare number of seconds). Only `stalled` reads it, "
@@ -980,8 +1068,8 @@ def add_tick_arguments(parser):
         "--tracker-cli",
         default=GH,
         choices=(GH, GLAB),
-        help="which CLI reads the labels and the comments, and posts the wake comment "
-        "where no terminal takes it. The caller resolves it from "
+        help="which CLI reads the labels and the comments, and writes the label a "
+        "transition swaps. The caller resolves it from "
         "docs/agents/issue-tracker.md. This seam passes the name to the tracker "
         "adapter, which holds every command, so this seam names no tracker",
     )
@@ -994,23 +1082,6 @@ def add_tick_arguments(parser):
         "to the CLI's own default server",
     )
     parser.add_argument(
-        "--back-off",
-        metavar="DURATION",
-        help="how long one outcome stays suppressed after it fires, so an "
-        "unanswered wake does not repeat every minute. A marker file per "
-        "(item, outcome) pair holds it. With no --back-off this subcommand writes "
-        "nothing",
-    )
-    parser.add_argument(
-        "--marker-dir",
-        default=None,
-        metavar="DIR",
-        help="where the --back-off marker files live. The default is .orchestrator/ "
-        "inside --worktree, so a caller that passes nothing behaves as it did before "
-        "this argument existed. Pass a directory that outlives a move of the watched "
-        "worktree. Otherwise an answered wake fires again from a fresh directory",
-    )
-    parser.add_argument(
         "--require-gate",
         action="append",
         metavar="COMMAND",
@@ -1018,6 +1089,14 @@ def add_tick_arguments(parser):
         "Repeat the flag once per required layer. The caller resolves the list from the "
         "gates: block of the Config, so this seam names no command of its own. With no "
         "--require-gate nothing is required, and gates-unproven can never fire",
+    )
+    parser.add_argument(
+        "--review",
+        action="store_true",
+        help="the review policy is on, which the caller resolves from `review.enabled` "
+        "in the Config. A finish then holds the swap to the review state, because a "
+        "Review round comes first and a worker still owns the item. With no --review a "
+        "finish reaches the review state, which is the policy every other flag assumes",
     )
     parser.add_argument(
         "--gh-fixture",
@@ -1037,9 +1116,10 @@ def main(argv=None):
         description=(
             "Answer what the Worker watch asks about one worker: is a live agent "
             "process at work in this worktree, and is a transition due for its "
-            "work item. Reports and never acts — it composes no prompt, kills no "
-            "process, writes no label and spawns nothing. Its wake delivers the line "
-            "it printed, and every decision stays with the session that reads it."
+            "work item. The phase subcommand computes and writes nothing. The tick "
+            "subcommand computes through the same code path and then applies the one "
+            "transition it computed. It composes no prompt, kills no process, moves no "
+            "card, merges nothing and spawns nothing."
         ),
     )
     subcommands = parser.add_subparsers(dest="command", required=True)
@@ -1064,66 +1144,52 @@ def main(argv=None):
         "it from references/harnesses/<harness>.md, so this seam names no harness",
     )
 
-    tick = subcommands.add_parser(
+    predicate = subcommands.add_parser(
         "phase",
         help="is a transition due for this work item? Exit 0 due, non-zero "
-        "nothing to do",
+        "nothing to do. It writes nothing at all",
         description=(
-            "The predicate an Item automation runs as its --precheck. Exit 0 means a "
+            "The plan half of the seam, and the dry run of a tick. Exit 0 means a "
             "transition is due, and the printed line names which one: "
             "implementation-complete, gates-unproven, "
             "verdict-approve, verdict-request-changes, rounds-exhausted, "
             "dead, stalled, unreadable. "
             "Exit 1 means nothing to do, so the run records as skipped at no token "
-            "cost. Exit 3 means the worktree is gone. The computed Position "
+            "cost. Exit 3 means the worktree is gone. It writes no tracker command and "
+            "no file, so it can be run against a live tracker. The computed Position "
             "decides which outcomes a tick can reach, and it reads no label of its "
             "own. An item in human review reaches none of them, so that branch is a "
             "quiet tick. The one outcome no position gates is unreadable, because a "
             "read that failed cannot say where the item sits."
         ),
     )
-    add_tick_arguments(tick)
+    add_tick_arguments(predicate)
 
-    delivery = subcommands.add_parser(
-        "wake",
-        help="the whole body of a tick: ask the same predicate, and deliver the line "
-        "where a transition is due. No path exits 0",
+    applier = subcommands.add_parser(
+        "tick",
+        help="the whole body of a tick: compute the same transition, then apply it. "
+        "No path exits 0",
         description=(
-            "The command an Item automation runs as its --precheck. It asks the phase "
-            "predicate, and on a due transition it delivers the printed line to the "
-            "first target that succeeds: the terminal handle, then the terminal "
-            "title, then a comment on the work item. Exit 4 means delivered, and the "
-            "line names the target that took it. Exit 5 means no target took it, and "
-            "every failure is printed. Exit 1 and exit 3 are what the predicate "
-            "answered, so there was nothing to deliver. No path exits 0, so every "
-            "run records as skipped and the automation's own prompt and provider "
-            "never load. No agent runs on a tick."
+            "The command an Item automation runs as its --precheck. It reads the same "
+            "plan the phase subcommand reads, and then it applies the one transition "
+            "that plan carries. Exit 4 means applied, and the line names the "
+            "transition and the labels it wrote. Exit 2 means refused: an outcome is "
+            "due and this seam writes no label for it, so the item stays where it is. "
+            "Exit 1 is a quiet tick and exit 3 is a worktree that is gone. No path "
+            "exits 0, so every run records as skipped and the automation's own prompt "
+            "and provider never load. No agent runs on a tick. At most one transition "
+            "lands per run."
         ),
     )
-    add_tick_arguments(delivery)
-    delivery.add_argument(
-        "--handle",
-        default="",
-        help="the orchestrator terminal, as the identifier the tool issued. This is "
-        "the first target. The caller resolves it at spawn from operation 9, so this "
-        "seam names no tool",
-    )
-    delivery.add_argument(
-        "--title",
-        default="",
-        help="the orchestrator terminal's title, which is the second target. A title "
-        "is a display string that a harness can rename, so it is a second chance and "
-        "never the mechanism",
-    )
-    delivery.add_argument(
-        "--send-command",
-        default="",
-        metavar="TEMPLATE",
-        help="how to send one line to a terminal, which the caller resolves from the "
-        f"tool file's operation 4. {TARGET_TOKEN} is where the terminal goes and "
-        f"{TEXT_TOKEN} is where the line goes. This seam splits the template into "
-        "arguments before it writes either one in, so no shell reads the line. With "
-        "no template the comment is the only target",
+    add_tick_arguments(applier, worker_required=False)
+    applier.add_argument(
+        "--claim",
+        action="store_true",
+        help="apply one named transition instead of computing: swap the ready state "
+        "for the in-progress state on --item. This is the spawn claim, so a session "
+        "runs the same writer a tick runs and assembles no label command of its own. "
+        "It reads no worktree and no process, so it needs none of the four flags that "
+        "name a worker",
     )
 
     args = parser.parse_args(argv)
@@ -1133,18 +1199,35 @@ def main(argv=None):
         print(line)
         return code
 
-    # `phase` and `wake` are the other two subcommands, and they share every flag
-    # above, so one validation serves both. `required=True` leaves no fourth case, so
-    # the last branch is unconditional rather than a third `if`. That is what keeps a
-    # fall-through out of the exit contract: an implicit `None` would exit 0 and read
-    # as a due transition.
-    if args.rounds < 1:
-        parser.error(f"--rounds must be a bound of 1 or more, not {args.rounds}")
-    try:
-        stall_after = parse_duration(args.stall_after)
-        back_off = parse_duration(args.back_off) if args.back_off else None
-    except ValueError as exc:
-        parser.error(str(exc))
+    # `phase` and `tick` are the other two subcommands, and they read one plan, so one
+    # validation serves both. **A claim reads no worker.** It names one transition and
+    # applies it, so `tick --claim` is the one form that can leave the four worker flags
+    # out. Every other form still needs all four, and a missing one is a usage error
+    # rather than a quiet tick.
+    claiming = args.command == "tick" and args.claim
+    stall_after = None
+    if not claiming:
+        missing = [
+            flag
+            for flag, value in (
+                ("--worktree", args.worktree),
+                ("--process", args.process),
+                ("--rounds", args.rounds),
+                ("--stall-after", args.stall_after),
+            )
+            if value is None
+        ]
+        if missing:
+            parser.error(
+                f"{', '.join(missing)}: a tick that computes reads a worker, so every "
+                f"one of those flags is required without --claim"
+            )
+        if args.rounds < 1:
+            parser.error(f"--rounds must be a bound of 1 or more, not {args.rounds}")
+        try:
+            stall_after = parse_duration(args.stall_after)
+        except ValueError as exc:
+            parser.error(str(exc))
 
     # A repeatable flag with no value is `None`, and the required list is a tuple of
     # every value it carried. So the seam holds no gate command of its own, and a
@@ -1152,54 +1235,32 @@ def main(argv=None):
     required = tuple(args.require_gate or ())
 
     # This run builds one **Tracker adapter**, from the four flags that name the
-    # tracker. Every read a tick makes goes through it. So no function past this point
-    # carries a CLI name, a host, a repository or a fixture path (ADR 0040). The
-    # construction reads nothing, so an unreadable fixture is still the `unreadable`
-    # outcome and never a traceback.
+    # tracker. Every read and every write a tick makes goes through it. So no function
+    # past this point carries a CLI name, a host, a repository or a fixture path
+    # (ADR 0040). The construction reads nothing, so an unreadable fixture is still the
+    # `unreadable` outcome and never a traceback.
     tracker = Tracker(args.tracker_cli, args.tracker_host, args.repo, args.gh_fixture)
 
-    if args.command == "phase":
-        code, line = phase(
-            args.item,
-            args.worktree,
-            args.process,
-            args.rounds,
-            stall_after,
-            tracker,
-            back_off=back_off,
-            marker_dir=args.marker_dir,
-            required=required,
-        )
+    if claiming:
+        code, line = claim(args.item, tracker)
         print(line)
         return code
 
-    if args.send_command:
-        try:
-            shlex.split(args.send_command)
-        except ValueError as exc:
-            parser.error(f"--send-command has an unbalanced quote: {exc}")
-        for token in (TARGET_TOKEN, TEXT_TOKEN):
-            if token not in args.send_command:
-                parser.error(
-                    f"--send-command must carry both {TARGET_TOKEN} and "
-                    f"{TEXT_TOKEN}, and this one has no {token}"
-                )
-    code, lines = wake(
+    # `required=True` on `--item` leaves no fourth case, so the last branch is
+    # unconditional rather than a third `if`. That is what keeps a fall-through out of
+    # the exit contract: an implicit `None` would exit 0 and read as a due transition.
+    answer = phase if args.command == "phase" else tick
+    code, line = answer(
         args.item,
         args.worktree,
         args.process,
         args.rounds,
         stall_after,
         tracker,
-        back_off=back_off,
-        marker_dir=args.marker_dir,
         required=required,
-        handle=args.handle,
-        title=args.title,
-        send_command=args.send_command,
+        review=args.review,
     )
-    for line in lines:
-        print(line)
+    print(line)
     return code
 
 

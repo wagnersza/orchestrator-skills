@@ -31,13 +31,19 @@ The orchestrator reads these from here; its own config never redefines them.
 | ready | `ready-for-agent` | Fully specified; a worker can start. Gates the ready queue. |
 | in progress | `in-progress` | A worker owns it. Set at spawn, before the prompt. Held through the whole adversarial-review loop. |
 | review | `to-review` | Work done, PR open, evidence posted. Waiting on a human. |
-| stopped | `needs-human` | A seam or a session refused. **The one label that stops every tick.** |
+| stopped | `needs-human` | A seam refused. **The one label that stops every tick.** |
 | done | *(closed)* | PR merged and the issue closed. |
 
-**`needs-human` carries one comment that says why, and only the maintainer removes it.**
-Every tick reads it first and stays quiet, whatever the other facts say. So a paused item
-costs one cheap read a minute and wakes nobody. No seam writes it: a session writes it
-where it refuses.
+**A seam writes every value in this table, and no session writes one by hand.** The tick of
+an **Item automation** applies the transition it computed, in the process that read the
+labels. The removals and the addition are one command, so nothing can stack. The
+orchestrator's spawn claim runs that same writer under one named transition, and the close
+seam writes the last value as one step of its own transaction. Rationale:
+[`orchestrator/docs/adr/0056-the-tick-applies-the-transition-it-computed.md`](../../orchestrator/docs/adr/0056-the-tick-applies-the-transition-it-computed.md).
+
+**`needs-human` carries one comment that says what the seam saw, and only the maintainer
+removes it.** Every tick reads it first and stays quiet, whatever the other facts say. So a
+paused item costs one cheap read a minute and moves nowhere.
 
 **Where an item sits inside an owned run is computed, and no label records it.** The
 **Position** entry of
@@ -57,7 +63,7 @@ gh label create in-progress --color FBCA04 --description "An agent worker owns t
 gh label create to-review   --color 0E8A16 --description "Work done, PR open, awaiting human review"
 gh label create ready-for-agent --color 1D76DB --description "Fully specified, ready for an AFK agent"
 gh label create user-story  --color 5319E7 --description "A spec whose children are the implementable work"
-gh label create needs-human --color B60205 --description "A seam or a session refused. Every tick stops until a human clears it"
+gh label create needs-human --color B60205 --description "A seam refused. Every tick stops until a human clears it"
 ```
 
 ## Story gate labels
