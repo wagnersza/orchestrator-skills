@@ -209,6 +209,32 @@ class TrackerTest(unittest.TestCase):
         )
         self.assertEqual(one.closing_note_argv(ITEM, "the work is merged"), [])
 
+    def test_the_close_writes_arrive_in_order_so_no_caller_orders_them(self):
+        """The reason goes before the close, and the adapter is what puts it there.
+
+        A caller reads the list and never the CLI name. So it cannot get the order
+        wrong, because there is no order left for it to assemble (ADR 0056).
+        """
+        gh = tracker.Tracker()
+        glab = tracker.Tracker(cli=tracker.GLAB)
+
+        # The tracker with a reason flag: one write, and the reason rides it.
+        self.assertEqual(
+            gh.close_writes(ITEM, "the work is merged"),
+            [("close", gh.close_argv(ITEM, "the work is merged"))],
+        )
+        # The tracker with no reason flag: two writes, the note first.
+        self.assertEqual(
+            glab.close_writes(ITEM, "the work is merged"),
+            [
+                ("note", glab.comment_argv(ITEM, "the work is merged")),
+                ("close", glab.close_argv(ITEM, "the work is merged")),
+            ],
+        )
+        # No reason means one write on either tracker, and it is the close.
+        for one in (gh, glab):
+            self.assertEqual([name for name, _ in one.close_writes(ITEM)], ["close"])
+
     def test_no_reason_leaves_the_close_bare_on_either_tracker(self):
         """A caller that passes no reason posts nothing and closes as it did before."""
         for cli in (tracker.GH, tracker.GLAB):

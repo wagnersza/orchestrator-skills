@@ -337,14 +337,29 @@ class Tracker:
     def closing_note_argv(self, item, body):
         """The argv that posts a closing reason as its own write, or an empty list.
 
-        Where the close command carries the reason itself, there is no second write. So
-        this answers nothing, and the caller plans one write instead of two. The caller
-        then reads whether the reason needs a write of its own, and never which CLI
-        needs one.
+        Where the close command carries the reason itself, there is no second write, so
+        this answers nothing. `close_writes` is what a seam asks, and it is the one
+        caller that reads this answer.
         """
         if not body or self.cli != GLAB:
             return []
         return self.comment_argv(item, body)
+
+    def close_writes(self, item, comment=""):
+        """The writes that close one work item, in the one order they hold.
+
+        One CLI closes an item and records the reason in the same command, so there is
+        one write. The other has no reason flag, so the reason is a write of its own. It
+        goes first, because an item that closes first closes with no reason on it.
+
+        **The order is here, and not in a caller.** A caller that assembles two writes
+        can assemble them the wrong way round. A count of writes is one more difference
+        between two trackers (ADR 0056). So this answers the name and the argv of each
+        write, in order, and a caller iterates them.
+        """
+        note = self.closing_note_argv(item, comment)
+        close = ("close", self.close_argv(item, comment))
+        return [("note", note), close] if note else [close]
 
     # There is no card write here. The board is an input, so this adapter holds one
     # board read and no board write (ADR 0054).
