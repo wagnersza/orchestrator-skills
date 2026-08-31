@@ -2,11 +2,15 @@
 # file, and `make full` runs it. The layer model is in
 # orchestrator/references/quality-gates.md.
 #
-# This repo holds two seams under `scripts/`, and each one is a CLI process of its own.
-# `close_item.py` owns steps 4 to 8 of a Close transaction (ADR 0015), and
-# `worker_state.py` owns the Worker watch predicate (ADR 0018). Neither seam imports
-# the other. An import puts the exit code of one seam in the hands of the other, and
-# each seam is invoked on its own.
+# This repo holds two seams under `scripts/`. `close_item.py` owns steps 4 to 8 of a
+# Close transaction (ADR 0015), and `worker_state.py` owns the Worker watch predicate
+# (ADR 0018).
+#
+# The dependency runs one way: the tick imports the close, and never the reverse. A
+# merged pull request fires the close, and the tick runs it in its own process so that
+# one Tracker adapter and one read of the item serve both (ADR 0057). The close is
+# reached through that one caller, so it never needs the watch and an import back would
+# be a cycle.
 #
 # Both seams import `tracker.py`, the Tracker adapter (ADR 0040). It is a library and
 # not a seam, so it imports neither of its callers.
@@ -14,11 +18,12 @@
 [importlinter]
 root_package = scripts
 
-[importlinter:contract:seams-are-independent]
-name = The two seams do not import each other
-type = independence
-modules =
+[importlinter:contract:the-close-imports-no-watch]
+name = The close seam does not import the watch
+type = forbidden
+source_modules =
     scripts.close_item
+forbidden_modules =
     scripts.worker_state
 
 [importlinter:contract:the-adapter-imports-no-seam]

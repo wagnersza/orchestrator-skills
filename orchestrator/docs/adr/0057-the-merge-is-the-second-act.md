@@ -66,6 +66,15 @@ the revert is the point:
 3. **"merge stays a human step"** — the **Review round** entry of
    [`CONTEXT.md`](../../CONTEXT.md). Same fact, same revert.
 
+**It narrows [ADR 0040](0040-the-tracker-is-one-adapter-behind-both-seams.md) on one point:
+the two seams are no longer independent, and the dependency runs one way.** That decision
+gave the layer 3 import gate a contract that said neither seam imports the other. The
+contract is now a forbidden one instead: **the close seam does not import the watch**. The
+tick imports the close, because the close is what a merged pull request fires. An import
+back would be a cycle, and the close needs nothing the watch holds. Nothing else in ADR
+0040 changes: one adapter still stands behind both seams, and it still imports neither of
+its callers.
+
 **It narrows [ADR 0037](0037-the-merge-queue-is-an-ordered-train.md) on one point: no tick
 calls a Merge train.** The train was the loop's answer to an ask that named ten items. That
 ask has no close behind it any more, because each merge closes its own item as it lands. The
@@ -128,5 +137,7 @@ this decision adds no mechanism for it.
   lands ([ADR 0040](0040-the-tracker-is-one-adapter-behind-both-seams.md)).
 - The tick's precheck grows three flags: the checkout, the default branch and the teardown
   command. A session resolves all three where it already resolves the rest.
+- `.importlinter` trades one independence contract for one forbidden contract, so the layer
+  3 gate proves the direction rather than the absence.
 - **The five board coordinate flags are not this decision's work.** #199 strips them, in the
   same change that deletes the board write sites.
