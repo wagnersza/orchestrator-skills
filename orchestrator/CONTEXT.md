@@ -340,11 +340,16 @@ The one-time interview that writes the Config — the user describes environment
 **Work-state labels**:
 The tracker labels that gate the queue and mark progress. **One family, four values, and it never stacks**: `ready-for-agent`, `in-progress`, `to-review` and `needs-human`. Owned by `docs/agents/issue-tracker.md` (`/setup-matt-pocock-skills`), not the orchestrator config — single source of truth. During an adversarial-review loop the item stays `in-progress` (a worker still owns it); it flips to the review label only when the loop concludes.
 
-**`needs-human` is the one label that stops the machine.** It means a seam or a session
-refused. Every tick reads it first and stays quiet, whatever the other facts say. It
-carries one comment that says why, and only the maintainer removes it. No seam writes it:
-a session writes it where it refuses. Where an item sits inside an owned run is a
-**Position**, and **no label records that**
+**The seam writes every value of this family, and a session writes none.** The **Worker
+watch** applies the transition it computed, in the process that read the labels. So the
+removals and the addition are one tracker write, and nothing can stack
+([`docs/adr/0056-the-tick-applies-the-transition-it-computed.md`](docs/adr/0056-the-tick-applies-the-transition-it-computed.md)).
+The spawn claim goes through that same writer, under one named transition.
+
+**`needs-human` is the one label that stops the machine.** It means a seam refused. Every
+tick reads it first and stays quiet, whatever the other facts say. It carries one comment
+that says what the seam saw, and only the maintainer removes it. Where an item sits inside
+an owned run is a **Position**, and **no label records that**
 ([`docs/adr/0053-one-work-state-label-and-a-computed-position.md`](docs/adr/0053-one-work-state-label-and-a-computed-position.md)).
 
 **Board status**:
@@ -369,7 +374,7 @@ _Avoid_: board state, column, board label, project status (the field is `Status`
 Per-project commands the completion contract needs but that aren't tool/harness/model: setup command, run-for-evidence recipe + port scheme, optional DB gate, evidence expectations. Stored in Config so the skill body stays abstract ("boot per the run recipe", "if a DB gate is configured, satisfy it").
 
 **Checklist**:
-A persistent, file-based task list that survives context loss and works across every harness (unlike claude-only `TodoWrite`). Both the orchestrator and each worker keep one, so neither forgets a step (the documented "stalls before opening the MR" failure mode). Written as markdown checkboxes (`- [ ]` / `- [x]`) to `.orchestrator/checklist-<item>.md` at the worktree root (gitignored, torn down with the worktree). The worker ticks each step as it completes; the orchestrator reads the file to see exact progress and detect a stall (unchecked items + idle terminal → re-prompt with the remaining steps). **Where the Project recipe asks for browser proof, the proof is one more box.** It drops on the same blank-field rule every other box takes, and `run_recipe` is the field it reads. So "every box ticked" is the whole finish signal, and a worker works one list top to bottom. **The last box ends at the review note.** A worker posts that note and stops. The **Orchestrator** writes the review state, and a **Worker** writes no work-state label at all (`docs/adr/0025-the-session-writes-the-review-state.md`).
+A persistent, file-based task list that survives context loss and works across every harness (unlike claude-only `TodoWrite`). Both the orchestrator and each worker keep one, so neither forgets a step (the documented "stalls before opening the MR" failure mode). Written as markdown checkboxes (`- [ ]` / `- [x]`) to `.orchestrator/checklist-<item>.md` at the worktree root (gitignored, torn down with the worktree). The worker ticks each step as it completes; the orchestrator reads the file to see exact progress and detect a stall (unchecked items + idle terminal → re-prompt with the remaining steps). **Where the Project recipe asks for browser proof, the proof is one more box.** It drops on the same blank-field rule every other box takes, and `run_recipe` is the field it reads. So "every box ticked" is the whole finish signal, and a worker works one list top to bottom. **The last box ends at the review note.** A worker posts that note and stops. The tick of an **Item automation** writes the review state, and a **Worker** writes no work-state label at all (`docs/adr/0056-the-tick-applies-the-transition-it-computed.md`).
 
 **Position**:
 Where a **Work item** sits inside its own run, computed from facts rather than read from a
@@ -398,7 +403,12 @@ disagreement. A computed answer holds no second copy to repair.
 
 **One label answers before every fact, and it is `needs-human`.** The tick reads that
 label first and stays quiet, whatever the other facts say. So a paused item costs one
-cheap read a minute and wakes nobody.
+cheap read a minute and moves nowhere.
+
+**Human review is also where an applied transition stops repeating.** A tick that writes
+the review state leaves the item in the one position no transition is due in. So the next
+tick reads that label, stays quiet, and no suppression window is needed
+([`docs/adr/0056-the-tick-applies-the-transition-it-computed.md`](docs/adr/0056-the-tick-applies-the-transition-it-computed.md)).
 
 **A review round always has a verdict behind it.** That verdict is what computes the
 position, so the verdict fires its own outcome and only implementation reads the
@@ -410,25 +420,26 @@ _Avoid_: phase (that named the label family this replaces), stage, state, status
 two name the work-state axis), progress.
 
 **Item automation**:
-One schedule per live **Work item**, owned by the **Tool** rather than by a session's shell, named `orchestrator-item-<N>`. It ticks once a minute. **Its precheck is the whole tick**: the **Worker watch** seam asked as a predicate, plus the delivery of the line that predicate printed. Where a transition is due the seam wakes the **Orchestrator** with that line itself. **The target is that session's terminal handle, resolved at spawn.** The terminal title is the second target, and a comment on the work item is the third. The spawn report names which of the three is live (`docs/adr/0024-the-wake-target-is-a-resolved-handle.md`).
+One schedule per live **Work item**, owned by the **Tool** rather than by a session's shell, named `orchestrator-item-<N>`. It ticks once a minute. **Its precheck is the whole tick**: the **Worker watch** seam asked for a transition, plus the write that transition carries. **The tick applies the transition it computed**, in the process that read the facts. It delivers nothing and it wakes nobody, so no transition can be lost to a delivery (`docs/adr/0056-the-tick-applies-the-transition-it-computed.md`).
 
-**No agent runs on a tick.** The precheck exits non-zero on every path, so every run records as skipped at no token cost. The schedule's own prompt and provider stay inert. So the only tokens the loop spends are the ones the **Orchestrator** spends when it answers a wake (`docs/adr/0027-the-tick-delivers-its-own-wake.md`).
+**No agent runs on a tick.** The precheck exits non-zero on every path, so every run records as skipped at no token cost. The schedule's own prompt and provider stay inert. So the loop spends no tokens at all between the spawn of a worker and the maintainer's own reading of the pull request.
 
-**It never acts.** It writes no label, composes no prompt, spawns nothing and merges nothing. **Delivery is not action**: the line it sends is the line it printed, and every decision stays with the session that reads it. **The automation decides when, and the session decides what** — the same split as a **Close transaction** and a **Worker watch**, applied a third time. So every destructive act stays in a session a human can interrupt. One per item, so a leaked schedule names the item it leaked from, and five siblings are five observed items. **One per item also means the schedule follows the live worker.** The session repoints its precheck at each transition. So a review round watches the reviewer's worktree, and a fix round watches the implementation worktree again (`docs/adr/0026-the-automation-follows-the-live-worker.md`). Removal folds into step 8 of a **Close transaction**, through the teardown command the session passes in, which means a refused transaction leaves the item observed. A tool with no automation surface skips the tick and the spawn works unchanged. Rationale, the schedule that replaces the blocking watch, the `dead` and `stalled` split, and the rejected alternatives: `docs/adr/0022-item-automation-replaces-the-blocking-watch.md`.
+**It acts on one thing, and one only: the work-state label of the item it watches.** It composes no prompt, kills no process, moves no card, merges nothing and spawns nothing. **At most one transition lands per run**, which is what stops a wrong computation cascading inside one minute. **The automation decides when, and the seam decides what** — the same split as a **Close transaction**, applied again. So every other destructive act stays in a session a human can interrupt. One per item, so a leaked schedule names the item it leaked from, and five siblings are five observed items. **One per item also means the schedule follows the live worker.** A session repoints the precheck when it spawns the next worker. So a review round watches the reviewer's worktree, and a fix round watches the implementation worktree again (`docs/adr/0026-the-automation-follows-the-live-worker.md`). Removal folds into step 8 of a **Close transaction**, through the teardown command the session passes in, which means a refused transaction leaves the item observed. A tool with no automation surface skips the tick and the spawn works unchanged. Rationale, the schedule that replaces the blocking watch, the `dead` and `stalled` split, and the rejected alternatives: `docs/adr/0022-item-automation-replaces-the-blocking-watch.md`.
 
 **A tick in human review is quiet, and no outcome answers a Merge queue.** The maintainer
 reads the pull request there and then types the ask, so nothing on the tracker records it.
-**The tick still merges nothing, writes no label and spawns nothing**: the session that
-reads a wake is what acts
+**The tick still merges nothing, moves no card and spawns nothing**
 ([`docs/adr/0053-one-work-state-label-and-a-computed-position.md`](docs/adr/0053-one-work-state-label-and-a-computed-position.md)).
 _Avoid_: cron job, watcher, daemon, poller (each names a mechanism rather than the unit), run automation (`Run` is not a term this repo defines).
 
 **Worker watch**:
-The seam that observes a live **Worker**'s own work product and answers whether something needs a decision now. It is not a worker — it has no **Harness** and no **Model** — and it is not the orchestrator, because it decides nothing. **It reports and never acts.** Asked once per tick, it reads three facts on the file system plus the work item's labels and comments. It answers one bit: a transition is due, or nothing is. The printed line names which outcome fired. It composes no prompt, kills no process, writes no label, and spawns nothing, so every destructive act stays in a session a human can interrupt. It holds no state that changes an answer, which is what makes a restart after each re-prompt free.
+The seam that observes a live **Worker**'s own work product and answers whether something needs a decision now. It is not a worker — it has no **Harness** and no **Model** — and it is not the orchestrator, because it composes nothing. Asked once per tick, it reads three facts on the file system plus the work item's labels and comments. It answers one outcome. The printed line names which one fired. It composes no prompt, kills no process, moves no card and spawns nothing, so every destructive act but one stays in a session a human can interrupt. It holds no state that changes an answer and it writes no file, which is what makes a restart after each re-prompt free.
 
-**It also delivers the line it printed, and that is not a decision.** The seam sends the wake to the first target that succeeds. That is the terminal handle, then the terminal title, then a comment on the **Work item**. Every prohibition above holds for that delivery, and the send carries nothing the seam chose. It exits non-zero on every path, which is what keeps an agent off a tick (`docs/adr/0027-the-tick-delivers-its-own-wake.md`).
+**The one thing it writes is the transition it computed.** One function inside the seam owns every **Work-state label** swap, and it runs in the process that read those labels. The removals and the addition are one tracker write, so the two can never land apart. **At most one transition lands per run.** Three outcomes carry a transition, and every other outcome refuses and leaves the item where it is (`docs/adr/0056-the-tick-applies-the-transition-it-computed.md`).
 
-**The watch decides when, and the session decides what** — the same split as a **Close transaction**, and the same reason: ordering is what code holds perfectly and prose holds poorly. So the watch is a seam, `scripts/worker_state.py`, and the session answers the wake with the flows `SKILL.md` already holds. The seam counts nothing. The session reads the stall count from the **Tracker** and restates it in its report (`docs/adr/0023-the-stall-count-is-a-tracker-comment.md`). One **Item automation** per spawn, impl and review alike, because an opt-in observer is off exactly when the maintainer forgets. Rationale, the rejected alternatives, the reviewer accepted risk, and the context reset that goes with a re-prompt: `docs/adr/0018-the-worker-watch-is-a-stateless-seam.md`. The same seam answers readiness for every **Tool** with one check: `docs/adr/0019-readiness-is-a-tool-agnostic-process-check.md`.
+**Two subcommands read one plan.** `phase` computes and writes nothing at all, so a maintainer dry-runs one item against a live tracker. `tick` computes through the same code path and then applies. That is the plan-and-execute split a **Close transaction** already holds, applied a second time.
+
+**The watch decides when and what, and the session decides everything else** — spawns, prompts, merges and reports. Ordering is what code holds perfectly and prose holds poorly, so the watch is a seam, `scripts/worker_state.py`. The seam counts nothing. The session reads the stall count from the **Tracker** and restates it in its report (`docs/adr/0023-the-stall-count-is-a-tracker-comment.md`). One **Item automation** per spawn, impl and review alike, because an opt-in observer is off exactly when the maintainer forgets. Rationale, the rejected alternatives, the reviewer accepted risk, and the context reset that goes with a re-prompt: `docs/adr/0018-the-worker-watch-is-a-stateless-seam.md`. The same seam answers readiness for every **Tool** with one check: `docs/adr/0019-readiness-is-a-tool-agnostic-process-check.md`.
 
 **The blocking poll loop has retired, and the seam has not.** A loop in a background process of the orchestrator's own shell dies with that shell. It reports nothing when it does. So the trigger is an **Item automation**, and the seam is asked once per tick as a predicate. The exit-code contract survives, the statelessness survives, and the split above survives. What retired is the `watch` subcommand, with its bounded maximum wait and its per-role completion flag. The stall window survives as an argument to the predicate. `docs/adr/0022-item-automation-replaces-the-blocking-watch.md` narrows ADR 0018 to that extent and no further.
 _Avoid_: watchdog, monitor, supervisor, liveness probe (each implies restart authority this thing does not have).
