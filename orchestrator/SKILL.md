@@ -265,8 +265,10 @@ read it before the first spawn of a session.
 1. **Classify the item.** Default **`heavy`**. Choose `light` only when *all* hold:
    one file/component touched, no schema change or `db_gate`, no new dependency,
    and acceptance criteria fully enumerated on the work item. Ambiguous → `heavy`.
-   A re-spawn after a failed round, or a fix round from adversarial review, goes up
-   a rung (`heavy` at `xhigh`, or `max` if `xhigh` already failed).
+   A fix round from adversarial review raises the effort by one rung (`heavy` at `xhigh`,
+   or `max` if `xhigh` already failed). A reviewer's verdict is the fact behind that step.
+   **A stalled worker raises nothing** — it gets one re-prompt and then a human
+   ([`docs/adr/0058-one-re-prompt-then-a-human.md`](docs/adr/0058-one-re-prompt-then-a-human.md)).
 2. **Resolve** `models.<role>` → model + effort. A flat `model:`/`effort:` config
    applies to every role.
 3. **Legal on this harness?** The harness reference's effort map holds the ceiling
@@ -803,9 +805,11 @@ worktree is a leak from a teardown that skipped op 12. Remove it by name
   stopped early. Reset its context
   ([Reset the worker's context before every re-prompt](#reset-the-workers-context-before-every-re-prompt)),
   then re-prompt with the remaining (unchecked) steps (op 4). Prefix a
-  code-changing follow-up appropriately for the harness. A worker that stalls or
-  flails **twice** was mis-routed — tear it down and re-spawn a rung up
-  (`light` → `heavy`, or `heavy` at `max`), and say that's what happened.
+  code-changing follow-up appropriately for the harness. **One re-prompt, and then a
+  human.** A worker that stalls again gets `needs-human`, which the tick writes
+  ([On the tick](#on-the-tick--what-it-wrote-and-what-is-left-for-you)). Never diagnose why
+  it stopped. Never re-spawn it on a bigger model
+  ([`docs/adr/0058-one-re-prompt-then-a-human.md`](docs/adr/0058-one-re-prompt-then-a-human.md)).
 
 The tick is what fires this rule without your asking
 ([Start the tick](#start-the-tick--one-item-automation-per-worker)). The four
@@ -842,8 +846,13 @@ pull request for the item's branch, and a merged one closes the item, removes th
 and removes the automation. So there is no close to run here and no verb to wait for
 ([`docs/adr/0057-the-merge-is-the-second-act.md`](docs/adr/0057-the-merge-is-the-second-act.md)).
 
-**Five outcomes carry no label**, and the tick exits 2 on each of them. The item stays where
-it is, and the row below is the whole of what is left to do.
+**One outcome carries a comment or a label, and it is `stalled`.** The first stalled tick
+posts one `Re-prompt:` comment and moves nothing. The second writes `needs-human`, and only
+the maintainer clears that label
+([`docs/adr/0058-one-re-prompt-then-a-human.md`](docs/adr/0058-one-re-prompt-then-a-human.md)).
+
+**Four outcomes carry nothing at all**, and the tick exits 2 on each of them. The item stays
+where it is, and the row below is the whole of what is left to do.
 
 | Outcome | What the tick already wrote | What is left for you |
 |---|---|---|
@@ -854,7 +863,7 @@ it is, and the row below is the whole of what is left to do.
 | `rounds-exhausted` | `in-progress` → `to-review` | Step 4 again — "after the last round regardless". The bound is spent, so offer no further round |
 | `merged` | the whole **Close transaction**: the review label came off, the item closed, and the worktree and the automation are gone. The line carries the plan | Nothing on the item. **Parent-close is what is left** ([Close a task](#close-a-task)), and only where this was the last child of a `user-story` parent |
 | `dead` | nothing, because the item stays where it is | Report, and **never re-prompt** — below |
-| `stalled` | nothing, for the same reason | Reset the context and re-prompt — below |
+| `stalled` | **first stall**: one `Re-prompt:` comment, and no label. **Second**: `needs-human`, with one comment that says what it saw | **First**: read that comment, then reset the context and re-prompt with the steps it carries — below. **Second**: report that the item is with a human, and clear nothing yourself |
 | `unreadable` | nothing, because a read that failed cannot say where the item sits | Report in one line: the tracker read is broken, and the item is unobserved until that read works again |
 
 **The computed Position is what makes the response a lookup.** The seam computes where the
@@ -869,9 +878,10 @@ needs no label of its own.
 **`needs-human` answers before every fact.** The tick reads that label first and stays
 quiet, so a paused item moves nowhere and no row above runs.
 
-**Why five outcomes carry no label.** A fix round is still the same worker's work, so
-nothing changes state. `dead` and `stalled` say something about the worker rather than about
-the item. `unreadable` says something about the tracker read, and a fact the tick never read
+**Why four outcomes carry no label.** A fix round is still the same worker's work, so
+nothing changes state. `dead` says something about the worker rather than about
+the item, and a re-prompt cannot reach a process that is gone. `unreadable` says something
+about the tracker read, and a fact the tick never read
 cannot decide a label. `gates-unproven` says the work is not finished after all, so the
 item stays where it is
 ([`docs/adr/0036-a-gate-run-is-work-product.md`](docs/adr/0036-a-gate-run-is-work-product.md)).
@@ -920,33 +930,36 @@ a stale `head_sha`. Reset the worker's context
 Then re-prompt with that cause and the command the line names, and ask for the gate run
 rather than for a tick of the box. A stale `head_sha` usually means the worker committed
 after the run, so the layer runs again at this commit. **The re-prompt is unconfirmed**,
-exactly as it is for a stall. **This is not a stall**, so it writes no `Stall:` comment and it counts
-toward no rung. **The record is not an enforcement mechanism**: nothing blocked the
+exactly as it is for a stall. **This is not a stall**, so the tick writes no `Re-prompt:`
+comment and this re-prompt counts toward nothing.
+**The record is not an enforcement mechanism**: nothing blocked the
 worker's push, and the item stops before review instead
 ([`docs/adr/0036-a-gate-run-is-work-product.md`](docs/adr/0036-a-gate-run-is-work-product.md)).
 
 **`dead` — a re-prompt cannot work, so nothing re-prompts.** No live agent process has its
 working directory inside the worktree, so nothing listens. Report where the item sits and
 where the worker got to. Then name the one human decision: tear the worker down and
-re-spawn a rung up. **Teardown keeps its confirmation** ([Safety](#safety)), because a
+re-spawn it. **Teardown keeps its confirmation** ([Safety](#safety)), because a
 tick cannot read intent in an uncommitted diff. This outcome needs no stall window, so it
 arrives about a minute after the worker exits.
 
-**`stalled` — a live process with stale work product, so a re-prompt is the response that
-works.** Reset the worker's context
-([Reset the worker's context before every re-prompt](#reset-the-workers-context-before-every-re-prompt)).
-Then re-prompt with the unchecked boxes (op 4). **The re-prompt is unconfirmed** — it is
-additive, and it costs the maintainer nothing to get wrong. **Post the stall as a comment on
-the work item, in the same step.** That comment carries the literal `Stall:`, plus the
-worker's model and effort. The stall count is the number of those comments that name the
-current `(model, effort)` pair. That is the shape the **Review round** number already takes,
-as the count of `Verdict:` comments. So neither count is held in a session's context
-([`docs/adr/0023-the-stall-count-is-a-tracker-comment.md`](docs/adr/0023-the-stall-count-is-a-tracker-comment.md)).
-At the **second** such comment the item was mis-routed. Tear the worker down and re-spawn a
-rung up (`light` → `heavy`, or `heavy` at `max`), and say that is what happened. The pair
-changes with the rung, so the new worker's count starts again with nothing to reset.
-That teardown keeps its confirmation too. Do not diagnose *why* the worker stalled: that is
-judgement on a live terminal and nothing here asks for it.
+**`stalled` — one re-prompt, and then a human.** A live process with stale work product, so a
+re-prompt is the response that works once. **The tick owns the count**, which is the number of
+`Re-prompt:` comments on the work item. That is the shape the **Review round** number already
+takes, as the count of `Verdict:` comments. So no session holds either count in its context
+([`docs/adr/0058-one-re-prompt-then-a-human.md`](docs/adr/0058-one-re-prompt-then-a-human.md)).
+
+- **The first stalled tick posts one `Re-prompt:` comment**, which carries what it saw and the
+  unticked steps. Read that comment. Reset the worker's context
+  ([Reset the worker's context before every re-prompt](#reset-the-workers-context-before-every-re-prompt)),
+  then re-prompt with those steps (op 4). **The re-prompt is unconfirmed** — it is additive,
+  and it costs the maintainer nothing to get wrong.
+- **The second stalled tick writes `needs-human`**, with one comment that says what it saw.
+  The item is then with a human, and every later tick leaves it alone. **Write no label, and
+  clear none.** Offer the teardown as the pending decision, and do not run it.
+
+**Do not diagnose *why* the worker stalled.** **Never re-spawn it a rung up.** Both are
+judgement on a live terminal, and nothing here asks for either.
 
 **No response above touches the automation.** It outlives the re-prompt, the fix round and
 this session, so there is nothing to restart. The seam still holds no state that changes an
@@ -1435,9 +1448,10 @@ it. Shape output for acting on, not for completeness:
 - **Both counts come from the tracker, so restate both.**
   [On the tick](#on-the-tick--what-it-wrote-and-what-is-left-for-you) says how to read each one.
   `#38 stalled in implementation ·
-  checklist 4/7 · stall 1 of 2. Context reset, re-prompted with the unchecked boxes.` At
-  `stall 2 of 2`, and on `dead`, the next step is a teardown — name it as the pending
-  human decision.
+  checklist 4/7 · retry 1 of 1. Context reset, re-prompted with the unticked steps.` On the
+  second stall the tick already wrote `needs-human`, so name the label and stop:
+  `#38 stalled again · needs-human written. Read its comment and take the item back.` On
+  `dead` the next step is a teardown — name it as the pending human decision.
 - **Say that the tick writes the label, and that you do not.** One line on the spawn line:
   `#38 tick: applies the transition, review policy off`
   ([Start the tick](#start-the-tick--one-item-automation-per-worker)). The user then knows
@@ -1494,10 +1508,12 @@ refusal reason are spelled out, never compressed.
   ([`docs/adr/0057-the-merge-is-the-second-act.md`](docs/adr/0057-the-merge-is-the-second-act.md)).
 - **Confirm before any teardown this session runs by hand**, because that one carries no
   merge behind it. It kills the live worker terminal and it can drop uncommitted work.
-- **A second stall is one of the ambiguous cases, so it asks. So is a `dead` worker.** The
-  maintainer said nothing about a teardown in either case, and a tick cannot read intent in
+- **A second stall goes to `needs-human`, and the tick writes that label itself.** So the
+  item moves no further, and no teardown runs. A `dead` worker is the ambiguous case that
+  still asks. The maintainer said nothing about a teardown, and a tick cannot read intent in
   an uncommitted diff. The re-prompt on the first stall stays unconfirmed, because it
-  destroys nothing.
+  destroys nothing
+  ([`docs/adr/0058-one-re-prompt-then-a-human.md`](docs/adr/0058-one-re-prompt-then-a-human.md)).
 - Keep the main checkout (config's `repo`) on the default branch — all
   tracker/git-state ops run there. This orchestrator's own worktree branch is
   separate and irrelevant.
