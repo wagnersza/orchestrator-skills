@@ -92,6 +92,15 @@ EXIT_APPLIED = 4
 CHANGES = "Verdict: request-changes"
 APPROVE = "Verdict: approve"
 
+# The literal a re-prompt writes, and the bound on how many of them a stall gets. The seam
+# owns both, so this file names neither as a value of its own.
+RE_PROMPT = worker_state.RE_PROMPT
+RE_PROMPTS = worker_state.RE_PROMPTS
+
+# One comment that already carries that literal, in the shape the seam writes it. A case
+# that wants the second stall puts this on the item.
+SENT = f"{RE_PROMPT} stalled: pid 1 is alive. Reset the worker's context"
+
 # The one Work-state family, whose four values come from docs/agents/issue-tracker.md.
 # `needs-human` is the one that stops every tick.
 READY_FOR_AGENT = "ready-for-agent"
@@ -440,6 +449,18 @@ class WorkerStateTestCase(unittest.TestCase):
         }[outcome]
         write(self.checklist, TICKED)
         self.write_fixture(comments=comments, labels=labels)
+
+    def stalling(self, comments=(), labels=IMPL):
+        """Put the worktree and the tracker in the state a stall fires from.
+
+        Unticked boxes, work product older than the window, and a live process. `comments`
+        is what the re-prompt count reads, so a case says how many retries went before it
+        rather than how the seam stores them.
+        """
+        write(self.checklist, UNTICKED)
+        self.write_fixture(comments=comments, labels=labels)
+        self.backdate(3600)
+        self.child_in(self.worktree)
 
     def backdate(self, seconds):
         """Age both freshness facts, so a stall needs no real waiting.
@@ -1805,25 +1826,26 @@ class WorkerStateTestCase(unittest.TestCase):
         self.assertFalse(log.exists())
 
     def test_an_outcome_with_no_transition_refuses_and_the_item_stays(self):
-        """Five outcomes say something about the worker, about the tracker read or about a
+        """Four outcomes say something about the worker, about the tracker read or about a
         fix round that is still the same worker's work. None of them decides a label, so
-        the tick refuses, the item stays where it is, and the code is the refusal."""
+        the tick refuses, the item stays where it is, and the code is the refusal. `stalled`
+        is not one of them any more: it carries one re-prompt and then a human."""
         write(self.checklist, UNTICKED)
 
         self.write_fixture(labels=IMPL)
         dead = self.apply(expect=EXIT_REFUSED)
         self.assertTrue(dead.startswith("dead:"), dead)
 
-        self.child_in(self.worktree)
-        self.backdate(3600)
-        stalled = self.apply(stall=HALF_HOUR, expect=EXIT_REFUSED)
-        self.assertTrue(stalled.startswith("stalled:"), stalled)
+        write(self.checklist, TICKED)
+        self.write_fixture(labels=IMPL)
+        unproven = self.apply(required=REQUIRED, expect=EXIT_REFUSED)
+        self.assertTrue(unproven.startswith("gates-unproven:"), unproven)
 
         self.write_fixture(comments=[CHANGES], labels=IMPL)
         changes = self.apply(expect=EXIT_REFUSED)
         self.assertTrue(changes.startswith("verdict-request-changes:"), changes)
 
-        for line in (dead, stalled, changes):
+        for line in (dead, unproven, changes):
             self.assertIn("stays where it is", line)
         self.assertEqual(self.writes(), [])
         self.assertEqual(self.work_states_after(IMPL), IMPL)
@@ -1909,6 +1931,128 @@ class WorkerStateTestCase(unittest.TestCase):
         self.write_fixture(labels=[NEEDS_HUMAN])
         write(self.checklist, TICKED)
         self.assertIn(NEEDS_HUMAN, self.apply(expect=EXIT_NOTHING))
+
+    # --- one re-prompt, then a human (ADR 0058) -----------------------------
+
+    def test_a_stall_gets_one_re_prompt_and_the_next_one_gets_a_human(self):
+        """The whole of this item. The first stalled tick posts one `Re-prompt:` comment and
+        moves no label, so the worker keeps its item and the tick records as applied. The
+        second writes `needs-human` with one comment, re-prompts nothing, and records as the
+        refusal. Nothing between them climbs a rung."""
+        self.stalling()
+
+        first = self.apply(stall=HALF_HOUR, expect=EXIT_APPLIED)
+
+        self.assertTrue(first.startswith("stalled:"), first)
+        self.assertIn(f"retry 1 of {RE_PROMPTS}", first)
+        self.assertEqual(len(self.writes()), 1)
+        self.assertIn(RE_PROMPT, self.writes()[0])
+        self.assertEqual(self.swaps(), [])
+        self.assertEqual(self.work_states_after(IMPL), IMPL)
+
+        # The comment it wrote is the count the next tick reads, so the second stall on the
+        # same item asks for a human.
+        self.stalling(comments=[SENT])
+        second = self.apply(stall=HALF_HOUR, expect=EXIT_REFUSED)
+
+        self.assertTrue(second.startswith(f"{NEEDS_HUMAN}: stalled:"), second)
+        self.assertIn(f"1 of {RE_PROMPTS} retries", second)
+        self.assertEqual(self.work_states_after(IMPL), [NEEDS_HUMAN])
+        self.assertEqual(
+            [line.split()[2] for line in self.writes()], ["edit", "comment"]
+        )
+        # It re-prompts nothing, so no write it made carries the literal again.
+        self.assertEqual([line for line in self.writes() if RE_PROMPT in line], [])
+
+        # And the label it wrote stops every later tick on that item.
+        self.stalling(comments=[SENT], labels=[NEEDS_HUMAN])
+        self.assertIn(NEEDS_HUMAN, self.apply(stall=HALF_HOUR, expect=EXIT_NOTHING))
+
+    def test_the_re_prompt_comment_carries_what_the_tick_saw_and_the_unticked_steps(
+        self,
+    ):
+        """A session that reads the comment needs no second read to compose the retry. So
+        the body carries the stall line, the reset, and the steps that are still unticked."""
+        write(self.checklist, UNTICKED.replace("- [ ] push the branch", "- [x] push"))
+        self.write_fixture(labels=IMPL)
+        self.backdate(3600)
+        self.child_in(self.worktree)
+
+        self.apply(stall=HALF_HOUR, expect=EXIT_APPLIED)
+
+        body = self.writes()[0]
+        self.assertIn(f"gh issue comment {ITEM} --body {RE_PROMPT}", body)
+        self.assertIn("Reset the worker's context", body)
+        self.assertIn("implement + self-test", body)
+        self.assertIn("commit in slices", body)
+        # The box the worker already ticked is not re-sent.
+        self.assertNotIn("push", body)
+
+    def test_the_re_prompt_count_is_a_tracker_fact_and_no_file_holds_it(self):
+        """A fresh `.orchestrator` directory reads the same count, because the count lives on
+        the work item. The marker file the old count used died with the worktree, and a
+        restart could not read it."""
+        self.stalling(comments=[SENT])
+        markers = self.checklist.parent
+        shutil.rmtree(markers)
+        write(self.checklist, UNTICKED)
+        self.backdate(3600)
+
+        self.assertEqual(
+            sorted(path.name for path in markers.iterdir()), ["checklist-54.md"]
+        )
+        line = self.apply(stall=HALF_HOUR, expect=EXIT_REFUSED)
+
+        self.assertIn(NEEDS_HUMAN, line)
+        self.assertEqual(self.work_states_after(IMPL), [NEEDS_HUMAN])
+
+        # And with no such comment on the item, the same fresh directory reads the first
+        # retry instead. So the answer follows the tracker and never the file system.
+        self.stalling()
+        shutil.rmtree(markers)
+        write(self.checklist, UNTICKED)
+        self.backdate(3600)
+        self.assertIn(
+            f"retry 1 of {RE_PROMPTS}", self.apply(stall=HALF_HOUR, expect=EXIT_APPLIED)
+        )
+
+    def test_the_re_prompt_bound_is_one_and_no_flag_raises_it(self):
+        """A bound a caller can raise is a climb under another name. So the seam holds the
+        number, and neither subcommand takes a flag for it."""
+        self.assertEqual(RE_PROMPTS, 1)
+
+        argv = self.tick_argv()
+        for flag in ("--re-prompts", "--stalls", "--retries"):
+            for subcommand in ("phase", "tick"):
+                self.run_seam(subcommand, *argv, flag, "3", expect=EXIT_USAGE, lines=0)
+
+    def test_a_dead_worker_is_never_re_prompted(self):
+        """Nothing listens, so a re-prompt cannot reach it. That outcome keeps the answer it
+        has: no label, no comment, and the refusal code."""
+        write(self.checklist, UNTICKED)
+        self.write_fixture(labels=IMPL)
+
+        line = self.apply(stall=FOUR_HOURS, expect=EXIT_REFUSED)
+
+        self.assertTrue(line.startswith("dead:"), line)
+        self.assertEqual(self.writes(), [])
+        self.assertEqual(self.work_states_after(IMPL), IMPL)
+
+    def test_the_stall_transition_writes_nothing_through_the_predicate(self):
+        """`phase` is the plan half, so a maintainer dry-runs a stalled item and no comment
+        and no label lands. Both stalls are due transitions there, and the line names which
+        one the tick would apply."""
+        log = self.root / "gh.json.writes"
+
+        self.stalling()
+        first = self.ask(stall=HALF_HOUR)
+        self.assertIn(f"retry 1 of {RE_PROMPTS}", first)
+        self.assertFalse(log.exists(), "the predicate wrote a re-prompt")
+
+        self.stalling(comments=[SENT])
+        second = self.ask(stall=HALF_HOUR)
+        self.assertIn("retries", second)
+        self.assertFalse(log.exists(), "the predicate wrote a label")
 
     def test_the_claim_transition_is_reachable_from_the_command_line(self):
         """One named transition, so a session's spawn claim runs the same writer a tick
