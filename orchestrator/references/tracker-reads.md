@@ -10,10 +10,12 @@ vocabulary, the CLI name, the host and the board coordinates. Those are per-repo
 The commands here are the same for every repo, so they live once
 ([ADR 0039](../docs/adr/0039-a-tracker-read-has-a-verified-command-in-the-skill.md)).
 
-**Every command in this file ran against a real GitHub repo and a real GitLab project.**
+**Every command in this file ran against a real GitHub repo and a real GitLab project**,
+except where its own section says which half ran.
 
-Four placeholders. `<owner>/<name>` is the repository, `<N>` is a work-item number,
+Five placeholders. `<owner>/<name>` is the repository, `<N>` is a work-item number,
 `<host>` is the GitLab server, and `<literal>` is the fixed string a count looks for.
+`<branch>` is a git branch name.
 On GitLab the project path carries the owner and the name joined by `%2F`. Where the
 tracker is `gitlab.com`, drop `--hostname <host>`. Where the session already runs
 inside the clone, drop `--repo`.
@@ -144,9 +146,9 @@ tick read one item the same way.
 
 ## Whether a merge request is merged, and the commit it landed as
 
-The two facts step 4 of a **Close transaction** gates on. Where the flows need it:
-**Steps 4 to 8** and **Merge the queue**. `scripts/close_item.py` runs this read through
-the **Tracker adapter**, and it prints the same command in its plan
+The two facts step 4 of a **Close transaction** gates on. Where the flows need it: **On the
+tick**, which is where that transaction runs. `scripts/close_item.py` makes this read
+through the **Tracker adapter**, and it prints the same command in its plan
 ([`../CONTEXT.md`](../CONTEXT.md), **Tracker adapter**).
 
 ```bash
@@ -169,6 +171,39 @@ Three differences, and none of them is a rename:
 sequence of their own, so a project can hold issue 2 and merge request 1 at once. On
 GitHub the two share one sequence. So read the number from the merge request itself, and
 never from the work item.
+
+## The pull request opened from one branch
+
+The number and the state of the pull request whose head is one branch. A tick holds the
+worktree it watches, so it reads the branch and never a number. Where the flows need it:
+**On the tick**. `scripts/worker_state.py` runs this read through the **Tracker adapter**
+([`../CONTEXT.md`](../CONTEXT.md), **Tracker adapter**).
+
+```bash
+gh pr list --head <branch> --state all --repo <owner>/<name> --json number,state
+```
+
+```bash
+glab api --hostname <host> \
+  "projects/<owner>%2F<name>/merge_requests?source_branch=<branch>&state=all"
+```
+
+**Escape `<branch>` in that query.** A `/` becomes `%2F`, a `+` becomes `%2B`, and an `&`
+becomes `%26`. All three are legal in a branch name. A raw `+` reads as a space on the
+server, and a raw `&` splits the query, so either one answers an empty list.
+
+Read every state, because the caller asks whether one of them is merged. The `glab` form
+goes through the API and never through `glab mr list`. The flag trap in this file is why.
+The API answers `iid`, which is the merge request's own number.
+
+**A branch can carry more than one record.** A branch that was closed and opened again
+has two. The merged one is the answer, because a merge is the fact the caller asked
+about. A branch with no record at all is an empty list, and that is no error.
+
+**Which half ran.** The `gh` form ran against this repo, on a merged branch and on a
+branch that has no pull request. The `glab` form ran against no live GitLab project. Read
+it as the API shape that the notes read in this file already proves. Prove the parameters
+before you trust them.
 
 ## The `glab issue list` flag trap
 

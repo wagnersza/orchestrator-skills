@@ -1,5 +1,7 @@
 # The orchestrator merges and closes when the maintainer asks it to
 
+> Superseded by [ADR 0057](0057-the-merge-is-the-second-act.md)
+
 The **Close transaction** ([`orchestrator/CONTEXT.md`](../../CONTEXT.md)) makes the
 orchestrator session the actor for all eight of its steps. The session resolves the
 conflicts against the default branch, pushes the mergeable branch, merges the PR, and

@@ -29,7 +29,7 @@ session coordinates **worker** sessions: each worker is a
 | **Adversarial review** | Optional review by a second worker on a **different-vendor** model (e.g. implement opus-5, review gpt-5.6). Prompted for **coverage**, not self-filtering. |
 | **Prose deliverable** | Text a worker routes through `simple-english` before it commits — the markdown in its diff, its review note, its PR body, and any string a Python file prints. Code, identifiers, paths, commands and link targets stay byte-identical. |
 | **Commit slice** | One commit on a worker's branch: one logical change, with the branch self-consistent at that commit (every cross-reference it adds resolves inside it). Committed as soon as the slice is done, not batched to the end. A trivial item is one commit. `main` still squash-merges to one commit per item ([ADR 0013](orchestrator/docs/adr/0013-workers-commit-in-contextualised-slices.md)). |
-| **Close transaction** | The eight steps that finish a work item, in one fixed order, after you ask for them. The orchestrator session runs steps 1 to 3 — resolve conflicts, push, merge — because they need judgement. `scripts/close_item.py` owns steps 4 to 8, because they need none: it refuses rather than warns, and its default invocation mutates nothing ([ADR 0015](orchestrator/docs/adr/0015-close-is-a-deterministic-transaction.md), [ADR 0016](orchestrator/docs/adr/0016-the-orchestrator-merges-when-asked.md)). |
+| **Close transaction** | The five steps that finish a work item, in one fixed order, once its pull request is merged. They keep the numbers 4 to 8 they held when there were eight. `scripts/close_item.py` owns them, it refuses rather than warns, and its default invocation mutates nothing. The tick reads the merge and runs the seam in its own process, so no verb starts a close ([ADR 0015](orchestrator/docs/adr/0015-close-is-a-deterministic-transaction.md), [ADR 0057](orchestrator/docs/adr/0057-the-merge-is-the-second-act.md)). |
 
 Full glossary: [`orchestrator/CONTEXT.md`](orchestrator/CONTEXT.md). Design
 rationale: [`orchestrator/docs/adr/`](orchestrator/docs/adr/).
@@ -141,16 +141,17 @@ phrases:
 | **work on #N, max K** | Batch-spawn every unblocked child of #N, capped at K. |
 | **what are the workers doing** | Monitor via checklist files + terminal idle state. |
 | **review #N adversarially** | Spawn a cross-vendor reviewer even if review is off in config. |
-| **close task #N** / it's done | Run the close transaction: resolve, merge, then the seam's five deterministic steps. |
+| **close task #N** / it's done | Report where the item is. A close needs no verb: merge the pull request, and the next tick runs the transaction. |
 
 Each worker keeps a file-based **checklist** (`.orchestrator/checklist-<item>.md`,
 gitignored) it ticks as it completes each contract step; the orchestrator reads it
 to track progress and catch a worker that stalls before opening the PR/MR. This
 replaces claude-only `TodoWrite` so it works across every harness.
 
-The merge decision is always a human one — the orchestrator never auto-merges. It
-carries out that decision only where you asked it to, as a **Close transaction**
-([ADR 0016](orchestrator/docs/adr/0016-the-orchestrator-merges-when-asked.md)).
+The merge decision is always a human one, and nothing here ever merges. You merge on the
+tracker, and the next tick reads that merge and runs a **Close transaction**: the item
+closes, and its worktree and its schedule go. So nothing is typed
+([ADR 0057](orchestrator/docs/adr/0057-the-merge-is-the-second-act.md)).
 
 ## Layout
 

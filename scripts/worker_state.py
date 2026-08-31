@@ -37,6 +37,7 @@ which of them a tick can reach:
 |---|---|
 | `implementation-complete` | every box in the **Checklist** is ticked, and the **Gate record** proves every required layer green at `HEAD` |
 | `gates-unproven` | the checklist reads complete, and the gate record does not prove it |
+| `merged` | the pull request whose head is this worktree's branch reads `MERGED` |
 | `verdict-approve` | the newest `Verdict:` comment reads `approve` |
 | `verdict-request-changes` | the newest one reads `request-changes`, inside the round bound |
 | `rounds-exhausted` | `--rounds` `Verdict:` comments, and the newest one asks for changes |
@@ -51,8 +52,12 @@ nothing stores a counter, and `--rounds` is the whole bound.
 `position_of` answers where the item sits in its run, from the work-state label, the
 `Verdict:` comment list and the last write to the **Checklist**. The rule has one home,
 the Position entry of `orchestrator/CONTEXT.md`, and this module restates no part of it.
-A position of human review means the maintainer is reading the pull request. No
-transition is due there, so every read of that branch is a quiet tick.
+
+**A position of human review reads one fact more: the pull request for this worktree's
+branch.** A `MERGED` pull request is the `merged` outcome, and it is a whole **Close
+transaction**. An open pull request is a quiet tick, and a branch with no pull request at
+all is a quiet tick too. So the maintainer merges on the tracker, and no verb carries their
+words (ADR 0057).
 
 **`needs-human` answers before every fact except the tracker read.** The tick reads that
 label and exits quiet, whatever the checklist, the verdicts and the process say. Only the
@@ -143,6 +148,7 @@ every other row of the table above writes nothing:
 | `implementation-complete` | the review state, in one label swap. It holds where `--review` says the policy is on |
 | `verdict-approve` | the review state, in one label swap |
 | `rounds-exhausted` | the review state, in one label swap |
+| `merged` | steps 4 to 8 of a **Close transaction**, through `scripts/close_item.py` in this process |
 | every other outcome | nothing, so the item stays where it is, and the code is 2 |
 
 **The finish is the one row that can hold its write.** A **Review round** comes next where
@@ -185,10 +191,15 @@ and posts one comment saying what the seam saw. A label with no reason leaves th
 maintainer to reconstruct one. Only the maintainer removes the label.
 
 **What this seam refuses to do.** It composes no prompt, kills no process, moves no card,
-merges nothing and spawns nothing. It writes one work-state label per run and nothing
-else. Every other destructive act stays in a session a human can interrupt. It holds no
-state that changes an answer, and it writes no file anywhere, so a restart after each
-re-prompt is free.
+merges nothing and spawns nothing. **The merge stays the maintainer's own act**, and this
+seam only reads its result. It holds no state that changes an answer, and it writes no file
+anywhere, so a restart after each re-prompt is free.
+
+**It writes one work-state label per run, or it runs one close.** The close is the one
+destructive act that left a session. It removes the worktree and the schedule of an item
+whose pull request is merged. Two gates in `scripts/close_item.py` stand in front of it,
+and each one refuses rather than warns. Every other destructive act stays in a session a
+human can interrupt.
 
 **The process pattern is an argument.** The caller reads it from
 `references/harnesses/<harness>.md`, so this seam names no harness and a sixth
@@ -210,8 +221,10 @@ from typing import Any
 # puts `scripts/` on the path, and `python3 -m scripts.worker_state` puts the repo root
 # there (ADR 0034).
 try:
+    from . import close_item
     from .tracker import GH, GLAB, Tracker, TrackerError
 except ImportError:  # the type checker reads the package form above
+    import close_item  # type: ignore[no-redef, import-not-found]
     from tracker import (  # type: ignore[no-redef, import-not-found]
         GH,
         GLAB,
@@ -735,23 +748,31 @@ APPLIES = {
     "rounds-exhausted": TO_REVIEW,
 }
 
+# The outcome that reads a merged pull request on the item's own branch. It is the one
+# outcome whose transition is a whole **Close transaction** rather than a label swap.
+MERGED = "merged"
+
 # What one tick does with the outcome it computed. `phase` prints the line and stops at
-# any of the four. `tick` maps each one to its own exit code, so a run history names what
+# any of the five. `tick` maps each one to its own exit code, so a run history names what
 # happened without parsing prose.
 GONE = "gone"
 QUIET = "quiet"
 REFUSED = "refused"
 APPLIED = "applied"
+CLOSE = "close"
 
 
-def decision(disposition, outcome, line, labels=(), add=""):
+def decision(disposition, outcome, line, labels=(), add="", pr=0):
     """One tick's answer, in the shape both subcommands read.
 
-    `disposition` is one of the four above. `outcome` is the tick's own word, or an empty
+    `disposition` is one of the five above. `outcome` is the tick's own word, or an empty
     string where no outcome fired. `line` is the one line to print. `labels` are the
     **Work-state label**s the item wore when this tick read it, and `add` is the label the
     transition puts on. The last two are what an `APPLIED` decision hands to the writer,
     and they are empty on every other one.
+
+    `pr` is the merged pull request a `CLOSE` decision carries, and it is 0 on every other
+    one. The close needs the number, and the tick read it from the branch.
     """
     return {
         "disposition": disposition,
@@ -759,7 +780,65 @@ def decision(disposition, outcome, line, labels=(), add=""):
         "line": line,
         "labels": list(labels),
         "add": add,
+        "pr": pr,
     }
+
+
+def in_human_review(item, worktree, tracker, labels):
+    """The answer for an item the maintainer is reading: a close, or a quiet tick.
+
+    **The merge is the second act, and nothing is typed.** A pull request that reads
+    `MERGED` is a deterministic fact. So this tick reads that fact, and no verb carries the
+    maintainer's words (ADR 0057).
+
+    **The branch is what this tick holds, and never a pull request number.** It watches one
+    worktree, so git answers the branch and the **Tracker adapter** answers the pull
+    request for it.
+
+    An open pull request is a quiet tick. A branch with no pull request at all is a quiet
+    tick too, and neither one is an error. A read that failed is the `unreadable` outcome,
+    the same as a failed read of the item.
+    """
+    branch = close_item.current_branch(worktree)
+    if not branch:
+        return decision(
+            QUIET,
+            "",
+            f"nothing: git reads no branch in {worktree}, so this tick can find no pull "
+            f"request for work item #{item}",
+        )
+    try:
+        pull = tracker.pull_request_for_branch(branch)
+    except (TrackerError, OSError, json.JSONDecodeError) as exc:
+        cause = " ".join(str(exc).split())
+        return decision(
+            REFUSED,
+            "unreadable",
+            f"unreadable: the pull requests for {branch} are unreadable, so this tick "
+            f"cannot read whether work item #{item} is merged: {cause}",
+            labels=labels,
+        )
+    state = (pull["state"] or "").upper()
+    if state != "MERGED":
+        seen = (
+            f"pull request #{pull['number']} for {branch} is {state.lower()}"
+            if pull["number"]
+            else f"no pull request is open for {branch}"
+        )
+        return decision(
+            QUIET,
+            "",
+            f"nothing: work item #{item} is in human review and {seen}, so no transition "
+            f"is due",
+        )
+    return decision(
+        CLOSE,
+        MERGED,
+        f"{MERGED}: pull request #{pull['number']} for {branch} is merged, so a Close "
+        f"transaction is due for work item #{item}",
+        labels=labels,
+        pr=pull["number"],
+    )
 
 
 def plan(
@@ -782,8 +861,8 @@ def plan(
     **Position** gates that outcome, because a read that failed cannot say where the item
     sits. `needs-human` follows, and it stops the tick whatever the other facts say. The
     computed position comes after that, because it decides which of the other outcomes
-    this tick can reach. An item in human review reaches none of them, so that branch is a
-    quiet tick.
+    this tick can reach. An item in human review reaches one of them, and that one is the
+    merged pull request `in_human_review` reads.
     """
     worktree = Path(os.path.realpath(worktree))
     if not worktree.is_dir():
@@ -816,12 +895,7 @@ def plan(
 
     current = position_of(labels, bodies, checklist_written(worktree, item))
     if current == HUMAN_REVIEW:
-        return decision(
-            QUIET,
-            "",
-            f"nothing: work item #{item} is in human review, so it waits for the "
-            f"maintainer to read the pull request and no transition is due",
-        )
+        return in_human_review(item, worktree, tracker, labels)
 
     outcome, detail = transition(
         item, worktree, current, bodies, rounds, pattern, stall_after, required=required
@@ -901,6 +975,96 @@ def needs_human(tracker, item, labels, saw):
     )
 
 
+def close_transaction(item, worktree, tracker, answer, close_flags):
+    """Run steps 4 to 8 of a **Close transaction**, and answer how the run went.
+
+    **The close runs in this process.** This function imports `scripts/close_item.py` and
+    calls its plan and its execute, rather than running it as a second process. So one
+    **Tracker adapter** serves both seams, and one read of the item serves both. The plan
+    the close emits becomes the line this tick prints, so the exit code and the reason stay
+    together.
+
+    **That seam keeps its five steps and their order, and this function adds none.** The
+    dirty-tree refusal is its own, and it protects uncommitted work, which has no reflog.
+
+    **A refusal writes `needs-human` with one comment.** The comment carries the plan's own
+    reason, so a dirty tree names its files and the maintainer repairs the one thing that
+    stopped the close.
+
+    `close_flags` is `(checkout, default branch, teardown command)`. **The checkout and the
+    teardown command are both conditions for a close, and neither one has a default.** With
+    one of them missing this tick closes nothing and names the flag it wants.
+
+    A teardown that removes no schedule leaves a schedule that ticks against a closed item.
+    And **step 5 cannot run inside the item's worktree**: that worktree is a linked one, and
+    `git fetch origin <branch>:<branch>` there exits 128 with `refusing to fetch into
+    branch`, because the sibling checkout holds that branch. So the checkout is where the
+    merge lands, and it is never this worktree.
+    """
+    checkout, default_branch, teardown_command = close_flags
+    missing = [
+        flag
+        for flag, value in (
+            ("--checkout", checkout),
+            ("--teardown-command", teardown_command),
+        )
+        if not value
+    ]
+    if missing:
+        return EXIT_REFUSED, (
+            f"{answer['line']} — refused: this tick carries no {', '.join(missing)}, so it "
+            f"closes nothing and work item #{item} stays where it is"
+        )
+    args = argparse.Namespace(
+        issue=item,
+        pr=answer["pr"],
+        repo=checkout,
+        default_branch=default_branch,
+        worktree=str(worktree),
+        remove_label=[name for name in WORK_STATES if name in answer["labels"]],
+        add_label=[],
+        close_comment=(
+            f"pull request #{answer['pr']} is merged, so the tick closed this work item"
+        ),
+        teardown_command=teardown_command,
+        teardown=True,
+        execute=True,
+    )
+    try:
+        closing = close_item.build(args, tracker)
+    # The same four causes the tick's own reads catch. `close_item.build` makes three more
+    # tracker reads, and a command that exits 0 with no JSON raises out of the parser. A
+    # traceback here would exit 1, which is the code a quiet tick already owns.
+    except (
+        close_item.GitError,
+        TrackerError,
+        OSError,
+        json.JSONDecodeError,
+    ) as exc:
+        cause = " ".join(str(exc).split())
+        return needs_human(
+            tracker,
+            item,
+            answer["labels"],
+            f"the close of work item #{item} could not be planned: {cause}",
+        )
+    code = close_item.execute(closing, tracker)
+    ran = ", ".join(
+        f"{entry['step']} {entry['name']} {entry['status']}"
+        for entry in closing["steps"]
+    )
+    if code != close_item.EXIT_OK:
+        reason = (
+            (closing.get("refused") or {}).get("reason")
+            or closing.get("error")
+            or "the close transaction did not complete"
+        )
+        return needs_human(
+            tracker, item, answer["labels"], f"{reason} The plan ran: {ran}"
+        )
+    return EXIT_APPLIED, f"{answer['line']} — applied: the close ran: {ran}"
+
+
 def claim(item, tracker):
     """The `--claim` answer: the ready state swapped for the in-progress state.
 
@@ -959,7 +1123,15 @@ def phase(
 
 
 def tick(
-    item, worktree, pattern, rounds, stall_after, tracker, required=(), review=False
+    item,
+    worktree,
+    pattern,
+    rounds,
+    stall_after,
+    tracker,
+    required=(),
+    review=False,
+    close_flags=("", "main", ""),
 ):
     """The `tick` answer: `(exit code, the one line to print)`.
 
@@ -967,6 +1139,9 @@ def tick(
     transition that plan carries. **At most one transition per run**: one tick reads one
     item, computes one outcome and makes at most one label swap. So a wrong computation
     cannot cascade inside one minute.
+
+    **The `merged` outcome is the one transition that is not a label swap.** It is a whole
+    **Close transaction**, and `close_transaction` runs it in this process.
 
     An outcome with no transition is a refusal, and the item stays where it is. Four facts
     reach that branch:
@@ -992,6 +1167,8 @@ def tick(
         return EXIT_GONE, answer["line"]
     if answer["disposition"] == QUIET:
         return EXIT_NOTHING, answer["line"]
+    if answer["disposition"] == CLOSE:
+        return close_transaction(item, worktree, tracker, answer, close_flags)
     if answer["disposition"] == REFUSED:
         return EXIT_REFUSED, (
             f"{answer['line']} — refused: this seam writes no label for "
@@ -1118,7 +1295,8 @@ def main(argv=None):
             "process at work in this worktree, and is a transition due for its "
             "work item. The phase subcommand computes and writes nothing. The tick "
             "subcommand computes through the same code path and then applies the one "
-            "transition it computed. It composes no prompt, kills no process, moves no "
+            "transition it computed. A merged pull request is one of those transitions, "
+            "and it closes the item. It composes no prompt, kills no process, moves no "
             "card, merges nothing and spawns nothing."
         ),
     )
@@ -1151,15 +1329,15 @@ def main(argv=None):
         description=(
             "The plan half of the seam, and the dry run of a tick. Exit 0 means a "
             "transition is due, and the printed line names which one: "
-            "implementation-complete, gates-unproven, "
+            "implementation-complete, gates-unproven, merged, "
             "verdict-approve, verdict-request-changes, rounds-exhausted, "
             "dead, stalled, unreadable. "
             "Exit 1 means nothing to do, so the run records as skipped at no token "
             "cost. Exit 3 means the worktree is gone. It writes no tracker command and "
             "no file, so it can be run against a live tracker. The computed Position "
             "decides which outcomes a tick can reach, and it reads no label of its "
-            "own. An item in human review reaches none of them, so that branch is a "
-            "quiet tick. The one outcome no position gates is unreadable, because a "
+            "own. An item in human review reaches one of them, and that one is merged. "
+            "The one outcome no position gates is unreadable, because a "
             "read that failed cannot say where the item sits."
         ),
     )
@@ -1173,7 +1351,9 @@ def main(argv=None):
             "The command an Item automation runs as its --precheck. It reads the same "
             "plan the phase subcommand reads, and then it applies the one transition "
             "that plan carries. Exit 4 means applied, and the line names the "
-            "transition and the labels it wrote. Exit 2 means refused: an outcome is "
+            "transition and the labels it wrote. Where that transition is a merged pull "
+            "request, the line carries the plan of the close that ran. Exit 2 means "
+            "refused: an outcome is "
             "due and this seam writes no label for it, so the item stays where it is. "
             "Exit 1 is a quiet tick and exit 3 is a worktree that is gone. No path "
             "exits 0, so every run records as skipped and the automation's own prompt "
@@ -1190,6 +1370,28 @@ def main(argv=None):
         "runs the same writer a tick runs and assembles no label command of its own. "
         "It reads no worktree and no process, so it needs none of the four flags that "
         "name a worker",
+    )
+    applier.add_argument(
+        "--checkout",
+        default="",
+        help="the checkout that receives the merge, where a merged pull request runs a "
+        "close. --repo names the tracker project, so the checkout takes an argument of its "
+        "own. It is never the item's worktree: that worktree is a linked one, and git "
+        "refuses to fetch into a branch a sibling checkout holds. With no value a merged "
+        "pull request closes nothing, and the tick says so",
+    )
+    applier.add_argument(
+        "--default-branch",
+        default="main",
+        help="the branch the merge landed on, which the close pulls into (default: main)",
+    )
+    applier.add_argument(
+        "--teardown-command",
+        default="",
+        help="the command that removes the automation and the worktree, with the ids "
+        "already in it. The caller reads it from its tool reference, so this seam holds no "
+        "command of its own. With no value a merged pull request closes nothing, because a "
+        "close with no teardown leaves a schedule that ticks against a closed item",
     )
 
     args = parser.parse_args(argv)
@@ -1249,17 +1451,32 @@ def main(argv=None):
     # `required=True` on `--item` leaves no fourth case, so the last branch is
     # unconditional rather than a third `if`. That is what keeps a fall-through out of
     # the exit contract: an implicit `None` would exit 0 and read as a due transition.
-    answer = phase if args.command == "phase" else tick
-    code, line = answer(
-        args.item,
-        args.worktree,
-        args.process,
-        args.rounds,
-        stall_after,
-        tracker,
-        required=required,
-        review=args.review,
-    )
+    #
+    # **The three close flags reach `tick` alone.** `phase` runs no close, so it takes
+    # none of them and it stays the half that writes nothing at all.
+    if args.command == "phase":
+        code, line = phase(
+            args.item,
+            args.worktree,
+            args.process,
+            args.rounds,
+            stall_after,
+            tracker,
+            required=required,
+            review=args.review,
+        )
+    else:
+        code, line = tick(
+            args.item,
+            args.worktree,
+            args.process,
+            args.rounds,
+            stall_after,
+            tracker,
+            required=required,
+            review=args.review,
+            close_flags=(args.checkout, args.default_branch, args.teardown_command),
+        )
     print(line)
     return code
 
