@@ -48,6 +48,11 @@ which of them a tick can reach:
 A **Review round** count is the number of `Verdict:` comments on the work item. So
 nothing stores a counter, and `--rounds` is the whole bound.
 
+**A re-prompt count is the number of `Re-prompt:` comments on the same item.** It takes that
+same shape, so nothing stores it either, and a restart reads the number a maintainer reads.
+The bound is one and it is not an argument: a bound a caller can raise is a climb, and no
+rung is a fact a machine can read (ADR 0058).
+
 **This tick computes the position, and it reads no label of its own to do that.**
 `position_of` answers where the item sits in its run, from the work-state label, the
 `Verdict:` comment list and the last write to the **Checklist**. The rule has one home,
@@ -130,7 +135,7 @@ the execute half, and it is the whole body of an **Item automation** tick:
 | Code | Meaning |
 |---|---|
 | 1 | a quiet tick, so the run records as skipped |
-| 2 | refused — an outcome is due, and this seam writes no label for it |
+| 2 | refused — an outcome is due, and this seam carries the work no further |
 | 3 | the worktree is gone — nothing left to watch |
 | 4 | applied — the printed line names the transition and the labels it wrote |
 
@@ -149,7 +154,15 @@ every other row of the table above writes nothing:
 | `verdict-approve` | the review state, in one label swap |
 | `rounds-exhausted` | the review state, in one label swap |
 | `merged` | steps 4 to 8 of a **Close transaction**, through `scripts/close_item.py` in this process |
+| `stalled` | one `Re-prompt:` comment under the bound, and `needs-human` at it |
 | every other outcome | nothing, so the item stays where it is, and the code is 2 |
+
+**A stalled worker gets one re-prompt, and then a human.** The count is the number of
+`Re-prompt:` comments on the work item. The first stalled tick posts one of those comments,
+which carries what it saw and the unticked boxes, and the item stays where it is. The second
+writes `needs-human` and re-prompts nothing. So no rung is climbed and no model diagnoses a
+terminal it cannot see (ADR 0058). `dead` keeps its own answer, because nothing listens
+there and a re-prompt cannot reach a process that is gone.
 
 **The finish is the one row that can hold its write.** A **Review round** comes next where
 `--review` says the policy is on. A worker still owns the item there, so the review state
@@ -188,14 +201,15 @@ worker flags. Every other form of `tick` still requires all four.
 
 **`needs-human` is a transition with a comment.** The writer puts the label on the item
 and posts one comment saying what the seam saw. A label with no reason leaves the
-maintainer to reconstruct one. Only the maintainer removes the label.
+maintainer to reconstruct one. Only the maintainer removes the label. A close that could not
+run writes it, and so does a stall that already spent its one retry.
 
 **What this seam refuses to do.** It composes no prompt, kills no process, moves no card,
 merges nothing and spawns nothing. **The merge stays the maintainer's own act**, and this
 seam only reads its result. It holds no state that changes an answer, and it writes no file
 anywhere, so a restart after each re-prompt is free.
 
-**It writes one work-state label per run, or it runs one close.** The close is the one
+**It writes one work-state label per run, or one comment, or it runs one close.** The close is the one
 destructive act that left a session. It removes the worktree and the schedule of an item
 whose pull request is merged. Two gates in `scripts/close_item.py` stand in front of it,
 and each one refuses rather than warns. Every other destructive act stays in a session a
@@ -267,6 +281,20 @@ EXIT_APPLIED = 4
 # places, so a writing pass leaves it byte-identical (ADR 0018).
 VERDICT_VALUES = ("approve", "request-changes")
 VERDICT = re.compile(r"Verdict:\**\s*`?(" + "|".join(VERDICT_VALUES) + r")\b")
+
+# The literal this seam writes on a re-prompt and counts back on the next stall. It is
+# quoted here and in `orchestrator/CONTEXT.md`, so a writing pass leaves it byte-identical
+# (ADR 0058).
+RE_PROMPT = "Re-prompt:"
+
+# A comment counts only where that literal opens a line, which is where this seam writes it.
+# A bare substring test counts a review note that quotes the literal, and a maintainer who
+# writes about a re-prompt must not spend one.
+RE_PROMPTED = re.compile(r"^\s*" + re.escape(RE_PROMPT), re.MULTILINE)
+
+# One re-prompt, and then a human. The bound is not an argument: a bound a caller can raise
+# is a climb under another name, and the climb is what ADR 0058 deletes.
+RE_PROMPTS = 1
 
 BOX = re.compile(r"^\s*[-*+]\s*\[([ xX])\]")
 
@@ -424,6 +452,24 @@ def boxes(path):
     return sum(1 for mark in marks if mark != " "), len(marks)
 
 
+def unticked(path):
+    """The first line of each unticked box in `path`, in file order.
+
+    What a re-prompt re-sends. A box in this repo's **Checklist** runs over several lines,
+    and the first one carries the step. So the answer is the steps that are left, short
+    enough for one comment body (ADR 0058).
+    """
+    try:
+        text = Path(path).read_text()
+    except OSError:
+        return []
+    return [
+        line.strip()
+        for line in text.splitlines()
+        if (match := BOX.match(line)) and match.group(1) == " "
+    ]
+
+
 def verdicts_in(bodies):
     """Every `approve` or `request-changes` the comments carry, oldest first.
 
@@ -431,6 +477,19 @@ def verdicts_in(bodies):
     So the count is read from the tracker and nothing stores a counter (ADR 0022).
     """
     return [match.group(1) for body in bodies if (match := VERDICT.search(body or ""))]
+
+
+def re_prompts_in(bodies):
+    """How many `Re-prompt:` comments the work item carries.
+
+    The re-prompt count, in the shape the **Review round** count already takes. It is
+    scoped to the item and to nothing else, so no re-spawn resets it and a restart reads
+    the number a maintainer reads. Nothing stores it (ADR 0058).
+
+    **The literal has to open a line**, which is where this seam writes it. So a review note
+    or a maintainer's comment that quotes the literal spends no retry.
+    """
+    return sum(1 for body in bodies if RE_PROMPTED.search(body or ""))
 
 
 # --- the Gate record (ADR 0036) ---------------------------------------------
@@ -752,14 +811,20 @@ APPLIES = {
 # outcome whose transition is a whole **Close transaction** rather than a label swap.
 MERGED = "merged"
 
+# The outcome that reads a live process with stale work product. It is the one outcome whose
+# transition depends on a count, so it is named rather than repeated.
+STALLED = "stalled"
+
 # What one tick does with the outcome it computed. `phase` prints the line and stops at
-# any of the five. `tick` maps each one to its own exit code, so a run history names what
+# any of the seven. `tick` maps each one to its own exit code, so a run history names what
 # happened without parsing prose.
 GONE = "gone"
 QUIET = "quiet"
 REFUSED = "refused"
 APPLIED = "applied"
 CLOSE = "close"
+RETRY = "retry"
+HUMAN = "human"
 
 
 def decision(disposition, outcome, line, labels=(), add="", pr=0):
@@ -841,6 +906,34 @@ def in_human_review(item, worktree, tracker, labels):
     )
 
 
+def stall_answer(item, detail, bodies, labels):
+    """The answer for a stalled worker: one re-prompt, and then a human.
+
+    **The count is the number of `Re-prompt:` comments on the work item**, read from the
+    bodies this tick already holds. Under the bound the answer is a re-prompt, and the item
+    stays where it is. At the bound the answer is a human, so `needs-human` goes on and every
+    later tick leaves the item alone.
+
+    **Nothing here computes a rung.** A bigger model is a judgement about a terminal this
+    seam cannot see, and the count no longer resets when a worker is re-spawned (ADR 0058).
+    """
+    sent = re_prompts_in(bodies)
+    if sent >= RE_PROMPTS:
+        return decision(
+            HUMAN,
+            STALLED,
+            f"{STALLED}: {detail}, and work item #{item} already carries {sent} of "
+            f"{RE_PROMPTS} retries",
+            labels=labels,
+        )
+    return decision(
+        RETRY,
+        STALLED,
+        f"{STALLED}: {detail}, on retry {sent + 1} of {RE_PROMPTS}",
+        labels=labels,
+    )
+
+
 def plan(
     item, worktree, pattern, rounds, stall_after, tracker, required=(), review=False
 ):
@@ -902,6 +995,8 @@ def plan(
     )
     if not outcome:
         return decision(QUIET, "", f"nothing: {detail}")
+    if outcome == STALLED:
+        return stall_answer(item, detail, bodies, labels)
     if outcome == FINISH and review:
         return decision(
             REFUSED,
@@ -972,6 +1067,35 @@ def needs_human(tracker, item, labels, saw):
     return EXIT_REFUSED, (
         f"{NEEDS_HUMAN}: {saw} — applied: {swap_line(item, removed, added)}, with one "
         f"comment that says what this tick saw"
+    )
+
+
+def re_prompt(item, worktree, tracker, answer):
+    """Post one `Re-prompt:` comment on a stalled worker's item, and answer how it went.
+
+    **The comment is the whole write.** It carries what this tick saw and the steps that are
+    still unticked, so a session that reads it needs no second read to compose the retry. No
+    label moves, because a stalled worker still owns its item.
+
+    **This seam composes no prompt and delivers nothing.** The reset of the worker's context
+    and the send stay a session's act, so no transition here depends on a delivery that can
+    fail (ADR 0058).
+
+    Returns `(exit code, the one line to print)`. The code is the applied one, because the
+    tick wrote the fact the next tick counts.
+    """
+    path = checklist_path(worktree, item)
+    steps = "; ".join(unticked(path)) or "no unticked box"
+    tracker.write(
+        tracker.comment_argv(
+            item,
+            f"{RE_PROMPT} {answer['line']}. Reset the worker's context, then re-send these "
+            f"steps of {path.name}: {steps}",
+        )
+    )
+    return EXIT_APPLIED, (
+        f"{answer['line']} — applied: one {RE_PROMPT} comment on work item #{item}, which "
+        f"carries the unticked steps"
     )
 
 
@@ -1143,11 +1267,15 @@ def tick(
     **The `merged` outcome is the one transition that is not a label swap.** It is a whole
     **Close transaction**, and `close_transaction` runs it in this process.
 
+    **The `stalled` outcome is the one transition a count decides.** Under the bound it is
+    one `Re-prompt:` comment and no label. At the bound it is `needs-human`, and the code is
+    the refusal because a seam that asks for a human refused to act (ADR 0058).
+
     An outcome with no transition is a refusal, and the item stays where it is. Four facts
     reach that branch:
 
     1. A **Gate record** that is not green at `HEAD`.
-    2. A dead worker, or a stalled one.
+    2. A dead worker, which no re-prompt can reach.
     3. A fix round, which is still the same worker's own work.
     4. A tracker read that failed.
 
@@ -1169,6 +1297,10 @@ def tick(
         return EXIT_NOTHING, answer["line"]
     if answer["disposition"] == CLOSE:
         return close_transaction(item, worktree, tracker, answer, close_flags)
+    if answer["disposition"] == RETRY:
+        return re_prompt(item, worktree, tracker, answer)
+    if answer["disposition"] == HUMAN:
+        return needs_human(tracker, item, answer["labels"], answer["line"])
     if answer["disposition"] == REFUSED:
         return EXIT_REFUSED, (
             f"{answer['line']} — refused: this seam writes no label for "
@@ -1352,7 +1484,8 @@ def main(argv=None):
             "plan the phase subcommand reads, and then it applies the one transition "
             "that plan carries. Exit 4 means applied, and the line names the "
             "transition and the labels it wrote. Where that transition is a merged pull "
-            "request, the line carries the plan of the close that ran. Exit 2 means "
+            "request, the line carries the plan of the close that ran. A stalled worker "
+            "gets one re-prompt comment, and then needs-human. Exit 2 means "
             "refused: an outcome is "
             "due and this seam writes no label for it, so the item stays where it is. "
             "Exit 1 is a quiet tick and exit 3 is a worktree that is gone. No path "
