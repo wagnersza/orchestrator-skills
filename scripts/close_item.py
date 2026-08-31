@@ -49,9 +49,10 @@ part into a coupled one:
   `--tracker-repo` name it, and the caller reads all three from the repo's tracker
   configuration. Every command then comes from the **Tracker adapter** in
   `scripts/tracker.py`, so this seam holds no tracker command and no CLI name
-  (ADR 0040). Where a tracker closes an item with no reason flag, step 7 posts the
-  reason first and closes second. The seam reads that from the adapter, and never
-  from the CLI name.
+  (ADR 0040). **It holds no order of its own either.** Step 7 asks the adapter for
+  the writes that close an item, and it runs them in the order the adapter gives
+  them. Where a tracker closes an item with no reason flag, that order is the reason
+  first and the close second (ADR 0056).
 
 The exit code carries the outcome, so the caller reports the cause and parses no
 prose: 0 clean, 2 the PR is not merged, 3 the worktree is dirty, 1 a step failed.
@@ -334,9 +335,10 @@ def tracker_parts(args, tracker):
     Each part is idempotent, which is what makes a part-applied close resumable:
     a re-run finds the parts that landed already `done` and finishes the rest.
 
-    There are two writes where the close command records the closing reason itself,
-    and three where that reason needs its own write. The seam asks the adapter which of
-    the two it has, so the seam names no tracker (ADR 0040).
+    The label is one part. The close is one or two more, and the adapter answers which
+    writes those are and in what order (ADR 0056). So this seam iterates that answer. It
+    learns neither that one tracker needs a second write nor where that write goes, and
+    it names no tracker (ADR 0040).
 
     **No part of step 7 writes a board card** (ADR 0054).
     """
@@ -359,33 +361,38 @@ def tracker_parts(args, tracker):
             f"the item carries {', '.join(labels) or 'no work-state label'}",
         )
 
-    close_argv = tracker.close_argv(args.issue, args.close_comment)
-    close = part(
+    parts = [label]
+    for name, argv in tracker.close_writes(args.issue, args.close_comment):
+        parts.append(
+            note_part(args, tracker, argv)
+            if name == "note"
+            else close_part(args, argv, closed)
+        )
+    return parts
+
+
+def close_part(args, argv, closed):
+    """The write that closes the item."""
+    return part(
         "close",
-        close_argv,
+        argv,
         STATUS_DONE if closed else STATUS_TODO,
         f"issue #{args.issue} is already closed"
         if closed
         else f"closes issue #{args.issue}",
     )
 
-    note = note_part(args, tracker)
-    return [label, *([note] if note else []), close]
 
-
-def note_part(args, tracker):
-    """The closing reason as its own write, or None where the close command carries it.
+def note_part(args, tracker, argv):
+    """The closing reason as a write of its own.
 
     A repeat of this write posts a second note. So this part reads the comments on the
     item first, and it answers `done` where the reason is already there. That keeps
     every part of step 7 repeatable, which is what makes a part-applied close resumable.
 
-    The read runs only where there is a reason to post and the close command takes
-    none. So a tracker that closes with a reason costs no extra read.
+    The adapter answers this write only where there is a reason to post and the close
+    command takes none. So a tracker that closes with a reason costs no extra read.
     """
-    argv = tracker.closing_note_argv(args.issue, args.close_comment)
-    if not argv:
-        return None
     _, comments = tracker.item_facts(args.issue)
     if any(args.close_comment in (body or "") for body in comments):
         return part(
