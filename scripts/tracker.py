@@ -24,12 +24,15 @@ item and one per pull request:
                       "labels": ["in-progress"],
                       "comments": ["Verdict: approve", "an earlier note"],
                       "board": "To do"}},
-     "pull_requests": {"48": {"state": "MERGED", "merge_commit": "a1b2c3d"}}}
+     "pull_requests": {"48": {"state": "MERGED",
+                              "merge_commit": "a1b2c3d",
+                              "head": "someone/54-a-branch"}}}
 
 `board` is the `Status` option name on that item's card. It is the one fact the board
-answers, and no caller writes it back (ADR 0054). Every key is optional. An item that
-is absent from a key reads as an item with none of that fact, and a key that is absent
-reads the same way.
+answers, and no caller writes it back (ADR 0054). `head` is the branch that pull
+request was opened from, and it is what a caller matches to find the pull request for
+a branch. Every key is optional. An item that is absent from a key reads as an item
+with none of that fact, and a key that is absent reads the same way.
 
 In fixture mode a write runs nothing. It appends its command to
 `<fixture path>.writes`, one per line. That file is what a test reads to see which
@@ -259,6 +262,40 @@ class Tracker:
             "merge_commit": (data.get("mergeCommit") or {}).get("oid") or "",
         }
 
+    def pull_request_for_branch(self, branch):
+        """The pull request whose head is `branch`: `{"number", "state"}`.
+
+        A caller that holds a branch and no number asks this. A **Worker watch** tick is
+        that caller. It knows the worktree it watches, so it can read the branch, and
+        nothing hands it a pull request number.
+
+        **A branch with no pull request is no error.** The answer is a number of 0 and an
+        empty state. So the caller reads one shape whichever fact holds, and a quiet tick
+        is one comparison away from a merged one.
+
+        **A merged pull request wins where a branch has more than one.** A branch that
+        was closed and opened again carries two records. The merge is the fact the caller
+        asked about.
+        """
+        found: list[tuple[int, str]]
+        if self.fixture is not None:
+            found = [
+                (int(number), str(record.get("state") or ""))
+                for number, record in (self.fixture.get("pull_requests") or {}).items()
+                if str(record.get("head") or "") == branch
+            ]
+        else:
+            # One tracker names the number `number`, and the other names it `iid`,
+            # because it numbers a merge request in a sequence of its own.
+            key = "iid" if self.cli == GLAB else "number"
+            found = [
+                (int(entry.get(key) or 0), str(entry.get("state") or ""))
+                for entry in read_json(self.pr_for_branch_argv(branch), "[]") or []
+            ]
+        merged = [one for one in found if one[1].upper() == "MERGED"]
+        number, state = (merged or found or [(0, "")])[0]
+        return {"number": number, "state": state}
+
     def board_status(self, item, project, owner):
         """The `Status` option name on this work item's card, or an empty string.
 
@@ -297,6 +334,42 @@ class Tracker:
             str(number),
             "--json",
             "state,mergeCommit",
+            *self._repo_flag(),
+        ]
+
+    def pr_for_branch_argv(self, branch):
+        """The argv that lists the pull requests opened from one branch.
+
+        Every state, because the caller asks whether one of them is merged. One tracker
+        filters on the head branch with a flag of its own. The other takes the branch as
+        a query parameter on its API. So the read never touches `glab mr list`, and it
+        never meets the flag trap `references/tracker-reads.md` records.
+        """
+        if self.cli == GLAB:
+            if not self.repo:
+                raise TrackerError(
+                    "a glab read of the merge requests for a branch needs --repo as "
+                    "OWNER/NAME, because the project path is part of the command"
+                )
+            argv = [
+                GLAB,
+                "api",
+                f"projects/{self.repo.replace('/', '%2F')}/merge_requests"
+                f"?source_branch={branch}&state=all",
+            ]
+            if self.host:
+                argv += ["--hostname", self.host]
+            return argv
+        return [
+            GH,
+            "pr",
+            "list",
+            "--head",
+            branch,
+            "--state",
+            "all",
+            "--json",
+            "number,state",
             *self._repo_flag(),
         ]
 
