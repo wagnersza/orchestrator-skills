@@ -1143,6 +1143,34 @@ class WorkerStateTestCase(unittest.TestCase):
         self.assertIn("--teardown-command", line)
         self.assertEqual(self.writes(), [])
 
+    def test_the_three_close_flags_reach_the_close_through_the_command_line(self):
+        """The precheck is a string a tool stores, so the flags must wire through `main`.
+
+        The in-process cases call `tick` directly, so none of them crosses the argument
+        parser. This one runs the command an **Item automation** really runs.
+        """
+        write(self.checklist, TICKED)
+        self.write_fixture(labels=HUMAN_REVIEW, pull_requests=self.pull_request())
+
+        line = self.tick_cli(
+            "--checkout",
+            str(self.worktree),
+            "--default-branch",
+            "main",
+            "--teardown-command",
+            f"touch {self.teardown_marker()}",
+        )
+
+        self.assertTrue(line.startswith("merged:"), line)
+        self.assertIn("8 teardown done", line)
+        self.assertTrue(self.teardown_marker().is_file())
+        self.assertEqual(self.swaps(), [([TO_REVIEW], [])])
+
+    def test_the_phase_subcommand_takes_none_of_the_three_close_flags(self):
+        """`phase` runs no close, so it stays the half that writes nothing at all."""
+        for flag in ("--checkout", "--default-branch", "--teardown-command"):
+            self.phase_cli(flag, "anything", expect=EXIT_USAGE)
+
     def test_the_phase_subcommand_reads_the_merge_and_writes_nothing(self):
         """The plan half names the close that is due, and it runs none of it."""
         write(self.checklist, TICKED)
