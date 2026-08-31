@@ -34,10 +34,11 @@ The orchestrator reads these from here; its own config never redefines them.
 | stopped | `needs-human` | A seam refused. **The one label that stops every tick.** |
 | done | *(closed)* | PR merged and the issue closed. |
 
-**A seam writes every value in this table, and a session writes none.** The tick of an
-**Item automation** applies the transition it computed, in the process that read the
+**A seam writes every value in this table, and no session writes one by hand.** The tick of
+an **Item automation** applies the transition it computed, in the process that read the
 labels. The removals and the addition are one command, so nothing can stack. The
-orchestrator's spawn claim runs that same writer under one named transition. Rationale:
+orchestrator's spawn claim runs that same writer under one named transition, and the close
+seam writes the last value as one step of its own transaction. Rationale:
 [`orchestrator/docs/adr/0056-the-tick-applies-the-transition-it-computed.md`](../../orchestrator/docs/adr/0056-the-tick-applies-the-transition-it-computed.md).
 
 **`needs-human` carries one comment that says what the seam saw, and only the maintainer

@@ -49,11 +49,15 @@ comment is a report of the current plan and not a promise about the next one.
 
 ## The park rule
 
-Where a branch conflicts, the session does three things:
+Where a branch conflicts, the session does two things:
 
-- Drop the item back to the review state.
 - Comment the conflicting paths on the work item.
 - Continue with the next branch.
+
+**No label moves.** An item in a **Merge queue** already wears the review state, and a park
+leaves it there. So a park is a comment and nothing else, and the session writes no
+work-state label
+([`../docs/adr/0056-the-tick-applies-the-transition-it-computed.md`](../docs/adr/0056-the-tick-applies-the-transition-it-computed.md)).
 
 Nothing unattended resolves a hunk. A parked item is not a failed one. It needs the
 judgement that step 1 of the **Close transaction** keeps in prose. So it goes back to the

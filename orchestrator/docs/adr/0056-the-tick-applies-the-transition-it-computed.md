@@ -33,13 +33,19 @@ in one swap. The rest say something about the worker, about the tracker read, or
 fix round that is still the same worker's work. None of those decides a label, so the item
 stays where it is and the exit code is the refusal.
 
-**The finish is the one row with more than one branch, and the tick honours both.** That
-row already held them. Where `--review` says the review policy is on, a **Review round**
-comes next and a worker still owns the item. On a `user-story` parent, the layer 5 story
-gate reads the evidence first
-([ADR 0047](0047-the-story-proof-runs-before-the-story-gate.md)). Each of the two holds the
-swap, prints why, and leaves the item where it is. So the outcome table gains a write and
-loses no branch, and `to-review` still means only that a human owns the item.
+**The finish holds its write where the review policy is on.** That branch was already in
+the outcome table's own row. A **Review round** comes next there, so a worker still owns the
+item. The review state would then read as a lie. The hold prints why, the item stays where
+it is, and the round's own verdict writes the label when the loop concludes. The policy
+arrives as `--review`, the way `--rounds` and `--require-gate` already arrive.
+
+**The parent branch of that row does not survive.** The table said a `user-story` parent
+waits for its layer 5 story gate before the swap
+([ADR 0047](0047-the-story-proof-runs-before-the-story-gate.md)). A hold there has no later
+writer, because the `user-story` label never leaves the item, so the parent would sit at
+`in-progress` for good. A parent now reaches the review state on its finish, and the story
+gate runs on an item that already wears it. The gate reads the evidence note and the spec
+PR, and neither one is gated by a label.
 
 **A tick applies at most one transition per run.** One tick reads one item, computes one
 outcome and makes at most one label swap. So a wrong computation cannot cascade inside one
@@ -108,6 +114,12 @@ was a second act inside a wake response, and there is no wake to respond to. A s
 repoints when it spawns the next worker instead. The edit still fails closed, so a
 rejected repoint leaves the item observed.
 
+**It narrows [ADR 0047](0047-the-story-proof-runs-before-the-story-gate.md) on one
+ordering.** A `user-story` parent now reaches the review state on its finish, and its layer
+5 story gate runs after that write rather than before it. The trigger, the fresh worktree,
+the two durable artifacts and the failed-proof block are all unchanged, and the maintainer
+still reads the spec PR before any close.
+
 **No old ADR file is edited here.** The ledger pass that marks every retired ADR is a
 later item, the same posture
 [ADR 0054](0054-the-board-is-an-input-not-a-mirror.md) took.
@@ -161,6 +173,10 @@ later item, the same posture
   round routes from an item a worker still owns, and the review round stays a legal
   position through this wave. Adversarial review leaves the loop in a later wave, and
   reversing the position rule would need its own ADR.
+- **The merge train's park loses its label write.** A park dropped the item "back to the
+  review state", and an item in a **Merge queue** already wears that state. So the write was
+  already a no-op, and the park is now the comment alone. No session writes a work-state
+  label anywhere in this repo's flows.
 - **Two bug reports close with this record.** #155, two stacked work states, and #156, an
   undelivered wake burning its window.
 - **The rollback is to remove the schedule.** The manual flow that

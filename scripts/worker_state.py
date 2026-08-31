@@ -140,15 +140,15 @@ every other row of the table above writes nothing:
 
 | Outcome | What the tick writes |
 |---|---|
-| `implementation-complete` | the review state, in one label swap. It holds where `--review` says the policy is on, and on a `user-story` parent |
+| `implementation-complete` | the review state, in one label swap. It holds where `--review` says the policy is on |
 | `verdict-approve` | the review state, in one label swap |
 | `rounds-exhausted` | the review state, in one label swap |
 | every other outcome | nothing, so the item stays where it is, and the code is 2 |
 
-**The finish is the one row with more than one branch, and both branches were already in
-it.** A **Review round** comes next where the review policy is on, so a worker still owns
-the item. A `user-story` parent waits for its layer 5 story gate. Each of the two holds the
-swap and prints why, so the item stays where it is.
+**The finish is the one row that can hold its write.** A **Review round** comes next where
+`--review` says the policy is on. A worker still owns the item there, so the review state
+would read as a lie. The hold prints why, and the item stays where it is. The round's own
+verdict writes the review state when the loop concludes.
 
 **One function owns every work-state label swap in this seam**, and it runs in the
 process that already read the labels. So no second read can disagree with the first, and
@@ -599,10 +599,6 @@ NEEDS_HUMAN = "needs-human"
 
 WORK_STATES = (READY_FOR_AGENT, IN_PROGRESS, TO_REVIEW, NEEDS_HUMAN)
 
-# The label that marks a spec whose children are the implementable work. It is not a
-# work-state value, and `docs/agents/issue-tracker.md` owns its string too. A finish on a
-# parent holds, because the layer 5 story gate reads the evidence first.
-USER_STORY = "user-story"
 
 # The three values of a **Position**. The concept has one home, the Position entry of
 # `orchestrator/CONTEXT.md`, and this seam restates no part of the rule.
@@ -766,23 +762,6 @@ def decision(disposition, outcome, line, labels=(), add=""):
     }
 
 
-def finish_holds(labels, review):
-    """Why a finish does not reach the review state, or an empty string.
-
-    Two cases, and both are already in the outcome table's own row for the finish. Where
-    `--review` says the policy is on, a **Review round** comes next and a worker still owns
-    the item. A `user-story` parent waits for its layer 5 story gate, which reads the
-    evidence a swap would hand to a human. Every other item reaches the review state.
-    """
-    if review:
-        return (
-            "the review policy is on, so a Review round comes before the review state"
-        )
-    if USER_STORY in labels:
-        return f"this is a {USER_STORY} parent, so its layer 5 story gate answers first"
-    return ""
-
-
 def plan(
     item, worktree, pattern, rounds, stall_after, tracker, required=(), review=False
 ):
@@ -849,10 +828,13 @@ def plan(
     )
     if not outcome:
         return decision(QUIET, "", f"nothing: {detail}")
-    holds = finish_holds(labels, review) if outcome == FINISH else ""
-    if holds:
+    if outcome == FINISH and review:
         return decision(
-            REFUSED, outcome, f"{outcome}: {detail}, and {holds}", labels=labels
+            REFUSED,
+            outcome,
+            f"{outcome}: {detail}, and the review policy is on, so a Review round comes "
+            f"before the review state",
+            labels=labels,
         )
     add = APPLIES.get(outcome, "")
     if not add:

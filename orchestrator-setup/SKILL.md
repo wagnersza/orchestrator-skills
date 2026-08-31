@@ -200,7 +200,7 @@ For option 1, skip the interview entirely. Do this instead:
      Offer to add it with the defaults of the template, plus the families step 1a
      found and `profile: strict`. **Ask no interview question here.** So a
      maintainer who answered the questions last month keeps every answer, and
-     still gains the block. Where the user takes the block, run step 5b too, so the
+     still gains the block. Where the user takes the block, run step 5a too, so the
      repo gains the gate files with it. Where the user declines it, the gate tools
      from point 1 stay installed and no layer command reaches a checklist.
    - **Values now invalid** — a model no longer in the registry, an effort the
@@ -211,18 +211,15 @@ For option 1, skip the interview entirely. Do this instead:
      GitHub repo that now has a board — run step 2a and offer to add it. If the
      section is there, read the two coordinates back and report any mismatch. **Also
      read the built-in workflow again**, because a maintainer can turn it off.
-3. **If the orchestrator terminal title is not set yet, set it** (step 5a). A repo
-   configured before the tick existed has no titled terminal, so this path is the only
-   place an existing user gets one.
-4. **Run step 5c and report whether the hook plane is live.** A plugin update is
+3. **Run step 5b and report whether the hook plane is live.** A plugin update is
    exactly when a fresh `hooks/hooks.json` arrives, and this path is the only place an
    existing user reads that. The step installs nothing.
-   **Then run step 5d**, the gate smoke run. A plane that just went live denies a push
+   **Then run step 5c**, the gate smoke run. A plane that just went live denies a push
    against a gate command that does not exist. So an existing user learns that here,
    before the next push.
-5. **Apply only what the user approves**, one edit at a time. An update must never
+4. **Apply only what the user approves**, one edit at a time. An update must never
    drop a hand-edited recipe field or flip a review policy on its own.
-6. **Report** as a short table: what updated, what the config needs, what's fine.
+5. **Report** as a short table: what updated, what the config needs, what's fine.
    Then stop — don't continue into steps 1–3.
 
 ## 1. Explore
@@ -568,7 +565,7 @@ it by running the command from `requirements.md`:
     no line for one, so step 0a did not update it and this loop does not either. A green
     check is the whole answer.
   - **This step installs a tool and writes no file.** The Makefile, the gate script and
-    each threshold key land in step 5b. So no threshold reaches a tool config here.
+    each threshold key land in step 5a. So no threshold reaches a tool config here.
 - **CLIs** — the documented installer (`brew install gh`/`glab`, `npm install -g @anthropic-ai/claude-code`, etc.).
 - **MCP** — `claude mcp add <name> <command/url>` once the server binary/endpoint is known.
 
@@ -639,37 +636,7 @@ writing. Then:
 - Ensure `.orchestrator/` is gitignored (the worker checklist files live there):
   add `.orchestrator/` to the repo's `.gitignore` if absent.
 
-### 5a. Title the orchestrator terminal
-
-Each live work item gets an **Item automation**. Its tick wakes the orchestrator session
-with one line. It has three targets in one order: the terminal **handle**, then the terminal
-**title**, then a comment on the work item.
-
-**The handle wins.** The spawn resolves it at that moment, and it is the identifier the tool
-issued. So no display string can move it. The title is target two, for a spawn that resolved
-no handle. An auto-generated title changes, so that fallback needs a fixed literal:
-**`orchestrator`**. Set it once here and it survives a restart of the session
-([`../orchestrator/SKILL.md`](../orchestrator/SKILL.md), *Start the tick*;
-[ADR 0024](../orchestrator/docs/adr/0024-the-wake-target-is-a-resolved-handle.md);
-[ADR 0027](../orchestrator/docs/adr/0027-the-tick-delivers-its-own-wake.md)).
-
-Only for a tool whose reference file supports operation 11
-([`../orchestrator/references/tools/_operations.md`](../orchestrator/references/tools/_operations.md)).
-On `orca`:
-
-```bash
-orca terminal list --worktree active --json          # find this session's handle
-orca terminal rename --terminal <handle> --title "orchestrator"
-```
-
-More than one terminal can sit in the active worktree. So **confirm which handle is this
-session's** before you rename it. A title on the wrong terminal sends every wake to a shell
-nobody reads. Where the tool records operation 11 as unsupported, there is no tick at all.
-Skip this step and say so in one line. Where the title cannot be set, the handle is still
-target one and the comment is still the last fallback. Say which of the three the spawn
-will use. That is a supported configuration and not a gap.
-
-### 5b. Write the gate files
+### 5a. Write the gate files
 
 Each layer command in `gates:` needs a file behind it. Write those files here, from the two
 templates beside this skill:
@@ -741,7 +708,7 @@ a dependency graph nobody read.
 its own row, with the key and the number. Then the report says which command is real, and
 which number reached the tool that reads it.
 
-### 5c. Report whether the enforcement is live
+### 5b. Report whether the enforcement is live
 
 The plugin ships a **hook plane**: three hooks that inject the item facts, deny a write
 that only a seam makes, and record what a gate command did. They are the one layer that
@@ -783,7 +750,7 @@ that arrived with step 0a reaches this session only after a restart, which is th
 rule step 0a states for the skill body. Say in one line that the plane is live from the
 next start, and never from this one.
 
-### 5d. Run each gate command once
+### 5c. Run each gate command once
 
 **Why this step exists: a `git push` is denied while a configured gate has no green line
 at `HEAD`** ([`../orchestrator/references/hooks.md`](../orchestrator/references/hooks.md)).
@@ -805,7 +772,7 @@ make full;  echo "full exit: $?"
   ([`references/quality-gates.md`](../orchestrator/references/quality-gates.md)).
 - **A command that does not exist is the fault this step looks for.** `No rule to make
   target` and `command not found` each mean no push can land. Name the field, the command
-  and the repair, which is either step 5b or the field itself.
+  and the repair, which is either step 5a or the field itself.
 - **A non-zero exit from a command that ran is not a setup fault.** The repo has work to
   do, and the report says which layer is red. Change no code here.
 - **Report one row per gate**: the field, the command, and the exit code. Then say in one

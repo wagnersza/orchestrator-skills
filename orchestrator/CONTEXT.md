@@ -340,11 +340,13 @@ The one-time interview that writes the Config — the user describes environment
 **Work-state labels**:
 The tracker labels that gate the queue and mark progress. **One family, four values, and it never stacks**: `ready-for-agent`, `in-progress`, `to-review` and `needs-human`. Owned by `docs/agents/issue-tracker.md` (`/setup-matt-pocock-skills`), not the orchestrator config — single source of truth. During an adversarial-review loop the item stays `in-progress` (a worker still owns it); it flips to the review label only when the loop concludes.
 
-**The seam writes every value of this family, and a session writes none.** The **Worker
-watch** applies the transition it computed, in the process that read the labels. So the
-removals and the addition are one tracker write, and nothing can stack
+**One seam writes every value of this family, and no session writes one by hand.** The
+**Worker watch** applies the transition it computed, in the process that read the labels. So
+the removals and the addition are one tracker write, and nothing can stack
 ([`docs/adr/0056-the-tick-applies-the-transition-it-computed.md`](docs/adr/0056-the-tick-applies-the-transition-it-computed.md)).
-The spawn claim goes through that same writer, under one named transition.
+The spawn claim goes through that same writer, under one named transition. The one other
+writer is `scripts/close_item.py`, which flips the family and closes the item as one step of
+a **Close transaction**.
 
 **`needs-human` is the one label that stops the machine.** It means a seam refused. Every
 tick reads it first and stays quiet, whatever the other facts say. It carries one comment
