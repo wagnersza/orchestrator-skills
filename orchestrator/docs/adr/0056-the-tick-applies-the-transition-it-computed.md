@@ -33,6 +33,14 @@ in one swap. The rest say something about the worker, about the tracker read, or
 fix round that is still the same worker's work. None of those decides a label, so the item
 stays where it is and the exit code is the refusal.
 
+**The finish is the one row with more than one branch, and the tick honours both.** That
+row already held them. Where `--review` says the review policy is on, a **Review round**
+comes next and a worker still owns the item. On a `user-story` parent, the layer 5 story
+gate reads the evidence first
+([ADR 0047](0047-the-story-proof-runs-before-the-story-gate.md)). Each of the two holds the
+swap, prints why, and leaves the item where it is. So the outcome table gains a write and
+loses no branch, and `to-review` still means only that a human owns the item.
+
 **A tick applies at most one transition per run.** One tick reads one item, computes one
 outcome and makes at most one label swap. So a wrong computation cannot cascade inside one
 minute. This is a mechanism with its own test, and not advice.
@@ -124,6 +132,10 @@ later item, the same posture
 - **Keep `--back-off` beside the label write** (rejected) — the label is the
   acknowledgement, so a second suppression window is a second answer to one question. The
   two can then disagree.
+- **Write the review state on every finish, review policy or not** (rejected) — a review
+  round would then run on an item labelled as waiting on a human, and that label would
+  lie. The review policy arrives as a flag instead, the way `--rounds` and
+  `--require-gate` already do.
 
 ## Consequences
 

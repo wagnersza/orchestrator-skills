@@ -140,10 +140,15 @@ every other row of the table above writes nothing:
 
 | Outcome | What the tick writes |
 |---|---|
-| `implementation-complete` | the review state, in one label swap |
+| `implementation-complete` | the review state, in one label swap. It holds where `--review` says the policy is on, and on a `user-story` parent |
 | `verdict-approve` | the review state, in one label swap |
 | `rounds-exhausted` | the review state, in one label swap |
 | every other outcome | nothing, so the item stays where it is, and the code is 2 |
+
+**The finish is the one row with more than one branch, and both branches were already in
+it.** A **Review round** comes next where the review policy is on, so a worker still owns
+the item. A `user-story` parent waits for its layer 5 story gate. Each of the two holds the
+swap and prints why, so the item stays where it is.
 
 **One function owns every work-state label swap in this seam**, and it runs in the
 process that already read the labels. So no second read can disagree with the first, and
@@ -594,6 +599,11 @@ NEEDS_HUMAN = "needs-human"
 
 WORK_STATES = (READY_FOR_AGENT, IN_PROGRESS, TO_REVIEW, NEEDS_HUMAN)
 
+# The label that marks a spec whose children are the implementable work. It is not a
+# work-state value, and `docs/agents/issue-tracker.md` owns its string too. A finish on a
+# parent holds, because the layer 5 story gate reads the evidence first.
+USER_STORY = "user-story"
+
 # The three values of a **Position**. The concept has one home, the Position entry of
 # `orchestrator/CONTEXT.md`, and this seam restates no part of the rule.
 HUMAN_REVIEW = "human-review"
@@ -715,12 +725,16 @@ def transition(
     )
 
 
+# The outcome that reads a **Completion signal** of a ticked **Checklist**. It is the one
+# outcome whose transition can hold, so it is named rather than repeated.
+FINISH = "implementation-complete"
+
 # The transition each outcome carries: the **Work-state label** the item ends on. An
 # outcome that is absent from this map writes nothing, and the item stays where it is.
 # Three outcomes hand the work to a human, and every other one says something about the
 # worker or about the tracker read rather than about the item.
 APPLIES = {
-    "implementation-complete": TO_REVIEW,
+    FINISH: TO_REVIEW,
     "verdict-approve": TO_REVIEW,
     "rounds-exhausted": TO_REVIEW,
 }
@@ -752,7 +766,26 @@ def decision(disposition, outcome, line, labels=(), add=""):
     }
 
 
-def plan(item, worktree, pattern, rounds, stall_after, tracker, required=()):
+def finish_holds(labels, review):
+    """Why a finish does not reach the review state, or an empty string.
+
+    Two cases, and both are already in the outcome table's own row for the finish. Where
+    `--review` says the policy is on, a **Review round** comes next and a worker still owns
+    the item. A `user-story` parent waits for its layer 5 story gate, which reads the
+    evidence a swap would hand to a human. Every other item reaches the review state.
+    """
+    if review:
+        return (
+            "the review policy is on, so a Review round comes before the review state"
+        )
+    if USER_STORY in labels:
+        return f"this is a {USER_STORY} parent, so its layer 5 story gate answers first"
+    return ""
+
+
+def plan(
+    item, worktree, pattern, rounds, stall_after, tracker, required=(), review=False
+):
     """What this tick would do, computed and applied by nothing.
 
     **This is the one code path both subcommands read.** `phase` prints the line and
@@ -816,6 +849,11 @@ def plan(item, worktree, pattern, rounds, stall_after, tracker, required=()):
     )
     if not outcome:
         return decision(QUIET, "", f"nothing: {detail}")
+    holds = finish_holds(labels, review) if outcome == FINISH else ""
+    if holds:
+        return decision(
+            REFUSED, outcome, f"{outcome}: {detail}, and {holds}", labels=labels
+        )
     add = APPLIES.get(outcome, "")
     if not add:
         return decision(REFUSED, outcome, f"{outcome}: {detail}", labels=labels)
@@ -911,7 +949,9 @@ def claim(item, tracker):
 # --- the two subcommands over that one plan ---------------------------------
 
 
-def phase(item, worktree, pattern, rounds, stall_after, tracker, required=()):
+def phase(
+    item, worktree, pattern, rounds, stall_after, tracker, required=(), review=False
+):
     """The `phase` answer: `(exit code, the one line to print)`.
 
     The plan half of the seam, so it writes nothing at all: no tracker command and no
@@ -920,7 +960,14 @@ def phase(item, worktree, pattern, rounds, stall_after, tracker, required=()):
     tracker.
     """
     answer = plan(
-        item, worktree, pattern, rounds, stall_after, tracker, required=required
+        item,
+        worktree,
+        pattern,
+        rounds,
+        stall_after,
+        tracker,
+        required=required,
+        review=review,
     )
     if answer["disposition"] == GONE:
         return EXIT_GONE, answer["line"]
@@ -929,7 +976,9 @@ def phase(item, worktree, pattern, rounds, stall_after, tracker, required=()):
     return EXIT_DUE, answer["line"]
 
 
-def tick(item, worktree, pattern, rounds, stall_after, tracker, required=()):
+def tick(
+    item, worktree, pattern, rounds, stall_after, tracker, required=(), review=False
+):
     """The `tick` answer: `(exit code, the one line to print)`.
 
     The execute half. It reads the same plan `phase` reads, and then it applies the one
@@ -948,7 +997,14 @@ def tick(item, worktree, pattern, rounds, stall_after, tracker, required=()):
     Each one keeps its printed line, so a maintainer reads which it was.
     """
     answer = plan(
-        item, worktree, pattern, rounds, stall_after, tracker, required=required
+        item,
+        worktree,
+        pattern,
+        rounds,
+        stall_after,
+        tracker,
+        required=required,
+        review=review,
     )
     if answer["disposition"] == GONE:
         return EXIT_GONE, answer["line"]
@@ -1051,6 +1107,14 @@ def add_tick_arguments(parser, worker_required=True):
         "Repeat the flag once per required layer. The caller resolves the list from the "
         "gates: block of the Config, so this seam names no command of its own. With no "
         "--require-gate nothing is required, and gates-unproven can never fire",
+    )
+    parser.add_argument(
+        "--review",
+        action="store_true",
+        help="the review policy is on, which the caller resolves from `review.enabled` "
+        "in the Config. A finish then holds the swap to the review state, because a "
+        "Review round comes first and a worker still owns the item. With no --review a "
+        "finish reaches the review state, which is the policy every other flag assumes",
     )
     parser.add_argument(
         "--gh-fixture",
@@ -1212,6 +1276,7 @@ def main(argv=None):
         stall_after,
         tracker,
         required=required,
+        review=args.review,
     )
     print(line)
     return code

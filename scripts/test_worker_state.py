@@ -1581,6 +1581,39 @@ class WorkerStateTestCase(unittest.TestCase):
         self.assertEqual(self.writes(), [])
         self.assertEqual(self.work_states_after(IMPL), IMPL)
 
+    def test_a_finish_holds_the_swap_where_the_row_already_held_it(self):
+        """The finish is the one row of the table with more than one branch, and both
+        branches were in it before this change. A review round comes next where the review
+        policy is on, and a `user-story` parent waits for its story gate. Each one refuses,
+        prints why, and leaves the item where it is."""
+        write(self.checklist, TICKED)
+
+        self.write_fixture(labels=IMPL)
+        on = self.apply(review=True, expect=EXIT_REFUSED)
+        self.assertTrue(on.startswith("implementation-complete:"), on)
+        self.assertIn("review policy is on", on)
+
+        self.write_fixture(labels=[*IMPL, "user-story"])
+        parent = self.apply(expect=EXIT_REFUSED)
+        self.assertTrue(parent.startswith("implementation-complete:"), parent)
+        self.assertIn("story gate", parent)
+
+        self.assertEqual(self.writes(), [])
+        self.assertEqual(self.work_states_after(IMPL), IMPL)
+
+        # The default is the policy every other flag assumes, so a leaf item with the
+        # review policy off reaches the review state.
+        self.write_fixture(labels=IMPL)
+        self.assertEqual(self.work_states_after(IMPL), IMPL)
+        self.apply()
+        self.assertEqual(self.work_states_after(IMPL), [TO_REVIEW])
+
+        # And the predicate answers the same code either way, because a held swap is still
+        # a transition a caller has to read.
+        self.write_fixture(labels=IMPL)
+        held = self.ask(review=True)
+        self.assertTrue(held.startswith("implementation-complete:"), held)
+
     def test_a_to_review_item_with_a_verdict_still_routes_a_fix_round(self):
         """The review state stays a legal position through this wave, because adversarial
         review leaves the loop later. A `to-review` item is human review, so the tick moves
