@@ -505,137 +505,64 @@ file-based **checklist** (works across every harness, unlike claude-only
   `run_recipe` is blank, so no item here grows a proof box.
   **The writing-pass box is unconditional** — it depends on no recipe field,
   so it ships on every item, including a pure-code one.
-- The prompt tells the worker to **work the checklist top to bottom, ticking each
-  box as it completes it, and not to end the turn while any box is unchecked.**
+- That seeded file is the **Checklist** input of the template below. The boxes reach the
+  worker with the render, so nothing about them is worded twice.
 
-**Prompt quality is not this skill's job — it's `prompt-improver`'s.** That skill
-(a dependency, see [`references/requirements.md`](references/requirements.md)) owns
-the diagnosis checklist, the shared rules, and the per-model tuning. Don't restate
-its rules here or work from memory of them.
+**The prompt is a render, and not a draft.**
+[`references/prompt.template.md`](references/prompt.template.md) is the one worker
+prompt, and this session fills its four inputs: the **Work item**, the **Checklist**
+above, the gate commands of the `gates:` block, and the routed skill. Nothing else
+reaches a worker. **Restate no wording of that body here, and compose none of your
+own.** A prompt this session writes by hand can drop a field, and the template is what
+closes that failure. Its own header holds the two render rules, the value shape of the
+routed skill, and the harness split. Read them there.
 
-1. **Draft** the worker prompt: the task, the acceptance criteria, the checklist,
-   the project recipe, the evidence bar, the scope edges — and the **routed skill**,
-   where the verb resolved to a `worker` row. The invocation is one more item in that
-   list, at the same level as the criteria and the scope edges, and it goes into the
-   **draft**, not into the sent prompt afterwards. The `prompt-improver` pass below
-   must see it.
-2. **Run it through `prompt-improver`**, naming the role's model so it applies the
-   right profile (look the model up in [`references/models.md`](references/models.md)
-   → its `prompt-improver` profile). Send the improved prompt, not the draft.
-3. **Tell it this is an agentic-pipeline prompt.** `prompt-improver` handles this
-   case explicitly: it keeps the tight task framing and the checklist, and applies
-   only the model-specific tuning. A worker prompt must be deterministic and
-   finishable unattended, so the open senior-partner rewrite must **not** be
-   applied — say so when invoking, or it can reshape the contract. **This framing is
-   also what protects the spliced invocation.** The rewrite keeps a literal
-   instruction literal. The open rewrite is the one that turns a command into a
-   suggestion, and a suggestion is the *may* this change exists to remove.
+**The acceptance criteria and the Touch set are already in the item body.** So the
+render carries both with the body, and this session assembles neither. That is what
+keeps the input count at four.
 
-**Word the routed skill as a command the worker runs, not as advice.** The first
-thing the prompt asks of the worker is to enter the skill: `Run /implement.` — an
-imperative, in the prompt's own voice. Never *you may use*, *consider*, *if it
-helps*, or a mention of the skill inside a sentence about something else. A worker
-that reads a suggestion does the work freehand, which is the defect the routing
-table exists to close. The skill then runs **inside** the completion contract, not in
-place of it. The checklist above still holds every box, and
+**`prompt-improver` reviewed that body once, at build time**, as an
+**Agentic-pipeline prompt**. So a spawn runs no pass of its own, and this session names
+no model to it. An edit to the body needs the review again, and the item that carries
+the edit records it. Prompt quality stays that skill's job and never this one's
+([`references/requirements.md`](references/requirements.md),
+[`docs/adr/0006-delegate-prompting-to-prompt-improver.md`](docs/adr/0006-delegate-prompting-to-prompt-improver.md)).
+
+**Which skill the fourth input names comes from the routing table**
+([Resolve the verb before you act](#resolve-the-verb-before-you-act)). A verb resolves
+one row, and a type label resolves the same skills through the type-label section of
+[`references/skill-routing.md`](references/skill-routing.md). The skill then runs
+**inside** the completion contract and never in place of it, so
 `.orchestrator/checklist-<item>.md` stays the file this session reads for progress.
-Which skill it is comes from the routing table
-([Resolve the verb before you act](#resolve-the-verb-before-you-act)), and what to
-hand it comes from that row's Notes. How to word the rest of the prompt is
-`prompt-improver`'s, as above.
 
-Three things `prompt-improver` can't know, so state them in the draft:
+Each part of that contract has a home, and the template body is where it reaches the
+worker:
 
-- **Whole spec, first turn.** A worker has no human to answer a follow-up, so
-  "ask the user" is never an option — where something is genuinely unknown, name
-  the assumption to take instead.
-- **Ask for delegation, under the cap.** When the work splits, the worker delegates.
-  It does not ask first. **At most 5 sub-agents run at once, per worktree.** The cap
-  counts concurrent sub-agents, so a worker can run 5, read the reports, and then run
-  5 more. **A sub-agent reads, searches and reports. It never writes the item's
-  source**, because the worker owns every edit, every **Commit slice** and every
-  **Gate**. **The worker delegates where its harness has a sub-agent surface.** A
-  harness with none reads the same sentence, delegates nothing, and satisfies the
-  instruction. Take the answer from the harness reference file under
-  `references/harnesses/`, not from a guess. Name the reads the item needs, because a
-  bare permission gets a worker that delegates nothing. Definition: the **Delegation
-  cap** entry in [`CONTEXT.md`](CONTEXT.md). Rationale, the sentence this reverses and
-  the accepted risk:
-  [`docs/adr/0035-workers-delegate-to-sub-agents-under-a-cap.md`](docs/adr/0035-workers-delegate-to-sub-agents-under-a-cap.md).
-- **Scope edges are the exception to positive-framing.** Name the neighbouring
-  files, features, and refactors the worker must not touch — negatively, on
-  purpose.
-- **One scope edge ships on every item: the Browser surface.** Where an item needs
-  UI proof, the worker drives the declared surface, `playwright-cli`. **A browser MCP
-  that the worker's session happens to expose is out of bounds, whichever one it
-  is.** Write the edge about the class, so a new ambient MCP that appears tomorrow is
-  already covered. Name Chrome DevTools MCP as the recognisable instance. Carry the
-  reason with the rule, because a worker that reads a bare prohibition is the worker
-  that reverses it later. The reason has two halves. The declared surface emits
-  Playwright code, which is the raw material for a durable test, and an MCP call emits
-  a transcript entry that dies with the session. And an undeclared tool has no home in
-  this repo, which is this repo's named failure mode in a different form. **Tool
-  availability is not tool endorsement.** An unattended worker's tool list comes from
-  global config the worker did not choose. So anything this repo has not declared is
-  not sanctioned by default. That framing holds for the next ambient dependency too,
-  not only for this one. The edge ships even on an item with no UI. There it costs one
-  sentence, and it closes the reading that an idle browser tool is an invitation.
-  Definition: the **Browser surface** entry in [`CONTEXT.md`](CONTEXT.md). Rationale
-  and the accepted risk:
-  [`docs/adr/0012-playwright-cli-is-the-only-browser-surface.md`](docs/adr/0012-playwright-cli-is-the-only-browser-surface.md).
-  Enforcement is documentary, so this prompt is where the rule reaches the worker.
+| The part | Definition | Rationale |
+|---|---|---|
+| the **Delegation cap** | [`CONTEXT.md`](CONTEXT.md) | [`docs/adr/0035-workers-delegate-to-sub-agents-under-a-cap.md`](docs/adr/0035-workers-delegate-to-sub-agents-under-a-cap.md) |
+| the **Browser surface** edge | [`CONTEXT.md`](CONTEXT.md) | [`docs/adr/0012-playwright-cli-is-the-only-browser-surface.md`](docs/adr/0012-playwright-cli-is-the-only-browser-surface.md) |
+| the **Commit slice** rule | [`CONTEXT.md`](CONTEXT.md) | [`docs/adr/0013-workers-commit-in-contextualised-slices.md`](docs/adr/0013-workers-commit-in-contextualised-slices.md) |
+| the writing pass, in pragmatic mode | the **simple-english** and **Prose deliverable** entries of [`CONTEXT.md`](CONTEXT.md) | [`docs/adr/0011-delegate-technical-writing-to-simple-english.md`](docs/adr/0011-delegate-technical-writing-to-simple-english.md) |
 
-**Writing quality is not this skill's job either — it's `simple-english`'s.** That
-skill (a dependency, see
-[`references/requirements.md`](references/requirements.md)) owns every writing rule.
-Tell the worker to run the prose it changed through `simple-english` in
-**pragmatic** mode, before it commits. State only which text, in which mode, and
-what stays untouched — the **simple-english** and **Prose deliverable** entries in
-[`CONTEXT.md`](CONTEXT.md) hold the definitions. Don't restate a sentence limit, a
-substitution or a rule number here or in the prompt. Rationale:
-[`docs/adr/0011-delegate-technical-writing-to-simple-english.md`](docs/adr/0011-delegate-technical-writing-to-simple-english.md).
-
-Four things the prompt must carry:
-
-- **Which text.** The four **Prose deliverable** classes in `CONTEXT.md`. Two classes
-  bind a worker only when its diff contains them: the markdown in the diff, and the
-  strings a Python file prints. Two classes bind **every** worker on **every** item:
-  the review note on the work item, and the PR/MR body. So a worker on a pure-code
-  item is never exempt. The fourth class is orchestrator reports, which bind this
-  session and no worker — see [Reporting to the user](#reporting-to-the-user).
-- **Which mode.** Pragmatic, which keeps domain vocabulary. Every `CONTEXT.md`
-  glossary term — Tool, Harness, Worker, Effort — survives the pass unchanged.
-  Never ask for strict mode: it needs a dictionary this repo does not have.
-- **What stays byte-identical.** Code blocks, identifiers, file paths, commands,
-  quoted error strings, YAML and JSON keys, link targets, and proper nouns. A pass
-  that edits one of these can break a cross-reference or a copy-pasteable command.
-- **How far it reaches.** Only the prose the worker already changes. A one-line
-  documentation item stays a one-line diff. A repo-wide rewrite is separate work.
+**A scope edge is the one exception to positive framing**, and the **Browser surface**
+row is negative on purpose. Enforcement is documentary for each row, so the rendered
+prompt is where the rule reaches the worker. `scripts/test_prompt_template.py` fails
+where a part of that table leaves the template body.
 
 **Keep the three delegations apart.** A worker that runs one artifact through two of
-them acts on contradictory instructions. The orchestrator invokes `prompt-improver`
-on the prompt. The worker invokes `simple-english` on its own deliverable prose.
-`ponytail` governs how much exists at all. The ordering rule and the one real
-collision sit in the **Prose deliverable** entry of [`CONTEXT.md`](CONTEXT.md).
-Point the worker at that entry rather than re-deriving the rule in the prompt.
+them acts on contradictory instructions. This session's artifact is the prompt, and
+`prompt-improver` shaped it at build time. The worker's artifact is its own **Prose
+deliverable**, and `simple-english` shapes that. `ponytail` governs how much exists at
+all. The ordering rule and the one real collision sit in the **Prose deliverable**
+entry of [`CONTEXT.md`](CONTEXT.md).
 
-**The `commit` box is a loop, not a step.** It covers a series of commits, and the
-worker lands each one as soon as that slice is complete. So the prompt carries the two
-conditions for one slice: one logical change, and the branch self-consistent at that
-commit. It names the message convention — Conventional Commits, an imperative subject,
-and a body that says why when the subject cannot carry it. It says that a trivial item
-is one commit, and that this is not a violation. It puts the writing pass before the
-commit that carries the prose, which is what the writing-pass box on the checklist also
-says. Give the worker the rule in plain English, whatever the harness. Definition: the
-**Commit slice** entry in [`CONTEXT.md`](CONTEXT.md), which the prompt points at rather
-than restating. Rationale, the rejected options and the accepted risk:
-[`docs/adr/0013-workers-commit-in-contextualised-slices.md`](docs/adr/0013-workers-commit-in-contextualised-slices.md).
-
-Bake in the project recipe: boot the app with `run_recipe` on the per-item `ports`
-for evidence; satisfy `db_gate` if configured; meet the `evidence` bar (real-data
-proof + full suite — unit tests alone are not enough); post the review note on the
-**work item** (What to review / Main changes / How to test / Evidence). **That note is
-the worker's last act.**
+**The project recipe reaches the worker through the Checklist, and not as a fifth
+input.** The boot box names `run_recipe` and the item's `ports`, the DB box names
+`db_gate`, and the evidence box names the `evidence` bar. Each box drops where its
+field is blank, so the recipe of the repo is already inside the boxes this session
+sends. The review note on the **work item** is the last box, and **that note is the
+worker's last act.**
 
 **The worker writes no work-state label, and neither does anything else about the
 board.** So the prompt hands it no `gh` command at all. The tick writes the review state
@@ -649,20 +576,16 @@ tick calling it. A worker that writes a work-state label of its own leaves the t
 a state nothing computed. Rationale:
 [`docs/adr/0056-the-tick-applies-the-transition-it-computed.md`](docs/adr/0056-the-tick-applies-the-transition-it-computed.md).
 
-**Harness shape:** a **claude** worker **does** enter the routed skill — the
-invocation is a literal slash command in the prompt (`/implement`), and its other
-slash skills (`/ponytail:ponytail`) stay available on top. See
-`references/harnesses/claude.md`. **Any other harness** gets the **same contract in
-plain English** — no slash commands, no "TodoWrite" wording; spell out the numbered
-checklist steps as prose. **The routed skill takes that same split.** A harness with
-no slash commands gets the skill's contract as prose, from the *Without slash
-commands* sentences in the row's Notes column of
-[`references/skill-routing.md`](references/skill-routing.md). Copy the substance of
-those sentences into the draft prompt as the worker's opening instruction, in the
-place the slash command takes on claude. **Never send a slash command to a harness
-that cannot parse one** — it reads as literal text and the worker starts cold, which
-is worse than the prose contract because it looks like it worked. This is the same
-plain-English rule as every other part of the contract, not a second mechanism.
+**Harness shape:** the split lands on one value, and that value is the routed skill. A
+**claude** worker takes the literal slash command (`/implement`), and its other slash
+skills (`/ponytail:ponytail`) stay available on top
+(`references/harnesses/claude.md`). **Any other harness** takes the skill's contract as
+prose, from the *Without slash commands* sentence of that row in
+[`references/skill-routing.md`](references/skill-routing.md). **Never send a slash
+command to a harness that cannot parse one** — it reads as literal text and the worker
+starts cold, which is worse than the prose contract because it looks like it worked. The
+template header holds the shape each value takes, and the rest of the body is
+harness-neutral prose.
 
 **Per-item ports.** Derive from the work-item number `N` per config's `ports`
 (e.g. `FE=3000+N`), so parallel workers never collide and the port reads back to
