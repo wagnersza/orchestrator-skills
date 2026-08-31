@@ -1,6 +1,6 @@
 ---
 name: orchestrator
-description: Orchestrate agent worker sessions across any workspace tool (orca/cmux/herdr), harness (claude/codex/pi/copilot/cursor), and frontier model. Pick the next ready work item, read whether it is a user story or a leaf task, spawn a worker in its own worktree on the right model and effort for the job, prompt/monitor it via a file-based checklist, run optional cross-vendor adversarial review, then merge and close finished work. Use this skill for every work-item action, and never wait for the user to type /orchestrator. A work verb plus a work-item number N is enough, with or without a "#". Trigger on "work on N", "work on #N", "implement N", "build N", "start N", "do N", "implement X", "spawn a worker", "start a session for X", "prompt worker Y", "what next", "what should I run/work on", "what's ready", "what are the workers doing", "list workers", "review N adversarially", "merge and close N", "merge N and close it", "close N", "close task #N", "it's done", "wrap up N", "orchestrate". A bare number after a work verb always means a tracked work item, so route it here rather than reading it as a file or a line number.
+description: Orchestrate agent worker sessions across any workspace tool (orca/cmux/herdr), harness (claude/codex/pi/copilot/cursor), and frontier model. Pick the next ready work item, read whether it is a user story or a leaf task, spawn a worker in its own worktree on the right model and effort for the job, prompt/monitor it via a file-based checklist, run optional cross-vendor adversarial review, then report finished work for the maintainer to merge. Use this skill for every work-item action, and never wait for the user to type /orchestrator. A work verb plus a work-item number N is enough, with or without a "#". Trigger on "work on N", "work on #N", "implement N", "build N", "start N", "do N", "implement X", "spawn a worker", "start a session for X", "prompt worker Y", "what next", "what should I run/work on", "what's ready", "what are the workers doing", "list workers", "review N adversarially", "merge and close N", "merge N and close it", "close N", "close task #N", "it's done", "wrap up N", "orchestrate". A bare number after a work verb always means a tracked work item, so route it here rather than reading it as a file or a line number.
 ---
 
 # Orchestrator
@@ -8,9 +8,9 @@ description: Orchestrate agent worker sessions across any workspace tool (orca/c
 This session is the **orchestrator**. It coordinates **worker** sessions. A
 worker is a `(Tool, Harness, Model)` triple running against one work item in its
 own worktree/terminal. Never do implementation work here — spawn a worker and
-prompt it. One bounded exception: step 1 of a [close](#close-a-task) resolves
-conflicts in the item's own worktree, on the maintainer's explicit instruction
-([`docs/adr/0016-the-orchestrator-merges-when-asked.md`](docs/adr/0016-the-orchestrator-merges-when-asked.md)).
+prompt it. **There is no exception.** The one that existed was a conflict resolution
+inside a [close](#close-a-task), and the maintainer merges on the tracker now
+([`docs/adr/0057-the-merge-is-the-second-act.md`](docs/adr/0057-the-merge-is-the-second-act.md)).
 
 The vocabulary (Tool, Harness, Model, Effort, Role, Vendor, Worker, Yolo mode,
 Adversarial review, Ready queue, Checklist, Project recipe, Position, Item automation) is
@@ -51,7 +51,7 @@ an unchecked parse reports the parser and never the cause. Where a read fails, *
 it in one line: the command that ran, and the tracker's own first line.** Then stop.
 Spawn nothing, write no label and move no card. That is the same answer a tick gives
 with its `unreadable` outcome
-([On the wake](#on-the-wake--one-response-per-outcome)). Rationale:
+([On the tick](#on-the-tick--what-it-wrote-and-what-is-left-for-you)). Rationale:
 [`docs/adr/0039-a-tracker-read-has-a-verified-command-in-the-skill.md`](docs/adr/0039-a-tracker-read-has-a-verified-command-in-the-skill.md).
 
 **Preflight the config's dependencies.** Before the first spawn of a session,
@@ -71,14 +71,14 @@ four install shapes (global or project, `.agents/` or `.claude/`) **satisfies th
 check**, for the same reason `prompt-improver` gets three: you invoke the skill,
 not a path. The skill is not a plugin, so `claude plugin list` never shows it.
 
-Check the **`resolving-merge-conflicts` skill** in the same pass too, because step 1
-of every [close](#close-a-task) invokes it. Run the `resolving-merge-conflicts` line
+Check the **`resolving-merge-conflicts` skill** in the same pass too, because the
+maintainer can ask for it at any time. Run the `resolving-merge-conflicts` line
 of that same check block — the four-path `ls`. Any of its four install shapes
 **satisfies the check**, for the same reason the other two get theirs: the plugin
 cache, the marketplace clone, or a standalone clone global or project. The skill ships
-inside `mattpocock-skills`, so there is nothing separate to install. **Never begin a
-close against a missing skill.** Stop and point the user at `/orchestrator-setup`, the
-same as any other missing dependency.
+inside `mattpocock-skills`, so there is nothing separate to install. **No flow reaches
+it by itself**, because the merge it used to serve is the maintainer's own act now
+([`docs/adr/0057-the-merge-is-the-second-act.md`](docs/adr/0057-the-merge-is-the-second-act.md)).
 
 **Check the Browser surface only when the recipe asks for browser evidence.** The
 gate is the project recipe: a non-blank `run_recipe`, or an `evidence` bar that asks
@@ -192,8 +192,9 @@ with ["What next?"](#what-next--pick-the-next-work), unchanged.
 *wrap up N*, *list workers* and *what are the workers doing* each name a section
 below, so they resolve to no skill and route nowhere. Run the section
 ([Close a task](#close-a-task), [Monitor workers](#monitor-workers)) and never ask the
-user to confirm a route. The one skill a close invokes is
-`resolving-merge-conflicts`, at step 1, and the close flow names it there.
+user to confirm a route. **A close needs no verb at all now**, so the first three
+phrases answer a question rather than start a transaction
+([`docs/adr/0057-the-merge-is-the-second-act.md`](docs/adr/0057-the-merge-is-the-second-act.md)).
 
 **An unmapped verb costs one line, then proceeds.** A verb that matches no row is
 not a near miss to act on. Ask once, in one line: name the closest row and the verb
@@ -324,7 +325,7 @@ Report the list as its own capped list, under the ready queue. Then offer the tr
 ([Merge the queue](#merge-the-queue)).
 
 **This read is the whole fallback where the tool supports no automation surface.** `cmux`
-and `herdr` create no schedule, so no tick fires and no wake ever arrives
+and `herdr` create no schedule, so no tick fires and no transition lands
 ([Start the tick](#start-the-tick--one-item-automation-per-worker)). A maintainer who asks
 what next still sees the list, and can still ask for the train.
 
@@ -395,13 +396,22 @@ and when the user names work with no number at all. The phrases that reach it ar
 4. **worker-create** (op 3) — start `$CMD`; capture the **stable** handle to
    prompt. Then **gate on readiness** before any prompt — see
    [Gate readiness before the first prompt](#gate-readiness-before-the-first-prompt).
-5. **Claim the item first** — swap `ready-for-agent` → `in-progress` on the
-   tracker (labels from `issue-tracker.md`), before prompting, so "what next?"
-   won't hand it out twice. **One label swap, and one family**, so nothing can
-   stack. **Move no card**, because the board is an input
-   ([Board status](#board-status)). Where the item sits inside the run is computed
+5. **Claim the item first** — before prompting, so "what next?" won't hand it out twice.
+   **Run the seam's one named transition, and write no label by hand:**
+
+   ```bash
+   python3 <plugin root>/scripts/worker_state.py tick --claim --item <N> \
+     --repo <owner>/<name> --tracker-cli <gh or glab> --tracker-host <host>
+   ```
+
+   It swaps `ready-for-agent` → `in-progress` through the same writer every tick uses, so
+   there is one place the family is written and one place to fix it. Exit 4 is applied and
+   exit 2 is refused, and it refuses where the item wears `needs-human`. **One label swap,
+   and one family**, so nothing can stack. **It moves no card**, because the board is an
+   input ([Board status](#board-status)). Where the item sits inside the run is computed
    from facts, so no second label is written here
-   ([`docs/adr/0053-one-work-state-label-and-a-computed-position.md`](docs/adr/0053-one-work-state-label-and-a-computed-position.md)).
+   ([`docs/adr/0053-one-work-state-label-and-a-computed-position.md`](docs/adr/0053-one-work-state-label-and-a-computed-position.md),
+   [`docs/adr/0056-the-tick-applies-the-transition-it-computed.md`](docs/adr/0056-the-tick-applies-the-transition-it-computed.md)).
    Apply any parent-promotion the tracker conventions define (idempotent).
 6. **Write the checklist + deliver the prompt** — see below.
 7. **Follow-along panel** (op 7) — mandatory, where the tool records operation 7 as
@@ -626,17 +636,16 @@ proof + full suite — unit tests alone are not enough); post the review note on
 the worker's last act.**
 
 **The worker writes no work-state label, and neither does anything else about the
-board.** So the prompt hands it no `gh` command at all. This session writes the review
-state itself ([On the wake](#on-the-wake--one-response-per-outcome)). A worker cannot
-see that moment. Whether review is on, and which round the item is on, are facts this
-session resolves. Rationale:
-[`docs/adr/0025-the-session-writes-the-review-state.md`](docs/adr/0025-the-session-writes-the-review-state.md).
+board.** So the prompt hands it no `gh` command at all. The tick writes the review state
+([On the tick](#on-the-tick--what-it-wrote-and-what-is-left-for-you)), from the ticked
+checklist and the green **Gate record** the worker leaves behind. Those two are the
+worker's whole part in that transition.
 
-**One family means one swap, so nothing can stack.** This session owns that swap at both
-ends: the spawn writes `in-progress` (step 5), and the wake writes every transition after
-it. A worker that writes a work-state label of its own leaves the tick reading a state no
-session set
-([On the wake](#on-the-wake--one-response-per-outcome)).
+**One family means one swap, so nothing can stack.** One writer inside the seam owns that
+swap at both ends: the spawn claim calls it at step 5, and every later transition is a
+tick calling it. A worker that writes a work-state label of its own leaves the tick reading
+a state nothing computed. Rationale:
+[`docs/adr/0056-the-tick-applies-the-transition-it-computed.md`](docs/adr/0056-the-tick-applies-the-transition-it-computed.md).
 
 **Harness shape:** a **claude** worker **does** enter the routed skill — the
 invocation is a literal slash command in the prompt (`/implement`), and its other
@@ -667,24 +676,34 @@ Definitions: the **Item automation** and **Position** entries in
 [`CONTEXT.md`](CONTEXT.md). Rationale:
 [`docs/adr/0022-item-automation-replaces-the-blocking-watch.md`](docs/adr/0022-item-automation-replaces-the-blocking-watch.md).
 
-**The precheck is the whole tick.** `wake` asks the same predicate as `phase`. The
-outcomes, their order and the back-off window are unchanged. On a due transition it
-delivers the printed line itself. **No path through it exits 0**, so every run records as
-skipped, no model loads and no agent runs on a tick. That command goes into op 11's
-`<precheck-command>` placeholder:
+**The precheck is the whole tick.** `tick` reads the same plan `phase` reads, and then it
+applies the one transition that plan carries. The outcomes and their order are unchanged.
+**No path through it exits 0**, so every run records as skipped, no model loads and no agent
+runs on a tick. That command goes into op 11's `<precheck-command>` placeholder:
 
 ```bash
-python3 <plugin root>/scripts/worker_state.py wake --item <N> \
+python3 <plugin root>/scripts/worker_state.py tick --item <N> \
   --worktree <the path from op 2> \
   --process '<the pattern from references/harnesses/<harness>.md>' \
   --rounds <config's review.rounds> --stall-after <duration> \
-  --back-off <duration> --repo <owner>/<name> \
-  --marker-dir <the implementation worktree from op 2>/.orchestrator \
+  --repo <owner>/<name> \
   --tracker-cli <gh or glab> --tracker-host <host> \
   --require-gate '<one per required layer, from config's gates: block>' \
-  --handle <this session's terminal handle, from op 9> --title orchestrator \
-  --send-command '<op 4, with {target} where the terminal goes and {text} where the line goes>'
+  --checkout <config's repo> --default-branch <the default branch> \
+  --teardown-command '<op 12 && op 10, with the ids filled in>' \
+  --review    # only where config's review.enabled is on
 ```
+
+**The last three flags are the close, and they are not optional.** A merged pull request
+fires a whole **Close transaction** on the tick that reads it
+([Close a task](#close-a-task)). A precheck missing `--checkout` or `--teardown-command`
+closes nothing and names the flag, so the item then sits at the review state with its pull
+request already merged.
+
+**`--checkout` is the main checkout, and never the item's worktree.** That worktree is a
+linked one, so `git fetch origin <branch>:<branch>` inside it exits 128 with `refusing to
+fetch into branch`: the main checkout already holds that branch. Step 5 of the transaction
+is that fetch, so the flag decides whether a close can run at all.
 
 **`<plugin root>` is a literal path in this string, and never a shell variable.** The
 **Tool** stores the precheck and runs it a minute later, in a shell that saw no
@@ -695,10 +714,10 @@ A precheck that carries the module form still runs inside a worktree of *this* r
 then runs that worktree's copy of the seam, and not the installed one.
 
 **Op 11's `--prompt` and `--provider` are inert.** The CLI requires both. Neither one runs.
-Exit 0 is what starts that agent, and no path through `wake` exits 0. Write a prompt that
-says the tick delivered its own line, so a maintainer who reads the schedule is not misled.
-Rationale:
-[`docs/adr/0027-the-tick-delivers-its-own-wake.md`](docs/adr/0027-the-tick-delivers-its-own-wake.md).
+Exit 0 is what starts that agent, and no path through `tick` exits 0. Write a prompt that
+says the tick applied its own transition, so a maintainer who reads the schedule is not
+misled. Rationale:
+[`docs/adr/0056-the-tick-applies-the-transition-it-computed.md`](docs/adr/0056-the-tick-applies-the-transition-it-computed.md).
 
 **Resolve the config values once, here.** The seam parses no configuration file, and it
 names no harness, no tracker and no tool. So the spawn is the one place they are read:
@@ -711,11 +730,20 @@ names no harness, no tracker and no tool. So the spawn is the one place they are
 | the harness process pattern | `references/harnesses/<harness>.md` | what the `dead` outcome looks for |
 | the stall window | longer than the item's slowest single step, so a worker thinking hard is never read as stalled | when `stalled` fires |
 | the required gate layers | config's `gates:` block — one `--require-gate` per non-blank command, minus `deep` under the `lite` profile, and never `story` | when `gates-unproven` fires in place of a finish. With none the record is never read ([`references/quality-gates.md`](references/quality-gates.md)) |
-| the marker directory | the item's implementation worktree (op 2), plus `/.orchestrator` | where a back-off marker lives, and what it outlives |
-| the tracker CLI | `docs/agents/issue-tracker.md` | which command reads the labels and the comments, and which posts the wake comment |
-| the tracker host | `docs/agents/issue-tracker.md`, where the tracker is self-hosted | which server those reads go to |
-| this session's handle and title | op 9, against this session's own worktree | where the wake is delivered, `--handle` first and `--title` second |
-| the send command | the tool file's operation 4 | how the tick delivers one line to a terminal |
+| the review policy | config's `review.enabled` | whether a finish holds its swap to the review state, because a **Review round** comes first |
+| the tracker CLI | `docs/agents/issue-tracker.md` | which command reads the labels and the comments, and which writes the label a transition swaps |
+| the tracker host | `docs/agents/issue-tracker.md`, where the tracker is self-hosted | which server those reads and that write go to |
+| the checkout | config's `repo` | where step 5 of a **Close transaction** pulls the merge into |
+| the default branch | config's `repo`, or the tracker's own default | which branch step 5 moves |
+| the teardown command | [`references/tools/<tool>.md`](references/tools/_operations.md), op 12 then op 10 | what step 8 runs to remove the automation and the worktree |
+
+**The teardown command is one string, and it removes the automation as well as the
+worktree.** Read both halves from the tool reference. Substitute the ids. Then join them
+with `&&` in that order. **The automation goes first**, so nothing ticks against a
+worktree that is half removed. Use `&&` and not `;`. A failed op 12 then leaves both in
+place, and the plan reports the failure rather than a leaked schedule. The checklist file
+dies with the worktree, so nothing cleans it up. Where the tool records operations 11 and
+12 as unsupported, no automation exists and there is no precheck to carry the string.
 
 Every value above is a flag on the command, except one. **The proof-box gate is not a
 flag.** It decides whether the **Checklist** this session writes ships a proof box, and
@@ -723,48 +751,30 @@ flag.** It decides whether the **Checklist** this session writes ships a proof b
 the same gate the Browser-surface preflight uses, so the two cannot disagree about when a
 proof is required.
 
-`--back-off` suppresses a repeat of one outcome for one item, so an unanswered wake does
-not queue sixty prompts in an hour. Pick a window at least as long as a fix round takes.
 `--repo` is the tracker repository as `OWNER/NAME`, read from
 `docs/agents/issue-tracker.md`.
 
-**`--marker-dir` is where those back-off markers live, and it is an argument because the
-watched worktree can change.** A reviewer reads the diff in its own worktree. A schedule
-that follows the live worker takes the default directory with it, and an answered wake then
-fires again from a fresh directory. Pass the item's implementation worktree instead. It
-lives until step 8 of the **Close transaction** removes it, so the markers still die with
-the work item.
+**`--review` is a switch and not a value.** Pass it only where config's `review.enabled` is
+on. A finish then holds its swap, because a **Review round** comes next and a worker still
+owns the item. With no `--review` a finish writes the review state, which is the policy this
+repo runs.
 
-**`--tracker-cli` and `--tracker-host` are the tracker read, and the wake comment that is
-target three below.** `gh` on github.com is the default and needs no host, so this repo
-passes neither flag. A self-hosted GitLab needs both, and it then needs no wrapper script
-outside this repo.
+**`--tracker-cli` and `--tracker-host` cover the tracker read and the label write.** `gh` on
+github.com is the default and needs no host, so this repo passes neither flag. A self-hosted
+GitLab needs both, and it then needs no wrapper script outside this repo.
 
-**Resolve this session's own terminal handle here, and pass it as `--handle`.** Op 9 returns
-`{handle, title}` for a worktree, so a session that can list a worker can list itself. The
-wake has three targets, and the first one that succeeds ends the delivery:
+**There is no delivery, so this command carries no target.** The tick applies the transition
+itself and wakes nobody. It writes no marker file and it needs no suppression window,
+because the label it wrote is what stops the same fire on the next minute. So no handle, no
+title and no send template enter the precheck
+([`docs/adr/0056-the-tick-applies-the-transition-it-computed.md`](docs/adr/0056-the-tick-applies-the-transition-it-computed.md)).
 
-1. **the handle** (`--handle`) — the identifier the tool issued, so no display string can
-   move it.
-2. **the title** (`--title`), which is `orchestrator`. `/orchestrator-setup` sets it (step
-   5a of [`../orchestrator-setup/SKILL.md`](../orchestrator-setup/SKILL.md)). **A title is
-   not a stable target.** The `claude` harness renames its own tab while the session runs,
-   and that is the harness this session runs under. So the title is a second chance and
-   never the mechanism.
-3. **a comment on the work item**, through `--tracker-cli`. So a transition is recorded late
-   rather than lost, which is the accepted risk in ADR 0022.
-
-**Say which of the three is live on the spawn line**
-([Reporting to the user](#reporting-to-the-user)). A comment-only wake is then a fact the
-maintainer reads at spawn, rather than a silence they find many runs later. Rationale:
-[`docs/adr/0024-the-wake-target-is-a-resolved-handle.md`](docs/adr/0024-the-wake-target-is-a-resolved-handle.md).
-
-**The tick delivers the line it printed, and it decides nothing else.** It writes no label,
-composes no prompt, spawns nothing and merges nothing. The **Item automation** entry in
-[`CONTEXT.md`](CONTEXT.md) holds that prohibition. It is why every destructive act stays in
-this session, where a human can interrupt it. The wake it delivers can land in a busy
-terminal, and the tick does not wait for idle. That is the accepted risk in ADR 0027, and
-`--back-off` is its mitigation.
+**The tick writes one work-state label, or it runs one close.** It composes no
+prompt, kills no process, moves no card, merges nothing and spawns nothing. **At most one
+transition lands per run.** The **Item automation** entry in [`CONTEXT.md`](CONTEXT.md)
+holds that prohibition. **The close is the one destructive act that left this session**, and
+two refusals inside `scripts/close_item.py` stand in front of it. Every other destructive
+act stays here, where a human can interrupt it.
 
 **A tool with no automation surface spawns exactly as it does today.** Operations 11 and
 12 are optional (`references/tools/_operations.md`), and `cmux` and `herdr` record them
@@ -772,15 +782,16 @@ as unsupported. Skip the step and change nothing else about the spawn. **Then sa
 report that the tick is unavailable on this tool.** The maintainer then knows to monitor by
 hand ([Monitor workers](#monitor-workers)).
 
-The argument surface is `python3 <plugin root>/scripts/worker_state.py wake --help`, and
-the module docstring is the outcome table. **Never restate either here or in a report.**
-What this session does when a tick wakes it is
-[On the wake](#on-the-wake--one-response-per-outcome).
+The argument surface is `python3 <plugin root>/scripts/worker_state.py tick --help`, and
+the module docstring is the outcome table, the transition table and the exit codes.
+**Never restate one of them here or in a report.** What this session does after a tick has
+written a label is
+[On the tick](#on-the-tick--what-it-wrote-and-what-is-left-for-you).
 
-**A tick against a worktree that is gone is silent.** The seam exits 3, which is
-non-zero, so the run records as skipped and nothing wakes. A live automation on a removed
+**A tick against a worktree that is gone writes nothing.** The seam exits 3, which is
+non-zero, so the run records as skipped. A live automation on a removed
 worktree is a leak from a teardown that skipped op 12. Remove it by name
-(`orchestrator-item-<N>`, op 12), because no wake can come for it.
+(`orchestrator-item-<N>`, op 12), because no transition can come for it.
 
 ## Monitor workers
 
@@ -800,33 +811,50 @@ worktree is a leak from a teardown that skipped op 12. Remove it by name
 
 The tick is what fires this rule without your asking
 ([Start the tick](#start-the-tick--one-item-automation-per-worker)). The four
-bullets above stay the way to answer *what are the workers doing* between wakes, and they
+bullets above stay the way to answer *what are the workers doing*, and they
 are the whole of monitoring on a tool with no automation surface.
 
-## On the wake — one response per outcome
+## On the tick — what it wrote, and what is left for you
 
-A tick wakes this session with the one line its precheck printed, and that line names one
-of its outcomes. **The response is a lookup, not an interpretation.** Read the outcome,
-run its row, and report per [Reporting to the user](#reporting-to-the-user).
+**The tick has already written the label by the time you read this section.** It applies
+the transition it computed, in the process that read the facts
+([`docs/adr/0056-the-tick-applies-the-transition-it-computed.md`](docs/adr/0056-the-tick-applies-the-transition-it-computed.md)).
+**So write no work-state label here, and hand no `gh issue edit` to anything.** Read the
+item, find the outcome, run its row, and report per
+[Reporting to the user](#reporting-to-the-user).
 
-**Three rows write a label, and it is one swap in one call.** The work-state family has
-four values and it never stacks, so a transition removes the old value and adds the new one
-in the same `gh issue edit`. **It moves no card**, because the board is an input
-([Board status](#board-status)). That write is what acknowledges the wake,
-and it stops a repeat fire on the same fact a minute later. **This session writes the
-label, and the worker writes none** — its last act is the review note. Rationale:
-[`docs/adr/0025-the-session-writes-the-review-state.md`](docs/adr/0025-the-session-writes-the-review-state.md).
+**Nothing wakes this session any more.** The tick delivers no line, so a transition is a
+line in the schedule's run history and a label on the item. You find it when the maintainer
+asks, or when you next read the queue
+(["What next?"](#what-next--pick-the-next-work), which already reports every item at
+`to-review` beside the ready queue).
+Until the item that removes that gap lands, **read the item's labels and its `Verdict:`
+comments before you answer any question about a worker**
+([`references/tracker-reads.md`](references/tracker-reads.md)).
 
-**Five rows write no label at all**, so nothing acknowledges those wakes and `--back-off`
-is what stops a repeat every minute.
+**Three outcomes carry a label the tick wrote, and it is one swap in one call.** The
+work-state family has four values and it never stacks. So the tick removes every value it
+found and adds the new one in the same command. **It moves no card**, because the board is
+an input ([Board status](#board-status)). That write is also what stops a repeat fire on the
+same fact a minute later. **The worker writes none either** — its last act is the review
+note.
 
-| Outcome | Write first | Then |
+**One outcome carries a whole Close transaction, and it is `merged`.** The tick reads the
+pull request for the item's branch, and a merged one closes the item, removes the worktree
+and removes the automation. So there is no close to run here and no verb to wait for
+([`docs/adr/0057-the-merge-is-the-second-act.md`](docs/adr/0057-the-merge-is-the-second-act.md)).
+
+**Five outcomes carry no label**, and the tick exits 2 on each of them. The item stays where
+it is, and the row below is the whole of what is left to do.
+
+| Outcome | What the tick already wrote | What is left for you |
 |---|---|---|
-| `implementation-complete` | **On a leaf item, review on**: nothing, because a worker still owns the item. **Review off**: `in-progress` → `to-review` in one call. **On a `user-story` parent**: nothing yet, because the layer 5 story gate runs before that swap. `--back-off` stops a repeat until it does | **Leaf, review on**: [Adversarial review](#adversarial-review-when-configs-reviewenabled) steps 1 and 2. Step 1 also **repoints the precheck** at the reviewer's worktree, with the review harness's process pattern — below. **Leaf, review off**: this wake is the hand-off to a human. Report the finish, the label you wrote, and the review you can still offer, in one line. **Parent**: [The story proof](#the-story-proof), steps 4 to 7. Read the evidence note and the spec PR, run [The layer 5 story gate](#the-layer-5-story-gate), then swap the label in one call. **No adversarial review round runs on the parent** |
+| `implementation-complete` | `in-progress` → `to-review`, on a leaf item and on a `user-story` parent alike. **Review on**: nothing, because a worker still owns the item and `--review` holds the swap | **Leaf, review on**: [Adversarial review](#adversarial-review-when-configs-reviewenabled) steps 1 and 2. Step 1 also **repoints the precheck** at the reviewer's worktree, with the review harness's process pattern — below. **Leaf, review off**: the item is already with a human. Report the finish, the label the tick wrote, and the review you can still offer, in one line. **Parent**: [The story proof](#the-story-proof), steps 4 to 7. Read the evidence note and the spec PR, then run [The layer 5 story gate](#the-layer-5-story-gate). **The gate runs after that swap, and it needs no label of its own.** No adversarial review round runs on the parent |
 | `gates-unproven` | nothing, because the item stays where it is | Reset the context and re-prompt — below. The line names one of four causes, so quote that cause and name the command to run again. Never move the item to review on this line |
-| `verdict-approve` | `in-progress` → `to-review` in one call | [Adversarial review](#adversarial-review-when-configs-reviewenabled) step 4 — gather evidence and hand the item to human review |
+| `verdict-approve` | `in-progress` → `to-review` | [Adversarial review](#adversarial-review-when-configs-reviewenabled) step 4 — gather evidence, and report that the item is with a human |
 | `verdict-request-changes` | nothing, because a fix round is still the same worker's work | [Adversarial review](#adversarial-review-when-configs-reviewenabled) step 3, at the round the line names. That step also **repoints the precheck** back at the implementation worktree, with the implementation harness's pattern — below |
-| `rounds-exhausted` | `in-progress` → `to-review` in one call | Step 4 again — "after the last round regardless". The bound is spent, so offer no further round |
+| `rounds-exhausted` | `in-progress` → `to-review` | Step 4 again — "after the last round regardless". The bound is spent, so offer no further round |
+| `merged` | the whole **Close transaction**: the review label came off, the item closed, and the worktree and the automation are gone. The line carries the plan | Nothing on the item. **Parent-close is what is left** ([Close a task](#close-a-task)), and only where this was the last child of a `user-story` parent |
 | `dead` | nothing, because the item stays where it is | Report, and **never re-prompt** — below |
 | `stalled` | nothing, for the same reason | Reset the context and re-prompt — below |
 | `unreadable` | nothing, because a read that failed cannot say where the item sits | Report in one line: the tracker read is broken, and the item is unobserved until that read works again |
@@ -841,25 +869,25 @@ that carries the facts. The on-demand door (`review #N adversarially`) is unchan
 needs no label of its own.
 
 **`needs-human` answers before every fact.** The tick reads that label first and stays
-quiet, so a paused item wakes nobody and no row above runs.
+quiet, so a paused item moves nowhere and no row above runs.
 
-**Why five rows write no label.** A fix round is still the same worker's work, so nothing
-changes state. `dead` and `stalled` say something about the worker rather than about the
-item. `unreadable` says something about the tracker read, and a fact the tick never read
+**Why five outcomes carry no label.** A fix round is still the same worker's work, so
+nothing changes state. `dead` and `stalled` say something about the worker rather than about
+the item. `unreadable` says something about the tracker read, and a fact the tick never read
 cannot decide a label. `gates-unproven` says the work is not finished after all, so the
 item stays where it is
 ([`docs/adr/0036-a-gate-run-is-work-product.md`](docs/adr/0036-a-gate-run-is-work-product.md)).
 
-**A repeat that carries the same round
-number, or the same checklist position, is a wake you already answered.** Say so in
+**A row you already ran is a row that carries the same round
+number, or the same checklist position.** Say so in
 one line and do nothing. That stays a lookup, because the line carries both facts.
 
-**Two rows carry a second act: they repoint the precheck at the live worker.** One **Item
-automation** per item stands, and a transition moves the work to a different worker. So the
-precheck follows it (op 13,
+**Two rows carry an act on the schedule: they repoint the precheck at the live worker.** One
+**Item automation** per item stands, and a transition moves the work to a different worker.
+So the precheck follows it (op 13,
 [`references/tools/_operations.md`](references/tools/_operations.md)). The repoint sits in
-the same row as the label write, so one transition is one step. It is not a repair the
-maintainer has to remember:
+the same row as the spawn of that worker, so one transition is one step. It is not a repair
+the maintainer has to remember:
 
 - `implementation-complete` points the precheck at the reviewer's worktree, with the review
   harness's process pattern from
@@ -877,12 +905,10 @@ item keeps an observer. **A row that names no next worker repoints nothing.**
 `gates-unproven` and `unreadable` say nothing about which worker is live. Rationale:
 [`docs/adr/0026-the-automation-follows-the-live-worker.md`](docs/adr/0026-the-automation-follows-the-live-worker.md).
 
-**The repointed precheck is the same `wake` command, with two flags changed.** `--worktree`
+**The repointed precheck is the same `tick` command, with two flags changed.** `--worktree`
 and `--process` name the live worker. Every other flag keeps the value the spawn resolved
-([Start the tick](#start-the-tick--one-item-automation-per-worker)), and `--handle` is one
-of them. So a repoint never drops the wake target. **`--marker-dir` stays pointed at the
-item's implementation worktree.** So an answered wake cannot fire again from a fresh
-directory. The markers still die with the item, at step 8 of a **Close transaction**.
+([Start the tick](#start-the-tick--one-item-automation-per-worker)). So a repoint changes
+which worker is watched and nothing else about the transition the tick can apply.
 
 **A tool that records operation 13 as unsupported changes nothing else about the flow.**
 `cmux` and `herdr` declare no automation surface, so no schedule exists and nothing needs a
@@ -991,7 +1017,7 @@ loses the worker's reasoning and never its position. Rationale:
 
 When a worker finishes a work item and review is enabled. **The tick is the actor that
 starts it** — its `implementation-complete` outcome
-([On the wake](#on-the-wake--one-response-per-outcome)). The item stays at `in-progress`
+([On the tick](#on-the-tick--what-it-wrote-and-what-is-left-for-you)). The item stays at `in-progress`
 through the whole loop, because a worker still owns it.
 
 **The round bound is the resolved `review.rounds`, and one value serves both halves.** It
@@ -1013,7 +1039,7 @@ outcome that reports the bound spent.
    findings never arrive, and nothing reports an error. **Then repoint the item's Item
    automation at this worktree** (op 13), and create no second one. One schedule per
    item stands, and its precheck follows the live worker
-   ([On the wake](#on-the-wake--one-response-per-outcome)). The precheck is the same `wake`
+   ([On the tick](#on-the-tick--what-it-wrote-and-what-is-left-for-you)). The precheck is the same `tick`
    command. `--worktree` and `--process` then name this worktree and the review harness.
    **The automation is repointed, and never restarted**, so the schedule and its run history
    both stay. The first `Verdict:` comment is what makes the tick read a verdict rather
@@ -1030,8 +1056,8 @@ outcome that reports the bound spent.
 
    **The verdict carries a `Verdict:` line, and the prompt asks for it verbatim.** Its
    value is `approve` or `request-changes`. That literal is what puts the item in a review
-   round, so a review whose comment omits it never wakes this session. Its count is
-   also the round number, so an omitted line loses the count with the wake. It is quoted
+   round, so a review whose comment omits it fires no transition at all. Its count is
+   also the round number, so an omitted line loses the count with it. It is quoted
    in the **Completion signal** entry of [`CONTEXT.md`](CONTEXT.md), so a writing pass
    leaves it byte-identical.
 
@@ -1075,7 +1101,7 @@ outcome that reports the bound spent.
    Then re-prompt **that same worker** with the findings to fix, and re-review. **Repoint the
    precheck back at the implementation worktree** (op 13), with the implementation harness's
    process pattern. The fix round then watches the worker that is fixing
-   ([On the wake](#on-the-wake--one-response-per-outcome)). The automation already runs and
+   ([On the tick](#on-the-tick--what-it-wrote-and-what-is-left-for-you)). The automation already runs and
    outlives the round, so it is repointed and never restarted. Loop,
    bounded at the resolved `review.rounds` (default 3), and the round the tick's line names
    is the round you are on.
@@ -1106,14 +1132,15 @@ outcome that reports the bound spent.
    prompt, so every rule in
    [The prompt: checklist + completion contract](#the-prompt-checklist--completion-contract)
    applies to it unchanged.
-4. **On approve, or after the last round regardless:** gather evidence and flip
-   the item to **human review**. **That transition is one call: it swaps `in-progress` for
-   `to-review`.** No card moves with it ([Board status](#board-status)). **This session
-   writes that label. The worker wrote none**, because its last act was the review
-   note. The item holds
+4. **On approve, or after the last round regardless:** gather evidence and report that the
+   item is with a human. **The tick has already swapped `in-progress` for `to-review`**, on
+   its `verdict-approve` or `rounds-exhausted` outcome. No card moves with it
+   ([Board status](#board-status)). **Write that label nowhere.** The item holds
    `in-progress` for the whole loop, because a worker owns it and a fix round is that same
    worker's work. So the label changes only here, at the one moment the loop concludes
-   ([`docs/adr/0025-the-session-writes-the-review-state.md`](docs/adr/0025-the-session-writes-the-review-state.md)).
+   ([`docs/adr/0056-the-tick-applies-the-transition-it-computed.md`](docs/adr/0056-the-tick-applies-the-transition-it-computed.md)).
+   `--review` on the precheck is what holds the finish back until this moment
+   ([Start the tick](#start-the-tick--one-item-automation-per-worker)).
    Merge is always a human step.
 
 On demand: **"review #N adversarially"** runs this flow directly even if review is
@@ -1121,120 +1148,59 @@ off in config.
 
 ## Close a task
 
-When the user says **merge and close N / close N / close task #N / it's done / wrap up
-<slug>**: run one **Close transaction**. It is eight steps in one fixed order, defined in
-[`CONTEXT.md`](CONTEXT.md). The split is by judgement. Steps 1 to 3 need it, so they
-are the prose below. Steps 4 to 8 need none, so `scripts/close_item.py` owns them.
+**There is nothing to run here.** A close is what one tick does when the pull request for
+an item's branch reads `MERGED`. The maintainer merges on the tracker, and the next tick
+closes the item, removes the worktree and removes the automation. **No verb starts a close,
+and no label authorises one**
+([`docs/adr/0057-the-merge-is-the-second-act.md`](docs/adr/0057-the-merge-is-the-second-act.md)).
+
+So *merge and close N*, *close N*, *it's done* and *wrap up <slug>* are questions now. Read
+the item and its pull request. Then answer in one line:
+
+| What you read | The one-line answer |
+|---|---|
+| the pull request is merged, and the item is closed | it closed on a tick, and that tick's line carries the plan |
+| the pull request is merged, and the item is open | the next tick closes it, inside a minute |
+| the pull request is open | merge it on the tracker, and the close follows by itself |
+| the item wears `needs-human` | quote the comment on the item, and stop |
+| there is no pull request | no worker opened one, so read the outcome instead ([On the tick](#on-the-tick--what-it-wrote-and-what-is-left-for-you)) |
+
+**Never merge for the maintainer, and never run `scripts/close_item.py` by hand.** That
+seam runs inside the tick, in the process that already read the item
+([Start the tick](#start-the-tick--one-item-automation-per-worker)). A second caller is a
+second source of truth about what closed an item. The five steps, their order, their gates
+and their refusals live in the seam and in the **Close transaction** entry of
+[`CONTEXT.md`](CONTEXT.md). **Never restate one of them here, in a prompt, or in a report.**
 Rationale:
 [`docs/adr/0015-close-is-a-deterministic-transaction.md`](docs/adr/0015-close-is-a-deterministic-transaction.md).
 
-**The maintainer's words are the gate.** Read the instruction against this table
-before you touch anything:
+**A refused close writes `needs-human` and stops.** The comment on the item carries the
+plan's own reason, so a dirty worktree names its files. Read that comment, then repair the
+one thing it names. **A refused item keeps its observer**, because teardown is step 8 and a
+refusal never reaches it. That is deliberate: an item that did not close is exactly the one
+that must keep watching.
 
-| Instruction | Teardown |
-|---|---|
-| "task done, merge and close" | yes |
-| "merge and close 20", "merge 20 and close it" | yes |
-| "close 20" | yes |
-| "wrap up 20" | yes |
-| "flip 20 to review", "advance 20" | no |
-| ambiguous, or not said | ask first |
+**The recovery goes back through the implementation position, and it takes two ticks.** The
+refusal took `to-review` off the item, so clearing `needs-human` leaves it with no
+work-state label. The next tick then reads implementation, re-proves the finish, and writes
+`to-review` again. The tick after that reads the merge and closes. **Where the repair was a
+commit, the Gate record must go green at the new `HEAD` first**, or the tick fires
+`gates-unproven` instead
+([On the tick](#on-the-tick--what-it-wrote-and-what-is-left-for-you)). A repair that commits
+nothing needs no gate run.
 
-The explicit ask **is** the confirmation. So never ask again for a merge the
-maintainer requested in the same turn. A **no** row is an advance and not a close:
-swap the label to the review state, and stop there. **No card moves**
-([Board status](#board-status)). On the **ask first** row, ask in one line and wait.
+**A close needs three flags on the precheck**, and a spawn is where they are resolved
+([Start the tick](#start-the-tick--one-item-automation-per-worker)). A precheck missing
+`--checkout` or `--teardown-command` closes nothing and names the flag. So an item that sits
+at the review state with a merged pull request is a precheck to repair.
 
-**An ask that names many items is still one ask.** A maintainer who names ten items
-authorised ten closes, so a close inside a **Merge train** carries the same authority as a
-close of one item
-([Merge the queue](#merge-the-queue),
-[`docs/adr/0037-the-merge-queue-is-an-ordered-train.md`](docs/adr/0037-the-merge-queue-is-an-ordered-train.md)).
+### Parent-close is what is left for you
 
-Then **find the worktree** (op 8) — display name = branch = slug. Keep its id and
-its path. If nothing matches, the item is probably closed already. Do the label steps
-that still apply, and say so.
-
-### Steps 1 to 3 — judgement, in this session
-
-**This orchestrator session does all three, and no worker is prompted for any of
-them.** A worker can be idle or out of context by now, and its worktree is what step
-8 removes. Step 1 needs a working tree, so it runs **inside the item's worktree**.
-That worktree is still there, because teardown has not run yet. The main checkout
-(config's `repo`) stays on the default branch. Step 3 is an API call and needs no
-checkout, which is why only the first two steps care where they run.
-
-1. **Resolve conflicts against the default branch.** Merge the default branch into
-   the item's branch, inside the item's worktree. If it conflicts, invoke
-   `resolving-merge-conflicts`. That skill owns the procedure and this repo copies no
-   step of it. So never resolve a hunk from memory.
-2. **Push the mergeable branch.**
-3. **Merge the PR.** The maintainer made this decision already, and you are carrying
-   it out
-   ([`docs/adr/0016-the-orchestrator-merges-when-asked.md`](docs/adr/0016-the-orchestrator-merges-when-asked.md)).
-
-### Steps 4 to 8 — `close_item` owns the order
-
-`scripts/close_item.py` holds the ordering, the gates, the exit codes and the
-refusal reasons. **Never restate one of them here, in a prompt, or in a report.** A
-second copy is a second source of truth. Read the plan the seam emits.
-`python3 <plugin root>/scripts/close_item.py --help` is the argument surface, and the
-module docstring is the step table. `<plugin root>` is the value the preflight resolved
-([Resolve the plugin root, and prove the seam runs](#resolve-the-plugin-root-and-prove-the-seam-runs)).
-The path names the seam and it leaves the working directory alone, which matters here:
-`--repo` defaults to the working directory, so a form that moves there first would point
-the merge at the plugin.
-
-```bash
-python3 <plugin root>/scripts/close_item.py --issue <N> --pr <PR> \
-  --repo <config's repo> --worktree <the path from op 8> \
-  --remove-label <the review label> \
-  --tracker-cli <gh or glab> --tracker-host <host> --tracker-repo <owner>/<name> \
-  --teardown-command '<op 10, with the ids filled in>'
-```
-
-Three things the seam never learns, so you pass them in:
-
-- **The teardown command, as a string — and it removes the automation as well as the
-  worktree.** Read both halves from
-  [`references/tools/<tool>.md`](references/tools/_operations.md), op 12 then op 10, and
-  substitute the ids. Join them with `&&`, in that order, and pass the whole line to
-  `--teardown-command`. So the seam holds no `orca` command, and a new tool stays a
-  markdown change. **The automation goes first**, so nothing ticks against a worktree that
-  is half removed. Use `&&` and not `;`, so a failed op 12 leaves both in place. The plan
-  then reports the failure rather than a leaked schedule. A session that no longer holds the
-  automation id reads it back from the name, `orchestrator-item-<N>` — that is what op 12
-  is written to do. The checklist file dies with the worktree, so nothing cleans it up.
-  Where the tool records operations 11 and 12 as unsupported, no automation was created and
-  the string is op 10 alone. Rationale:
-  [`docs/adr/0022-item-automation-replaces-the-blocking-watch.md`](docs/adr/0022-item-automation-replaces-the-blocking-watch.md).
-  **The eight steps and their order are unchanged**, and `scripts/close_item.py` gains no
-  code. The whole change is the value of one argument it already takes.
-- **Which tracker, as three arguments.** Read `--tracker-cli`, `--tracker-host` and
-  `--tracker-repo` from [`../docs/agents/issue-tracker.md`](../docs/agents/issue-tracker.md),
-  the same way the tick reads its own two
-  ([On the wake](#on-the-wake--one-response-per-outcome)). `gh` on github.com is the
-  default, so this repo passes none of the three. A self-hosted GitLab needs all three,
-  and the seam then runs there with no wrapper script. `--tracker-repo` is the tracker
-  project and `--repo` is the checkout on disk, so the two never share an argument. Every
-  command comes from the **Tracker adapter**
-  ([`CONTEXT.md`](CONTEXT.md), **Tracker adapter**), so never write a tracker command
-  here or in a prompt.
-- **Whether to mutate. The default invocation is a dry run.** It resolves every
-  precondition, prints the plan as JSON, and changes nothing. Read that plan. Then
-  re-run it with `--execute`. Teardown needs `--execute --teardown` together, and
-  only where the table above says yes.
-
-**A refused transaction leaves the automation in place.** Teardown is step 8, so a refusal
-at any earlier step never reaches the string above. The item is then still observed, and the
-next tick still wakes this session. That is deliberate: an item that did not close is
-exactly the one that must keep its observer.
-
-**Parent-close stays yours.** The seam closes one item. Where the tracker conventions
-define a parent close, apply it after the seam exits clean. That is the last child
-closed → close the parent. **The parent's card needs no move**, because the board's own
-built-in workflow answers a closed item ([Board status](#board-status)). **Two steps run
-before that close, in this order**: [The story proof](#the-story-proof), then
+**The tick closes one item, and it closes no parent.** Where the tracker conventions
+define a parent close, apply it after the last child of a `user-story` parent closes.
+**The parent's card needs no move**, because the board's own built-in workflow answers a
+closed item ([Board status](#board-status)). **Two steps run before that close, in this
+order**: [The story proof](#the-story-proof), then
 [The layer 5 story gate](#the-layer-5-story-gate). A proof that failed stops there, and the
 parent stays open.
 
@@ -1259,17 +1225,18 @@ Its `run_recipe` is blank, so no story here ever reaches a story proof.
 
 Where the gate does hold:
 
-1. **Write `in-progress` on the parent.** One label swap, the same as every other
-   transition, and no card moves with it ([Board status](#board-status)).
+1. **Claim the parent**, with the same `tick --claim` command a leaf spawn runs
+   ([Spawn a worker](#spawn-a-worker-implement-x)). One label swap through the one writer, and no card
+   moves with it ([Board status](#board-status)).
 2. **Spawn the proof worker**, and start or repoint the **Item automation** — below.
-3. **The tick reports `implementation-complete` on the parent**
-   ([On the wake](#on-the-wake--one-response-per-outcome)).
+3. **The tick reads `implementation-complete` on the parent, and writes `to-review`**
+   ([On the tick](#on-the-tick--what-it-wrote-and-what-is-left-for-you)).
 4. **Read the evidence note and the spec PR.**
 5. **Run [The layer 5 story gate](#the-layer-5-story-gate)**, and triage every candidate it
    reports.
-6. **Swap `in-progress` for `to-review` on the parent, in one call.** That is the same one
-   swap every other transition makes
-   ([On the wake](#on-the-wake--one-response-per-outcome)).
+6. **The parent already wears `to-review`**, because the tick wrote it at step 3. So there
+   is nothing to swap here, and this session writes no label
+   ([On the tick](#on-the-tick--what-it-wrote-and-what-is-left-for-you)).
 7. **The maintainer reads the spec PR, then asks for the close.** No session merges that PR
    unasked ([Close a task](#close-a-task)).
 
@@ -1298,7 +1265,7 @@ restate its reason here
 **The Item automation is `orchestrator-item-<parent N>`, and one item never holds two
 schedules.** Where the parent already carries one, repoint its precheck at the proof worktree
 (op 13), the same way a review round does
-([On the wake](#on-the-wake--one-response-per-outcome)). Where it carries none, create one at
+([On the tick](#on-the-tick--what-it-wrote-and-what-is-left-for-you)). Where it carries none, create one at
 this spawn ([Start the tick](#start-the-tick--one-item-automation-per-worker)). Step 8 of the
 parent's own **Close transaction** removes it.
 
@@ -1308,7 +1275,7 @@ session then files each failure through `/to-tickets`, and it leaves the parent 
 `in-progress`. It runs **no** layer 5 story gate, and it reports the pending human
 decision ([Reporting to the user](#reporting-to-the-user)). `gates-unproven`, `stalled` and
 `dead` keep the answers they already have
-([On the wake](#on-the-wake--one-response-per-outcome)).
+([On the tick](#on-the-tick--what-it-wrote-and-what-is-left-for-you)).
 
 ### The layer 5 story gate
 
@@ -1362,7 +1329,7 @@ grilling loop runs here.
 **The threshold is 0 untriaged `Strong` candidates, and not 0 findings.** This session
 checks it, and `scripts/close_item.py` does not. That seam owns the judgement-free steps
 of a **Close transaction** alone, and triage is judgement
-([Steps 4 to 8](#steps-4-to-8--close_item-owns-the-order)).
+([Close a task](#close-a-task)).
 
 **Layer 5 stops nothing.** It holds no exit code, so it fails no push and no merge. Depth
 is a judgement, and a hard gate here stalls every story on an opinion. A candidate still
@@ -1408,18 +1375,18 @@ you need them, and never from memory. This section restates neither one. Rationa
    report is what lets the maintainer stop a train they did not expect.
 4. **Park what the plan parked.**
    [`references/merge-train.md`](references/merge-train.md) holds the park rule, and this
-   session performs it. **The label is the whole park, and no card moves with it**
-   ([Board status](#board-status)). The seam writes no label and comments nowhere, so this
-   session makes every tracker write a park needs.
-5. **Run one full Close transaction per item, in the printed order.** Steps 1 to 3 in
-   prose, and `resolving-merge-conflicts` where step 1 conflicts. Then steps 4 to 8 through
-   `scripts/close_item.py`, with `--execute --teardown`
-   ([Close a task](#close-a-task)). **No step of the transaction changes, and their order
-   does not change.** The maintainer's ask is the standing authorisation, so no close
-   inside a train asks a second time ([Safety](#safety)).
-6. **A late conflict parks the item, and the train continues.** Step 1 of the transaction
-   is where it appears, because an earlier merge of this same train moved the default
-   branch. Park it per step 4, then continue with the next item.
+   session performs it. **The comment is the whole park.** No label moves, because a queued
+   item already wears the review state, and no card moves either
+   ([Board status](#board-status)). `scripts/merge_train.py` comments nowhere, so this
+   session posts that one comment.
+5. **Hand the maintainer the order, and merge nothing.** They merge on the tracker, in
+   that order, and each merge closes its own item on the next tick
+   ([Close a task](#close-a-task)). **No step of a Close transaction changes, and their
+   order does not change.** So a train adds one caller and no second close path.
+6. **A late conflict parks the item, and the train continues.** It appears when the
+   maintainer merges, because an earlier merge of this same train moved the default branch.
+   Park it per step 4, then continue with the next item. `resolving-merge-conflicts` is
+   there where they ask for it.
 7. **Apply the layer 5 story gate per item, and never once per train.** Where a merge
    closed the last child of a user story, run
    [The layer 5 story gate](#the-layer-5-story-gate) for that story. One train can close
@@ -1454,53 +1421,56 @@ it. Shape output for acting on, not for completeness:
   session cannot infer. The position is computed, so read it the way the seam does: the
   work-state label, the `Verdict:` comment count and the checklist file. Do not ask the
   user to remember any of the three.
-- **A wake report names the outcome and the transition that ran.** The outcome is the
+- **A tick report names the outcome and the transition the tick applied.** The outcome is the
   tick's own word: `implementation-complete`, `gates-unproven`,
   `verdict-approve`, `verdict-request-changes`, `rounds-exhausted`,
   `dead`, `stalled` or `unreadable`. Then
-  the label you wrote, then what you did. `#38 implementation-complete · in-progress held.
-  Reviewer spawned, gpt-5.6-terra @ high.` **Where the wake handed the item to a human,
-  name the swap you wrote.** That one call is the whole hand-off:
-  `#38 verdict-approve · in-progress → to-review.`
+  the label the tick wrote, then what you did. `#38 implementation-complete · in-progress
+  held. Reviewer spawned, gpt-5.6-terra @ high.` **Where the tick handed the item to a human,
+  name the swap it wrote.** That one write is the whole hand-off:
+  `#38 verdict-approve · in-progress → to-review.` Read the swap off the item, and never
+  write one yourself.
 - **A story-proof line names the parent and the two artifacts.**
   `#57 story proof · evidence note on #57 · spec PR #64.` The parent number is
-  the fact a fresh session cannot infer, because the item that woke this session was the last
-  child ([The story proof](#the-story-proof)).
+  the fact a fresh session cannot infer, because the item that reached the finish was the
+  last child ([The story proof](#the-story-proof)).
 - **Both counts come from the tracker, so restate both.**
-  [On the wake](#on-the-wake--one-response-per-outcome) says how to read each one.
+  [On the tick](#on-the-tick--what-it-wrote-and-what-is-left-for-you) says how to read each one.
   `#38 stalled in implementation ·
   checklist 4/7 · stall 1 of 2. Context reset, re-prompted with the unchecked boxes.` At
   `stall 2 of 2`, and on `dead`, the next step is a teardown — name it as the pending
   human decision.
-- **Name the live wake mode on the spawn line.** The tick delivers to the handle, the title
-  or a comment on the work item, and the first that succeeds ends the delivery
-  ([Start the tick](#start-the-tick--one-item-automation-per-worker)). Say which one this
-  spawn resolved: `#38 tick: wake by handle` / `wake by title` / `wake by comment`. A
-  comment-only wake is then a fact the user reads at spawn, rather than a silence they find
-  many runs later.
+- **Say that the tick writes the label, and that you do not.** One line on the spawn line:
+  `#38 tick: applies the transition, review policy off`
+  ([Start the tick](#start-the-tick--one-item-automation-per-worker)). The user then knows
+  which writes happen with nobody in the turn, and that `needs-human` is the label that
+  stops them.
 - **Name the panel on the spawn line.** Op 7 opens the work item as a tab beside
   the worker. Say it happened: `#38 panel: opened`.
 - **Say when the panel is unavailable.** A tool that records operation 7 as
   unsupported opens no follow-along tab, so say so on the spawn line, once.
 - **Say when the tick is unavailable.** A tool that records operations 11 and 12 as
-  unsupported gets no automation, so nothing wakes this session for that item. Say so on
+  unsupported gets no automation, so no transition lands on its own. Say so on
   the spawn line, once, and point at the four monitor bullets
-  ([Monitor workers](#monitor-workers)).
+  ([Monitor workers](#monitor-workers)). **Run the `tick` command by hand there instead of
+  writing a label**, with the same flags the precheck would have carried
+  ([Start the tick](#start-the-tick--one-item-automation-per-worker)). One writer holds
+  every swap, whether a schedule calls it or you do.
 - **One table or list, capped at 5 rows.** More than 5 ready items or 5 findings →
   rank and split (`start now` vs `blocked`, `must-fix` vs `noted`). Five ranked
   beats twelve flat, and the ready queue already promises "at least 5".
 - **End with one action the user can take now.** `Spawn #41 next?` / `#38's MR is
-  green — merge it and say "close 38".` The merge decision and the teardown
-  authorisation are the only human steps; name whichever is pending.
-- **A close report names which steps ran and which refused**, read off the plan the
-  seam emitted ([Close a task](#close-a-task)), and ends with the one action left.
-  `#20 closed: steps 1 to 7 ran, teardown refused. Cause: the worktree holds
-  src/api.ts. Commit it or stash it, then say "close 20" again.`
-- **A train report names the order it ran**, what merged, what parked and why, and it ends
-  with the one action left. That is the close-report shape, once per train instead of once
-  per item ([Merge the queue](#merge-the-queue)). **A parked item is that action**, and it
-  carries the conflicting paths. `#152 #153 merged, in that order. #151 parked:
-  orchestrator/SKILL.md conflicts. Resolve it in 151-merge-train, then say "close 151".`
+  green — merge it and the tick closes #38.` **The merge is the only human step left in the
+  second act**, so name it where it is pending.
+- **A close report names which steps ran and which refused**, read off the tick's own line
+  ([Close a task](#close-a-task)), and ends with the one action left.
+  `#20: steps 4 to 7 ran, and step 6 refused. Cause: the worktree holds src/api.ts. Commit
+  it or stash it, clear needs-human, and the next tick finishes the close.`
+- **A train report names the order the seam planned**, what parked and why, and it ends with
+  the one action left. That is the close-report shape, once per train instead of once per
+  item ([Merge the queue](#merge-the-queue)). **A parked item is that action**, and it
+  carries the conflicting paths. `#152 #153 in that order, ready to merge. #151 parked:
+  orchestrator/SKILL.md conflicts. Resolve it in 151-merge-train first.`
 - **Matter-of-fact failures.** Location, cause, fix — no "uh oh", no apology.
   `#38 idle with checklist 4/7 (evidence unchecked). Cause: port 3038 in use.
   Re-prompting with the remaining steps.`
@@ -1523,16 +1493,13 @@ refusal reason are spelled out, never compressed.
 
 ## Safety
 
-- Confirm with the user before teardown **where the instruction is ambiguous or
-  unsaid** — it kills the live worker terminal and can drop uncommitted work. An
-  explicit "merge and close" **is** that confirmation, so a second ask is friction
-  rather than safety (the table in [Close a task](#close-a-task)). The data-loss case
-  is a dirty tree, and step 6 of the transaction refuses it rather than warning.
-- **The maintainer's ask is the standing authorisation, so a Merge train asks no second
-  time.** The ask names the items, on items they read, so it authorises those
-  transactions and never a whole session. Each close inside a train then runs all eight
-  steps, teardown included ([Merge the queue](#merge-the-queue),
-  [`docs/adr/0037-the-merge-queue-is-an-ordered-train.md`](docs/adr/0037-the-merge-queue-is-an-ordered-train.md)).
+- **The maintainer's own merge is the authorisation for the teardown that follows it**, and
+  no session asks a second time ([Close a task](#close-a-task)). The data-loss case is a
+  dirty tree, and step 6 of the transaction refuses it rather than warning. So the one
+  unrecoverable case never reaches an unattended teardown
+  ([`docs/adr/0057-the-merge-is-the-second-act.md`](docs/adr/0057-the-merge-is-the-second-act.md)).
+- **Confirm before any teardown this session runs by hand**, because that one carries no
+  merge behind it. It kills the live worker terminal and it can drop uncommitted work.
 - **A second stall is one of the ambiguous cases, so it asks. So is a `dead` worker.** The
   maintainer said nothing about a teardown in either case, and a tick cannot read intent in
   an uncommitted diff. The re-prompt on the first stall stays unconfirmed, because it

@@ -3,8 +3,10 @@
 A **Merge queue** is the set of open work items ready to merge. A **Merge train** is one
 ordered run over that set. Both terms are defined in [`../CONTEXT.md`](../CONTEXT.md).
 
-A train runs in the **Orchestrator** session. It resolves an order, then runs one full
-**Close transaction** per item in that order, teardown included. Rationale, the rejected
+A train runs in the **Orchestrator** session. It resolves an order and hands that order to
+the maintainer. **The maintainer merges in it, and each merge closes its own item on the
+next tick**, through one full **Close transaction** with teardown
+([ADR 0057](../docs/adr/0057-the-merge-is-the-second-act.md)). Rationale, the rejected
 alternatives and the accepted risk:
 [ADR 0037](../docs/adr/0037-the-merge-queue-is-an-ordered-train.md). Why no label records
 the ask:
@@ -23,8 +25,8 @@ type it twice.
    parked before the train starts.
 2. Rank the rest by how many other queued branches they share a changed file with, fewest
    first. Break a tie by work-item number, ascending.
-3. After each real merge, the next branch runs step 1 of the **Close transaction**. That is
-   where a late conflict appears, and where the park rule fires again.
+3. After each real merge, the next branch meets a default branch that moved. That is where
+   a late conflict appears, and where the park rule fires again.
 
 File overlap is a cheap proxy, and the test-merge is the real check. The seam does both, so
 a wrong ranking costs one extra park and never a wrong merge.
@@ -49,15 +51,20 @@ comment is a report of the current plan and not a promise about the next one.
 
 ## The park rule
 
-Where a branch conflicts, the session does three things:
+Where a branch conflicts, the session does two things:
 
-- Drop the item back to the review state.
 - Comment the conflicting paths on the work item.
 - Continue with the next branch.
 
+**No label moves.** An item in a **Merge queue** already wears the review state, and a park
+leaves it there. So a park is a comment and nothing else, and the session writes no
+work-state label
+([`../docs/adr/0056-the-tick-applies-the-transition-it-computed.md`](../docs/adr/0056-the-tick-applies-the-transition-it-computed.md)).
+
 Nothing unattended resolves a hunk. A parked item is not a failed one. It needs the
-judgement that step 1 of the **Close transaction** keeps in prose. So it goes back to the
-human who can give that judgement.
+judgement a merge always needed, and the maintainer holds every merge
+([ADR 0057](../docs/adr/0057-the-merge-is-the-second-act.md)). So it goes back to the human
+who can give that judgement.
 
 ## The seam's contract
 
@@ -65,8 +72,8 @@ human who can give that judgement.
 contract is declared here, and the file lands with the flow change that consumes it.
 
 - **It plans, and it merges nothing.** There is no `--execute` flag, because there is
-  nothing to execute. The merge is the **Close transaction** this repo already holds, run
-  once per item in the planned order.
+  nothing to execute. The maintainer makes each merge in the planned order, and the tick
+  that reads it runs one **Close transaction**.
 - **It mutates no checkout a session works in.** It creates a temporary checkout,
   test-merges each queued branch there, and removes the checkout again.
 - **It prints one JSON object** on stdout: the planned `order`, and a `parked` list that

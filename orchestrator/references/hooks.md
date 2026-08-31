@@ -129,13 +129,16 @@ nothing stands behind is worse than no line.
 
 ## What the plane does not do yet
 
-- **No hook denies the review state.** That denial waits on the tick that applies a
-  transition itself, and no hook writes a label
-  ([ADR 0051](../docs/adr/0051-a-hook-refuses-and-a-seam-performs.md)).
+- **The label denial still reads a command and not a caller's role.** The tick applies the
+  transition itself now, so no session has a reason to write a work-state label
+  ([ADR 0056](../docs/adr/0056-the-tick-applies-the-transition-it-computed.md)). The
+  denial's caller test names one seam file, and no hook writes a label
+  ([ADR 0051](../docs/adr/0051-a-hook-refuses-and-a-seam-performs.md),
+  [ADR 0055](../docs/adr/0055-the-label-denial-reads-its-caller.md)).
 - **No `Stop` hook.** Nothing writes the board on a stop, so a reconcile there would
   move a field no session touched.
-- **No merge guard.** The maintainer merges
-  ([ADR 0016](../docs/adr/0016-the-orchestrator-merges-when-asked.md)).
+- **No merge guard.** The maintainer merges, on the tracker
+  ([ADR 0057](../docs/adr/0057-the-merge-is-the-second-act.md)).
 - **No label vocabulary changes.** The four work-state strings are the ones
   `docs/agents/issue-tracker.md` holds today.
 

@@ -203,14 +203,12 @@ expression, or an RRULE string. Only cron reaches one minute, so the one-minute 
 is `'* * * * *'`. `--workspace` binds the schedule to the worktree that already exists.
 `--repo` in its place cuts a new worktree per run.
 
-The precheck is the seam's `wake` command, which is the whole body of a tick. The caller
-fills the placeholder. Its send template is **operation 4** of this file, with `{target}`
-where `--terminal` goes and `{text}` where the line goes:
+The precheck is the seam's `tick` command, which is the whole body of a tick. It computes
+the transition and applies it, so it carries no delivery target of any kind. The caller
+fills the placeholder:
 
 ```bash
---precheck "python3 <plugin root>/scripts/worker_state.py wake --item <N> <the other flags> \
-  --handle <handle> --title orchestrator \
-  --send-command 'orca terminal send --terminal {target} --text {text} --enter'"
+--precheck "python3 <plugin root>/scripts/worker_state.py tick --item <N> <the other flags>"
 ```
 
 `<plugin root>` is a **literal path** here, and never a shell variable. This schedule
@@ -219,11 +217,11 @@ caller resolves the value and writes it in
 ([`../../SKILL.md`](../../SKILL.md#resolve-the-plugin-root-and-prove-the-seam-runs)).
 
 **The provider never runs, by design.** The CLI requires `--prompt` and `--provider`, and
-exit 0 is the only code that starts that agent. No path through `wake` exits 0, so every
+exit 0 is the only code that starts that agent. No path through `tick` exits 0, so every
 run records as skipped and both flags stay inert. Write a prompt that says the tick
-delivered its own line. The provider is an agent id (`codex`, `claude`, `gemini`), and the
-choice changes nothing. Rationale:
-[`../../docs/adr/0027-the-tick-delivers-its-own-wake.md`](../../docs/adr/0027-the-tick-delivers-its-own-wake.md).
+applied its own transition. The provider is an agent id (`codex`, `claude`, `gemini`), and
+the choice changes nothing. Rationale:
+[`../../docs/adr/0056-the-tick-applies-the-transition-it-computed.md`](../../docs/adr/0056-the-tick-applies-the-transition-it-computed.md).
 
 `--precheck-timeout` defaults to 60 seconds, and its maximum is 600.
 
@@ -258,11 +256,11 @@ The flag surface is `--id <id>`, `--precheck` and `--workspace <selector>`, conf
 against `orca automations edit --help`. The identifier is also positional
 (`orca automations edit <id>`), and `--id` is the form operation 12 already uses.
 
-`--precheck` takes the same `wake` command operation 11 wrote, with `--worktree` and
-`--process` renamed to the live worker. Every other flag keeps the value the spawn
-resolved, `--handle` and `--marker-dir` included. So a repoint never drops the wake target,
-and the back-off markers stay in one directory. `--workspace` moves the worktree the runs
-bind to, so the schedule and its precheck name one worker.
+`--precheck` takes the same `tick` command operation 11 wrote, with `--worktree` and
+`--process` renamed to the live worker. Every other flag keeps the value the spawn resolved.
+So a repoint changes which worker is watched and nothing else about the transition the tick
+can apply. `--workspace` moves the worktree the runs bind to, so the schedule and its
+precheck name one worker.
 
 The edit fails closed: a rejected call leaves the old precheck running, and the item keeps
 an observer. Rationale:

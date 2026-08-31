@@ -45,8 +45,9 @@ The user reads the spec, and the acceptance criteria are enumerated on it.
 - **Worktree + worker.** Branch `61-contacts-import` off the default branch,
   `pnpm install` through the setup hook, then `claude --model opus --effort xhigh
   --dangerously-skip-permissions`.
-- **Claim #61** — `ready-for-agent` → `in-progress`, one swap in one call. No card
-  moves, because the board is an input.
+- **Claim #61** — `worker_state.py tick --claim`, which swaps `ready-for-agent` for
+  `in-progress` through the seam's one writer. No card moves, because the board is an
+  input.
 - **Draft the prompt.** The routed skill is one item in the draft, beside the rest:
 
   ```

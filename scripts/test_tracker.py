@@ -24,6 +24,7 @@ from scripts import tracker
 
 ITEM = 54
 PR = 48
+BRANCH = "someone/54-a-branch"
 HOST = "git.example.com"
 REPO = "team/thing"
 
@@ -89,7 +90,13 @@ class TrackerTest(unittest.TestCase):
                     "board": "To do",
                 }
             },
-            pull_requests={str(PR): {"state": "MERGED", "merge_commit": "a1b2c3d"}},
+            pull_requests={
+                str(PR): {
+                    "state": "MERGED",
+                    "merge_commit": "a1b2c3d",
+                    "head": BRANCH,
+                }
+            },
         )
         one = tracker.Tracker(fixture=path)
 
@@ -105,6 +112,9 @@ class TrackerTest(unittest.TestCase):
         self.assertEqual(
             one.pull_request(PR), {"state": "MERGED", "merge_commit": "a1b2c3d"}
         )
+        self.assertEqual(
+            one.pull_request_for_branch(BRANCH), {"number": PR, "state": "MERGED"}
+        )
 
     def test_an_absent_item_and_an_absent_key_read_the_same_way(self):
         """No record is not an error, because a repo with no board reads this way."""
@@ -114,6 +124,9 @@ class TrackerTest(unittest.TestCase):
         self.assertEqual(one.issue(ITEM), {"state": None, "labels": []})
         self.assertEqual(one.board_status(ITEM, 6, "someone"), "")
         self.assertEqual(one.pull_request(PR), {"state": None, "merge_commit": ""})
+        self.assertEqual(
+            one.pull_request_for_branch(BRANCH), {"number": 0, "state": ""}
+        )
 
     def test_a_fixture_write_runs_nothing_and_is_recorded(self):
         """The log is how a test sees which writes an execute run made."""
@@ -333,6 +346,80 @@ class TrackerTest(unittest.TestCase):
             log.read_text().splitlines(),
             [f"mr view {PR} -F json -R {HOST}/{REPO}"],
         )
+
+    def test_the_pull_request_for_a_branch_answers_a_number_and_a_state(self):
+        """The caller holds a branch, so the adapter is what finds the number."""
+        log = self.fake_cli(
+            "gh", answer=json.dumps([{"number": PR, "state": "MERGED"}])
+        )
+
+        one = tracker.Tracker(repo=REPO)
+
+        self.assertEqual(
+            one.pull_request_for_branch(BRANCH), {"number": PR, "state": "MERGED"}
+        )
+        self.assertEqual(
+            log.read_text().splitlines(),
+            [f"pr list --head {BRANCH} --state all --json number,state --repo {REPO}"],
+        )
+
+    def test_a_branch_with_no_pull_request_is_no_error(self):
+        """An empty list is the quiet answer, and the caller reads one shape."""
+        self.fake_cli("gh", answer="[]")
+
+        self.assertEqual(
+            tracker.Tracker(repo=REPO).pull_request_for_branch(BRANCH),
+            {"number": 0, "state": ""},
+        )
+
+    def test_a_merged_pull_request_wins_over_an_older_closed_one(self):
+        """A branch closed and opened again carries two records, and one merged."""
+        self.fake_cli(
+            "gh",
+            answer=json.dumps(
+                [{"number": 99, "state": "CLOSED"}, {"number": PR, "state": "MERGED"}]
+            ),
+        )
+
+        self.assertEqual(
+            tracker.Tracker(repo=REPO).pull_request_for_branch(BRANCH),
+            {"number": PR, "state": "MERGED"},
+        )
+
+    def test_the_branch_read_on_the_other_tracker_goes_through_its_api(self):
+        """`glab mr list` has the flag trap, so the API answers this read instead."""
+        log = self.fake_cli("glab", answer=json.dumps([{"iid": 7, "state": "merged"}]))
+
+        one = tracker.Tracker(cli=tracker.GLAB, host=HOST, repo=REPO)
+
+        self.assertEqual(
+            one.pull_request_for_branch(BRANCH), {"number": 7, "state": "merged"}
+        )
+        # The branch is escaped in the query, so a `/` reads as one path segment and a
+        # `+` cannot arrive as a space.
+        self.assertEqual(
+            log.read_text().splitlines(),
+            [
+                "api projects/team%2Fthing/merge_requests"
+                "?source_branch=someone%2F54-a-branch"
+                f"&state=all --hostname {HOST}"
+            ],
+        )
+
+    def test_a_branch_name_that_would_break_the_query_is_escaped(self):
+        """A `+` reads as a space on the server, and an `&` splits the query."""
+        argv = tracker.Tracker(cli=tracker.GLAB, repo=REPO).pr_for_branch_argv(
+            "feat/a+b&c"
+        )
+
+        self.assertIn("?source_branch=feat%2Fa%2Bb%26c&state=all", argv[2])
+
+    def test_a_glab_branch_read_without_a_repository_says_why_it_cannot_run(self):
+        """The project path is part of the command, so the name is not optional."""
+        with self.assertRaises(tracker.TrackerError) as caught:
+            tracker.Tracker(cli=tracker.GLAB).pull_request_for_branch(BRANCH)
+
+        self.assertIn("--repo", str(caught.exception))
 
     def test_the_item_read_on_the_other_tracker_is_one_command_with_plain_labels(self):
         """A label is a string there, and the state is the caller's to compare."""

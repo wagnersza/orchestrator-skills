@@ -95,11 +95,13 @@ def scan(root):
 
 
 class SeamInvocationTestCase(unittest.TestCase):
-    """Four small Markdown files in a temporary directory. The four cases are:
+    """Five small Markdown files in a temporary directory. The five cases are:
 
     - the bare module form, which fails everywhere but the plugin root
     - the module form behind a prefix that makes it run, which is still banned
     - the sanctioned path form
+    - the `tick` subcommand under both forms, because an Item automation stores that
+      one and runs it a minute later, in a shell that saw no assignment
     - `python3 -m pytest scripts/`, which names a directory and not the package
     """
 
@@ -119,6 +121,13 @@ class SeamInvocationTestCase(unittest.TestCase):
         self.write(
             "resolved.md",
             f"```bash\npython3 {PATH_FORM}worker_state.py ready\n```\n",
+        )
+        self.write(
+            "tick.md",
+            "```bash\n"
+            "python3 -m scripts.worker_state tick --item 62\n"
+            f"python3 {PATH_FORM}worker_state.py tick --item 62\n"
+            "```\n",
         )
         self.write("suite.md", "```bash\npython3 -m pytest scripts/ -q\n```\n")
 
@@ -161,6 +170,18 @@ class SeamInvocationTestCase(unittest.TestCase):
         """The fixture that must stay quiet, so the tests above pass on the form and
         not on the word `scripts`."""
         self.assertEqual(self.reported_in("resolved.md"), [])
+
+    def test_the_tick_subcommand_is_covered_under_both_invocation_forms(self):
+        """The subcommand an Item automation stores and runs a minute later. The **Tool**
+        runs it in a shell that saw no assignment, and with a working directory the session
+        did not choose. So the module form is the one that cannot resolve there. One line
+        per form, and only the module line is reported."""
+        reported = self.reported_in("tick.md")
+
+        self.assertEqual(len(reported), 1, reported)
+        self.assertIn("tick.md:2", reported[0])
+        self.assertIn("scripts.worker_state", reported[0])
+        self.assertIn(f"{PATH_FORM}worker_state.py", reported[0])
 
     def test_running_the_suite_is_not_a_seam_invocation(self):
         """`python3 -m pytest scripts/ -q` names a directory to collect, not the
