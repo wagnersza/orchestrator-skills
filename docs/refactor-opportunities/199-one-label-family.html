@@ -1,0 +1,517 @@
+<!doctype html>
+<html lang="en" class="scroll-smooth">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Layer 5 story gate — user story #199</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  mermaid.initialize({ startOnLoad: true, theme: 'dark', themeVariables: { fontSize: '13px' } });
+</script>
+<style>
+  .card { background: #11161d; }
+  .rail { background: linear-gradient(180deg,#38bdf8,#818cf8); }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .dup { box-shadow: inset 0 0 0 1px rgba(248,113,113,.35); }
+  .one { box-shadow: inset 0 0 0 1px rgba(52,211,153,.45); }
+</style>
+</head>
+<body class="bg-[#0a0d12] text-slate-200 antialiased">
+
+<header class="border-b border-slate-800/80">
+  <div class="max-w-6xl mx-auto px-6 py-10">
+    <p class="text-xs uppercase tracking-[0.2em] text-sky-400 mb-3">Layer 5 story gate · advisory · stops nothing</p>
+    <h1 class="text-3xl md:text-4xl font-semibold text-white leading-tight">What user story #199 left behind</h1>
+    <p class="mt-4 text-slate-400 max-w-3xl leading-relaxed">
+      Story <span class="mono text-slate-200">#199</span> landed as three work items:
+      <span class="mono text-slate-200">#208</span> (the tick computes the position),
+      <span class="mono text-slate-200">#209</span> (one work-state family, four values) and
+      <span class="mono text-slate-200">#213</span> (nothing writes the board).
+      This report reads the state those three items left across the seams in
+      <span class="mono text-slate-200">scripts/</span>, the hook plane in
+      <span class="mono text-slate-200">hooks/</span>, and the skill body.
+    </p>
+    <div class="mt-6 flex flex-wrap gap-2 text-xs">
+      <span class="px-2.5 py-1 rounded-full bg-rose-500/15 text-rose-300 ring-1 ring-rose-500/30">3 Strong</span>
+      <span class="px-2.5 py-1 rounded-full bg-amber-500/15 text-amber-300 ring-1 ring-amber-500/30">1 Worth exploring</span>
+      <span class="px-2.5 py-1 rounded-full bg-slate-500/15 text-slate-300 ring-1 ring-slate-500/30">1 Speculative</span>
+    </div>
+  </div>
+</header>
+
+<main class="max-w-6xl mx-auto px-6 py-12 space-y-14">
+
+<!-- ============ SUMMARY ============ -->
+<section>
+  <h2 class="text-xl font-semibold text-white mb-5">The shape of the friction</h2>
+  <div class="grid md:grid-cols-3 gap-4">
+    <div class="card rounded-xl p-5 ring-1 ring-slate-800">
+      <p class="text-4xl font-semibold text-rose-400">0</p>
+      <p class="mt-2 text-sm text-slate-400">seams that can write a <span class="mono">Work-state label</span>, against one hook that denies every session which tries.</p>
+    </div>
+    <div class="card rounded-xl p-5 ring-1 ring-slate-800">
+      <p class="text-4xl font-semibold text-amber-400">6</p>
+      <p class="mt-2 text-sm text-slate-400">repo-fact readers written more than once across <span class="mono">hooks/</span> and <span class="mono">scripts/</span>. One is written four times.</p>
+    </div>
+    <div class="card rounded-xl p-5 ring-1 ring-slate-800">
+      <p class="text-4xl font-semibold text-sky-400">3</p>
+      <p class="mt-2 text-sm text-slate-400">independent implementations of one rule: <em>is the <span class="mono">Gate record</span> green at <span class="mono">HEAD</span></em>.</p>
+    </div>
+  </div>
+  <p class="mt-5 text-sm text-slate-400 leading-relaxed max-w-3xl">
+    Two of the three candidates below are the same bug class that
+    <span class="mono">#186</span> reported and <span class="mono">#213</span> closed: one recipe with two
+    implementations. <span class="mono">#213</span> deleted the duplicate inside the
+    <span class="mono">Tracker adapter</span>. The hook plane that landed with story
+    <span class="mono">#198</span> reintroduced the class at a larger scale, because
+    <span class="mono">hooks/</span> imports nothing from <span class="mono">scripts/</span>.
+  </p>
+</section>
+
+<!-- ============ CANDIDATE 1 ============ -->
+<section class="card rounded-2xl ring-1 ring-slate-800 overflow-hidden">
+  <div class="flex">
+    <div class="rail w-1"></div>
+    <div class="p-7 flex-1">
+      <div class="flex items-start justify-between gap-4 flex-wrap">
+        <div>
+          <p class="text-xs uppercase tracking-widest text-slate-500">Candidate 1</p>
+          <h3 class="text-2xl font-semibold text-white mt-1">The label write has a denial and no performer</h3>
+        </div>
+        <span class="shrink-0 px-3 py-1.5 rounded-full text-xs font-semibold bg-rose-500/20 text-rose-300 ring-1 ring-rose-500/40">Strong</span>
+      </div>
+
+      <h4 class="mt-7 text-sm font-semibold text-sky-300 uppercase tracking-wider">Files</h4>
+      <ul class="mt-2 space-y-1 text-sm mono text-slate-300">
+        <li>hooks/refuse.py:167 — <span class="text-slate-500">label_denial</span></li>
+        <li>hooks/refuse.py:184 — <span class="text-slate-500">teardown_denial</span></li>
+        <li>scripts/close_item.py:303 — <span class="text-slate-500">the only label write in the repo</span></li>
+        <li>orchestrator/SKILL.md — <span class="text-slate-500">the spawn claim and the review-state transition</span></li>
+      </ul>
+
+      <h4 class="mt-7 text-sm font-semibold text-sky-300 uppercase tracking-wider">Problem</h4>
+      <p class="mt-2 text-sm text-slate-300 leading-relaxed">
+        <span class="mono">hooks/refuse.py</span> denies every command that writes a
+        <span class="mono">Work-state label</span>, with no exception, and its message says
+        <em>"Run <span class="mono">scripts/close_item.py</span> for the labels of a close."</em>
+        That command is itself denied: <span class="mono">label_denial</span> reads the words of the
+        command and never asks who the caller is. Its sibling
+        <span class="mono">teardown_denial</span> asks exactly that question, seventeen lines below,
+        and exempts the seam by name.
+      </p>
+      <p class="mt-3 text-sm text-slate-300 leading-relaxed">
+        The second half is worse. Story <span class="mono">#199</span> assigns
+        <span class="mono">in-progress</span> to <em>"the session at spawn, and
+        <span class="mono">spawn_item.py</span> from wave 4"</em>, and <span class="mono">to-review</span>
+        to <em>"the session at the finish, and <span class="mono">worker_state.py</span> from wave 3"</em>.
+        Neither seam exists yet. So for the whole of wave 2 there is a denial with no performer:
+        the two transitions a run depends on cannot be written by anybody.
+      </p>
+      <div class="mt-4 rounded-lg bg-rose-950/40 ring-1 ring-rose-900/60 p-4 text-sm text-rose-200/90">
+        <p class="font-semibold text-rose-300">Observed three times while closing this story.</p>
+        <p class="mt-1.5 leading-relaxed">The spawn claim on <span class="mono">#213</span>, the review-state
+        write on <span class="mono">#213</span>, and the <span class="mono">--remove-label</span> argument of the
+        close on <span class="mono">#209</span> were all denied. <span class="mono">#209</span> is closed
+        wearing <span class="mono">to-review</span> and <span class="mono">#213</span> is closed wearing
+        <span class="mono">ready-for-agent</span>.</p>
+      </div>
+
+      <h4 class="mt-7 text-sm font-semibold text-sky-300 uppercase tracking-wider">Solution</h4>
+      <p class="mt-2 text-sm text-slate-300 leading-relaxed">
+        Make the label write a <strong>seam</strong> with one entry point, and let the hook exempt that
+        seam the way it already exempts the teardown. Concretely: one
+        <span class="mono">scripts/work_state.py</span> that owns the swap, built on the
+        <span class="mono">Tracker.label_argv</span> that already exists, with a plan-then-execute shape
+        copied from <span class="mono">close_item.py</span>. Then
+        <span class="mono">label_denial</span> gains the same caller test
+        <span class="mono">teardown_denial</span> has, and the denial message names a command that runs.
+        The two seams wave 3 and wave 4 promise then call that module instead of adding a third
+        label writer.
+      </p>
+
+      <h4 class="mt-7 text-sm font-semibold text-sky-300 uppercase tracking-wider">Benefits</h4>
+      <ul class="mt-2 space-y-2 text-sm text-slate-300 leading-relaxed list-disc list-inside">
+        <li><strong>Locality.</strong> The swap rule, the "never stack" invariant and the vocabulary sit in one
+        module. Today the invariant is stated in <span class="mono">docs/agents/issue-tracker.md</span> and
+        enforced nowhere.</li>
+        <li><strong>Leverage.</strong> One test asserts the invariant the story was written to buy: exactly one
+        work-state label after every transition. That test cannot be written today, because no function
+        performs a transition.</li>
+        <li><strong>The hook plane law holds again.</strong> <em>A hook answers, and a seam performs</em>
+        (ADR 0051) is currently half true: the hook answers, and nothing performs.</li>
+      </ul>
+
+      <h4 class="mt-7 text-sm font-semibold text-sky-300 uppercase tracking-wider">Before / After</h4>
+      <div class="mt-3 grid md:grid-cols-2 gap-4">
+        <div class="rounded-xl bg-[#0d1117] ring-1 ring-rose-900/50 p-4">
+          <p class="text-xs uppercase tracking-widest text-rose-400 mb-3">Before</p>
+          <pre class="mermaid text-xs">flowchart TD
+  S["Orchestrator session"] -->|gh issue edit| H{"refuse.py<br/>label_denial"}
+  C["close_item.py<br/>--remove-label"] -->|gh issue edit| H
+  H -->|deny| X1["denied"]
+  H -->|deny| X2["denied"]
+  X1 -.->|"no performer"| N["label never written"]
+  X2 -.-> N
+  style H fill:#450a0a,stroke:#f87171
+  style N fill:#450a0a,stroke:#f87171</pre>
+        </div>
+        <div class="rounded-xl bg-[#0d1117] ring-1 ring-emerald-900/50 p-4">
+          <p class="text-xs uppercase tracking-widest text-emerald-400 mb-3">After</p>
+          <pre class="mermaid text-xs">flowchart TD
+  S["Orchestrator session"] --> W["work_state.py<br/><i>the one performer</i>"]
+  C["close_item.py"] --> W
+  F["spawn_item.py<br/>wave 4"] --> W
+  W --> H{"refuse.py<br/>label_denial<br/><i>exempts the seam</i>"}
+  H -->|allow| T["one label on the item"]
+  style W fill:#052e16,stroke:#34d399
+  style T fill:#052e16,stroke:#34d399</pre>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ CANDIDATE 2 ============ -->
+<section class="card rounded-2xl ring-1 ring-slate-800 overflow-hidden">
+  <div class="flex">
+    <div class="rail w-1"></div>
+    <div class="p-7 flex-1">
+      <div class="flex items-start justify-between gap-4 flex-wrap">
+        <div>
+          <p class="text-xs uppercase tracking-widest text-slate-500">Candidate 2</p>
+          <h3 class="text-2xl font-semibold text-white mt-1">The hook plane re-reads every fact the seams already read</h3>
+        </div>
+        <span class="shrink-0 px-3 py-1.5 rounded-full text-xs font-semibold bg-rose-500/20 text-rose-300 ring-1 ring-rose-500/40">Strong</span>
+      </div>
+
+      <h4 class="mt-7 text-sm font-semibold text-sky-300 uppercase tracking-wider">Files</h4>
+      <ul class="mt-2 space-y-1 text-sm mono text-slate-300">
+        <li>hooks/refuse.py · hooks/record.py · hooks/context.py</li>
+        <li>scripts/worker_state.py · scripts/tracker.py</li>
+      </ul>
+
+      <h4 class="mt-7 text-sm font-semibold text-sky-300 uppercase tracking-wider">Problem</h4>
+      <p class="mt-2 text-sm text-slate-300 leading-relaxed">
+        The three hooks import nothing from each other and nothing from
+        <span class="mono">scripts/</span>. Every fact about the repo is therefore read once per hook,
+        and once more in <span class="mono">worker_state.py</span>. Six concepts, thirteen
+        implementations:
+      </p>
+
+      <div class="mt-4 overflow-hidden rounded-xl ring-1 ring-slate-800">
+        <table class="w-full text-sm">
+          <thead class="bg-slate-900/70 text-slate-400 text-xs uppercase tracking-wider">
+            <tr><th class="text-left px-4 py-2.5">Concept</th><th class="text-left px-4 py-2.5">Copies</th><th class="text-left px-4 py-2.5">Where</th></tr>
+          </thead>
+          <tbody class="mono text-xs divide-y divide-slate-800/70">
+            <tr class="dup"><td class="px-4 py-2.5 text-slate-200">head_sha</td><td class="px-4 py-2.5 text-rose-300 font-semibold">4</td><td class="px-4 py-2.5 text-slate-400">worker_state:461 · record:153 · context:149 · refuse:300</td></tr>
+            <tr class="dup"><td class="px-4 py-2.5 text-slate-200">item_number</td><td class="px-4 py-2.5 text-rose-300 font-semibold">3</td><td class="px-4 py-2.5 text-slate-400">record:86 · refuse:234 · context:81</td></tr>
+            <tr class="dup"><td class="px-4 py-2.5 text-slate-200">project_dir</td><td class="px-4 py-2.5 text-rose-300 font-semibold">3</td><td class="px-4 py-2.5 text-slate-400">record:76 · refuse:101 · context:57</td></tr>
+            <tr class="dup"><td class="px-4 py-2.5 text-slate-200">orchestrated</td><td class="px-4 py-2.5 text-rose-300 font-semibold">3</td><td class="px-4 py-2.5 text-slate-400">record:81 · refuse:106 · context:76</td></tr>
+            <tr class="dup"><td class="px-4 py-2.5 text-slate-200">work_state_labels</td><td class="px-4 py-2.5 text-amber-300 font-semibold">2</td><td class="px-4 py-2.5 text-slate-400">context:91 · refuse:111</td></tr>
+            <tr class="dup"><td class="px-4 py-2.5 text-slate-200">gate_commands</td><td class="px-4 py-2.5 text-amber-300 font-semibold">2</td><td class="px-4 py-2.5 text-slate-400">record:97 · refuse:244</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p class="mt-4 text-sm text-slate-300 leading-relaxed">
+        Two copies are already not identical. <span class="mono">work_state_labels</span> parses the
+        <span class="mono">## Work-state labels</span> table with a regex on the second cell in both files,
+        so a change to that table's shape breaks two parsers on different days.
+        <span class="mono">gate_commands</span> carries the same three-layer key tuple and the same
+        <span class="mono">GATE_LINE</span> regex in two files, and both restate that layer 5 is not a
+        <span class="mono">Gate</span>.
+      </p>
+
+      <h4 class="mt-7 text-sm font-semibold text-sky-300 uppercase tracking-wider">Solution</h4>
+      <p class="mt-2 text-sm text-slate-300 leading-relaxed">
+        One deep module — <span class="mono">scripts/repo_facts.py</span> — whose interface is the
+        questions, not the files: <span class="mono">project_dir()</span>,
+        <span class="mono">orchestrated(root)</span>, <span class="mono">item_number(root)</span>,
+        <span class="mono">work_state_labels(root)</span>, <span class="mono">gate_commands(root)</span>,
+        <span class="mono">head_sha(root)</span>. Each of the three hooks imports it with the same
+        two-form <span class="mono">try/except ImportError</span> shim
+        <span class="mono">worker_state.py</span> already uses for <span class="mono">tracker.py</span>,
+        so both invocation forms keep working (ADR 0034).
+      </p>
+
+      <h4 class="mt-7 text-sm font-semibold text-sky-300 uppercase tracking-wider">Benefits</h4>
+      <ul class="mt-2 space-y-2 text-sm text-slate-300 leading-relaxed list-disc list-inside">
+        <li><strong>The deletion test says "concentrates".</strong> Delete the module and thirteen
+        implementations come back. That is the signal.</li>
+        <li><strong>Locality.</strong> A change to the <span class="mono">gates:</span> block shape, or to the
+        work-state table, is one edit and one test.</li>
+        <li><strong>The interface becomes the test surface.</strong> Today each hook's suite builds its own
+        fixture repo to test its own copy. One suite over one module replaces three partial ones.</li>
+      </ul>
+
+      <h4 class="mt-7 text-sm font-semibold text-sky-300 uppercase tracking-wider">Before / After</h4>
+      <div class="mt-3 grid md:grid-cols-2 gap-4">
+        <div class="rounded-xl bg-[#0d1117] ring-1 ring-rose-900/50 p-4">
+          <p class="text-xs uppercase tracking-widest text-rose-400 mb-3">Before — every hook its own reader</p>
+          <div class="space-y-2">
+            <div class="grid grid-cols-3 gap-2 text-[10px] text-center">
+              <div class="rounded bg-slate-900 p-2 dup"><p class="mono text-slate-300">refuse.py</p><p class="mt-1 text-rose-400">6 readers</p></div>
+              <div class="rounded bg-slate-900 p-2 dup"><p class="mono text-slate-300">record.py</p><p class="mt-1 text-rose-400">4 readers</p></div>
+              <div class="rounded bg-slate-900 p-2 dup"><p class="mono text-slate-300">context.py</p><p class="mt-1 text-rose-400">5 readers</p></div>
+            </div>
+            <div class="flex justify-center gap-6 text-slate-700 text-lg">↓ ↓ ↓</div>
+            <div class="rounded bg-slate-950 ring-1 ring-slate-800 p-3 text-center text-[11px] text-slate-500">
+              config · issue-tracker.md · .orchestrator/ · git HEAD
+            </div>
+            <p class="pt-2 text-[11px] text-rose-300/80 text-center">15 reader implementations over 4 sources</p>
+          </div>
+        </div>
+        <div class="rounded-xl bg-[#0d1117] ring-1 ring-emerald-900/50 p-4">
+          <p class="text-xs uppercase tracking-widest text-emerald-400 mb-3">After — one seam, three callers</p>
+          <div class="space-y-2">
+            <div class="grid grid-cols-3 gap-2 text-[10px] text-center">
+              <div class="rounded bg-slate-900 p-2 one"><p class="mono text-slate-300">refuse.py</p><p class="mt-1 text-emerald-400">asks</p></div>
+              <div class="rounded bg-slate-900 p-2 one"><p class="mono text-slate-300">record.py</p><p class="mt-1 text-emerald-400">asks</p></div>
+              <div class="rounded bg-slate-900 p-2 one"><p class="mono text-slate-300">context.py</p><p class="mt-1 text-emerald-400">asks</p></div>
+            </div>
+            <div class="flex justify-center gap-6 text-emerald-800 text-lg">↓ ↓ ↓</div>
+            <div class="rounded bg-emerald-950/50 ring-1 ring-emerald-800 p-3 text-center">
+              <p class="mono text-xs text-emerald-300">scripts/repo_facts.py</p>
+              <p class="text-[10px] text-emerald-500/80 mt-0.5">6 questions</p>
+            </div>
+            <div class="flex justify-center text-slate-700 text-lg">↓</div>
+            <div class="rounded bg-slate-950 ring-1 ring-slate-800 p-3 text-center text-[11px] text-slate-500">
+              config · issue-tracker.md · .orchestrator/ · git HEAD
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ CANDIDATE 3 ============ -->
+<section class="card rounded-2xl ring-1 ring-slate-800 overflow-hidden">
+  <div class="flex">
+    <div class="rail w-1"></div>
+    <div class="p-7 flex-1">
+      <div class="flex items-start justify-between gap-4 flex-wrap">
+        <div>
+          <p class="text-xs uppercase tracking-widest text-slate-500">Candidate 3</p>
+          <h3 class="text-2xl font-semibold text-white mt-1">One gate verdict, three implementations, three answers</h3>
+        </div>
+        <span class="shrink-0 px-3 py-1.5 rounded-full text-xs font-semibold bg-rose-500/20 text-rose-300 ring-1 ring-rose-500/40">Strong</span>
+      </div>
+
+      <h4 class="mt-7 text-sm font-semibold text-sky-300 uppercase tracking-wider">Files</h4>
+      <ul class="mt-2 space-y-1 text-sm mono text-slate-300">
+        <li>scripts/worker_state.py:423 · :480 — <span class="text-slate-500">gate_runs, unproven_gates</span></li>
+        <li>hooks/refuse.py:272 · :311 — <span class="text-slate-500">latest_runs, not_green</span></li>
+        <li>hooks/context.py:160 — <span class="text-slate-500">gate_verdict</span></li>
+      </ul>
+
+      <h4 class="mt-7 text-sm font-semibold text-sky-300 uppercase tracking-wider">Problem</h4>
+      <p class="mt-2 text-sm text-slate-300 leading-relaxed">
+        One question — <em>does the <span class="mono">Gate record</span> hold a green line for this command
+        at the current <span class="mono">HEAD</span></em> — is answered by three separate walks over the
+        same <span class="mono">.orchestrator/gates-&lt;item&gt;.jsonl</span> file. All three decide when to
+        stop at a malformed line, all three carry a <span class="mono">SHA_PREFIX</span> floor, and all three
+        pick "the newest line of a command" as the verdict.
+      </p>
+      <p class="mt-3 text-sm text-slate-300 leading-relaxed">
+        They have already diverged. <span class="mono">worker_state.gate_runs</span> rejects a line missing
+        any of the four <span class="mono">GATE_KEYS</span>; <span class="mono">refuse.latest_runs</span>
+        accepts any JSON object and reads the keys it wants. So a record whose lines dropped
+        <span class="mono">utc</span> reads as malformed to the tick and as green to the push block. The
+        push then goes through and the item stops at <span class="mono">gates-unproven</span> — the two
+        halves of one contract disagreeing about the same file.
+      </p>
+      <div class="mt-4 rounded-lg bg-amber-950/30 ring-1 ring-amber-900/50 p-4 text-sm text-amber-200/90">
+        <p class="leading-relaxed"><strong>This is #186's finding, one layer up.</strong>
+        <span class="mono">#213</span> closed #186 by deleting one of two implementations of a board recipe.
+        The same class survives here, at three copies instead of two, because the record format's
+        one home is prose in <span class="mono">references/quality-gates.md</span> and not code.</p>
+      </div>
+
+      <h4 class="mt-7 text-sm font-semibold text-sky-300 uppercase tracking-wider">Solution</h4>
+      <p class="mt-2 text-sm text-slate-300 leading-relaxed">
+        A <span class="mono">scripts/gate_record.py</span> whose interface is the two questions the callers
+        actually ask: <span class="mono">verdict(path, command, head)</span> returning the one reason it is
+        not green or an empty string, and <span class="mono">append(path, command, code, head)</span> for
+        <span class="mono">record.py</span>. The four causes and their wording then live once, and the
+        <span class="mono">gates-unproven</span> line, the push-block message and the session-start fact
+        all quote the same string.
+      </p>
+
+      <h4 class="mt-7 text-sm font-semibold text-sky-300 uppercase tracking-wider">Benefits</h4>
+      <ul class="mt-2 space-y-2 text-sm text-slate-300 leading-relaxed list-disc list-inside">
+        <li><strong>Locality.</strong> The format's writer and its three readers become one module. Today the
+        writer is a hook and the readers are three strangers.</li>
+        <li><strong>Leverage.</strong> The divergence above becomes untestable rather than untested: one
+        function cannot answer two ways.</li>
+        <li><strong>Testability.</strong> One table-driven suite over the four causes replaces three partial
+        suites, each of which currently covers its own copy only.</li>
+      </ul>
+
+      <h4 class="mt-7 text-sm font-semibold text-sky-300 uppercase tracking-wider">Before / After</h4>
+      <div class="mt-3 grid md:grid-cols-2 gap-4">
+        <div class="rounded-xl bg-[#0d1117] ring-1 ring-rose-900/50 p-4">
+          <p class="text-xs uppercase tracking-widest text-rose-400 mb-3">Before</p>
+          <pre class="mermaid text-xs">flowchart LR
+  R[("gates-N.jsonl")]
+  R --> A["worker_state<br/>gate_runs + unproven_gates<br/><i>4 keys required</i>"]
+  R --> B["refuse<br/>latest_runs + not_green<br/><i>any object accepted</i>"]
+  R --> C["context<br/>gate_verdict<br/><i>its own walk</i>"]
+  A --> A2["gates-unproven"]
+  B --> B2["push allowed"]
+  C --> C2["session-start fact"]
+  A2 -.->|"disagree"| B2
+  style A fill:#450a0a,stroke:#f87171
+  style B fill:#450a0a,stroke:#f87171
+  style C fill:#450a0a,stroke:#f87171</pre>
+        </div>
+        <div class="rounded-xl bg-[#0d1117] ring-1 ring-emerald-900/50 p-4">
+          <p class="text-xs uppercase tracking-widest text-emerald-400 mb-3">After</p>
+          <pre class="mermaid text-xs">flowchart LR
+  R[("gates-N.jsonl")]
+  R --> G["gate_record.py<br/>verdict() · append()"]
+  G --> A["worker_state"] --> A2["gates-unproven"]
+  G --> B["refuse"] --> B2["push block"]
+  G --> C["context"] --> C2["session-start fact"]
+  style G fill:#052e16,stroke:#34d399</pre>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ CANDIDATE 4 ============ -->
+<section class="card rounded-2xl ring-1 ring-slate-800 overflow-hidden">
+  <div class="flex">
+    <div class="rail w-1 opacity-60"></div>
+    <div class="p-7 flex-1">
+      <div class="flex items-start justify-between gap-4 flex-wrap">
+        <div>
+          <p class="text-xs uppercase tracking-widest text-slate-500">Candidate 4</p>
+          <h3 class="text-2xl font-semibold text-white mt-1">The Tracker adapter has two interfaces wearing one name</h3>
+        </div>
+        <span class="shrink-0 px-3 py-1.5 rounded-full text-xs font-semibold bg-amber-500/20 text-amber-300 ring-1 ring-amber-500/40">Worth exploring</span>
+      </div>
+
+      <h4 class="mt-7 text-sm font-semibold text-sky-300 uppercase tracking-wider">Files</h4>
+      <ul class="mt-2 space-y-1 text-sm mono text-slate-300"><li>scripts/tracker.py:97 — <span class="text-slate-500">class Tracker</span></li></ul>
+
+      <h4 class="mt-7 text-sm font-semibold text-sky-300 uppercase tracking-wider">Problem</h4>
+      <p class="mt-2 text-sm text-slate-300 leading-relaxed">
+        <span class="mono">Tracker</span> mixes two kinds of method with no marker between them.
+        <span class="mono">item_facts</span>, <span class="mono">issue</span>,
+        <span class="mono">pull_request</span> and <span class="mono">board_status</span>
+        <em>run a command and return a fact</em>. <span class="mono">label_argv</span>,
+        <span class="mono">close_argv</span>, <span class="mono">comment_argv</span>,
+        <span class="mono">closing_note_argv</span> and <span class="mono">pr_read_argv</span>
+        <em>return an argv the caller must then hand back to</em>
+        <span class="mono">write()</span>. A caller has to know which is which, and the fixture
+        branch is written twice per concept as a result: once inside the reader, once inside
+        <span class="mono">write()</span>.
+      </p>
+      <p class="mt-3 text-sm text-slate-300 leading-relaxed">
+        The reason the split exists is real: <span class="mono">close_item.py</span> prints its plan before
+        it runs it, so it needs the argv as a value. That is a good reason for a
+        <em>plan</em> object, and a weaker one for nine sibling methods that return
+        two different kinds of thing.
+      </p>
+
+      <h4 class="mt-7 text-sm font-semibold text-sky-300 uppercase tracking-wider">Solution</h4>
+      <p class="mt-2 text-sm text-slate-300 leading-relaxed">
+        Name the two halves. Keep <span class="mono">Tracker</span> for the questions, and give the writes a
+        small <span class="mono">TrackerWrite</span> value with an <span class="mono">argv</span>, a
+        <span class="mono">name</span> and a <span class="mono">run()</span>. A plan then holds a list of
+        those and prints them; an executor calls <span class="mono">run()</span>. The
+        <span class="mono">_argv</span> suffix stops being the reader's only clue.
+      </p>
+
+      <h4 class="mt-7 text-sm font-semibold text-sky-300 uppercase tracking-wider">Benefits</h4>
+      <ul class="mt-2 space-y-2 text-sm text-slate-300 leading-relaxed list-disc list-inside">
+        <li><strong>Leverage.</strong> Candidate 1's new label seam wants exactly this shape: plan the swap,
+        print it, then run it. Doing candidate 4 first makes candidate 1 smaller.</li>
+        <li><strong>Locality.</strong> The fixture branch moves into one place instead of one per write.</li>
+      </ul>
+      <p class="mt-4 text-xs text-slate-500 leading-relaxed">
+        Note: this does not contradict ADR 0040, which put every tracker command behind one adapter. The
+        adapter stays. This only names the two shapes of thing it returns.
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ CANDIDATE 5 ============ -->
+<section class="card rounded-2xl ring-1 ring-slate-800 overflow-hidden opacity-90">
+  <div class="flex">
+    <div class="rail w-1 opacity-40"></div>
+    <div class="p-7 flex-1">
+      <div class="flex items-start justify-between gap-4 flex-wrap">
+        <div>
+          <p class="text-xs uppercase tracking-widest text-slate-500">Candidate 5</p>
+          <h3 class="text-2xl font-semibold text-white mt-1">A parameter with a branch nothing can reach</h3>
+        </div>
+        <span class="shrink-0 px-3 py-1.5 rounded-full text-xs font-semibold bg-slate-500/20 text-slate-300 ring-1 ring-slate-500/40">Speculative</span>
+      </div>
+
+      <h4 class="mt-7 text-sm font-semibold text-sky-300 uppercase tracking-wider">Files</h4>
+      <ul class="mt-2 space-y-1 text-sm mono text-slate-300"><li>scripts/worker_state.py:605 — <span class="text-slate-500">position_of(..., verdict_written=None)</span></li></ul>
+
+      <h4 class="mt-7 text-sm font-semibold text-sky-300 uppercase tracking-wider">Problem</h4>
+      <p class="mt-2 text-sm text-slate-300 leading-relaxed">
+        <span class="mono">position_of</span> takes a fourth argument, <span class="mono">verdict_written</span>,
+        and branches on it. Its own docstring says why nobody passes it: <em>"The
+        <span class="mono">Tracker adapter</span> answers comment bodies and no dates, so a tick passes
+        nothing here."</em> The one production caller at line 801 passes three arguments. So the
+        <span class="mono">IMPLEMENTATION</span> branch after a dated verdict is dead flexibility built for a
+        fact the adapter does not yet return.
+      </p>
+
+      <h4 class="mt-7 text-sm font-semibold text-sky-300 uppercase tracking-wider">Solution</h4>
+      <p class="mt-2 text-sm text-slate-300 leading-relaxed">
+        Either delete the parameter until <span class="mono">item_facts</span> returns comment dates, or add
+        the date to <span class="mono">item_facts</span> now and make the branch live. Both are small. The
+        deletion test is genuinely ambiguous here, which is why this is speculative rather than strong: the
+        parameter costs almost nothing, and wave 3 may want it.
+      </p>
+      <p class="mt-4 text-xs text-slate-500 leading-relaxed">
+        Worth raising only because the branch is documented as unreachable in the same paragraph that
+        specifies it. A reader cannot tell whether it is a bug or a plan.
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ TOP RECOMMENDATION ============ -->
+<section class="rounded-2xl bg-gradient-to-br from-sky-950/60 to-indigo-950/40 ring-1 ring-sky-800/50 p-7">
+  <p class="text-xs uppercase tracking-[0.2em] text-sky-400">Top recommendation</p>
+  <h2 class="text-2xl font-semibold text-white mt-2">Candidate 1, and it is not close</h2>
+  <p class="mt-4 text-sm text-slate-300 leading-relaxed max-w-3xl">
+    Candidates 2 and 3 are the deeper architectural wins. Candidate 1 is a live outage. The hook
+    plane currently denies a write that no code in the repo can perform, so every transition of
+    the label vocabulary story <span class="mono">#199</span> just shipped has to be done by hand
+    or skipped. Two items closed during this very story are wearing the wrong label because of it.
+  </p>
+  <p class="mt-3 text-sm text-slate-300 leading-relaxed max-w-3xl">
+    Do candidate 1 first, and take the small version: give <span class="mono">label_denial</span> the
+    caller test <span class="mono">teardown_denial</span> already has, and add the label swap to a seam.
+    Then candidate 3, because it has an observable divergence rather than a theoretical one. Then
+    candidate 2, which is the largest diff and the one that stops the class coming back.
+  </p>
+  <div class="mt-6 grid sm:grid-cols-3 gap-3 text-xs">
+    <div class="rounded-lg bg-slate-950/60 ring-1 ring-slate-800 p-3"><p class="text-slate-500">1st</p><p class="mt-1 text-slate-200 font-semibold">Candidate 1</p><p class="mt-1 text-slate-500">unblocks the loop</p></div>
+    <div class="rounded-lg bg-slate-950/60 ring-1 ring-slate-800 p-3"><p class="text-slate-500">2nd</p><p class="mt-1 text-slate-200 font-semibold">Candidate 3</p><p class="mt-1 text-slate-500">a real divergence today</p></div>
+    <div class="rounded-lg bg-slate-950/60 ring-1 ring-slate-800 p-3"><p class="text-slate-500">3rd</p><p class="mt-1 text-slate-200 font-semibold">Candidate 2</p><p class="mt-1 text-slate-500">stops the class returning</p></div>
+  </div>
+</section>
+
+<footer class="border-t border-slate-800/80 mt-4">
+  <div class="max-w-6xl mx-auto px-6 py-8 text-xs text-slate-500 space-y-1">
+    <p>Layer 5 story gate for user story #199. Advisory: it holds no exit code and stops no merge (ADR 0033).</p>
+    <p>Architecture vocabulary from the <span class="mono">codebase-design</span> skill. Domain vocabulary from <span class="mono">orchestrator/CONTEXT.md</span>.</p>
+  </div>
+</footer>
+
+</main>
+</body>
+</html>

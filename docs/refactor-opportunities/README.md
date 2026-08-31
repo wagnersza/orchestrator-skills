@@ -57,6 +57,7 @@ a judgement, and a hard gate here stalls every story on an opinion. The rational
 |---|---|---|---|
 | [#143](https://github.com/wagnersza/orchestrator-skills/issues/143) — the tracker is one verified adapter behind both seams | [`143-tracker-adapter.html`](143-tracker-adapter.html) | `a94f459` | 5, of which 1 `Strong` |
 | [#163](https://github.com/wagnersza/orchestrator-skills/issues/163) — prove a user story end to end before its parent closes | [`163-story-proof.html`](163-story-proof.html) | `34d7b9b` | 2, of which 1 `Strong` |
+| [#199](https://github.com/wagnersza/orchestrator-skills/issues/199) — one label family, four values, and nothing writes the board | [`199-one-label-family.html`](199-one-label-family.html) | `de169ba` | 5, of which 3 `Strong` |
 
 Each report loads Tailwind and Mermaid from a CDN. So a reader with no network sees the text
 and the tables, and the diagrams do not draw.
