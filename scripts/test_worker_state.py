@@ -71,6 +71,11 @@ GIT_ENV = {
 
 ITEM = 54
 
+# The worker's branch, and the pull request opened from it. A tick in human review reads
+# the branch off the worktree, so the number is the fixture's answer and never a flag.
+BRANCH = f"{ITEM}-worker-state-seam"
+PR = 242
+
 EXIT_COMPLETE = 0
 EXIT_GONE = 3
 EXIT_NOT_READY = 1
@@ -200,7 +205,7 @@ class WorkerStateTestCase(unittest.TestCase):
         write(self.worktree / ".gitignore", ".orchestrator/\n")
         git(self.worktree, "add", "-A")
         git(self.worktree, "commit", "-qm", "base")
-        git(self.worktree, "checkout", "-qb", f"{ITEM}-worker-state-seam")
+        git(self.worktree, "checkout", "-qb", BRANCH)
 
         self.checklist = self.worktree / ".orchestrator" / f"checklist-{ITEM}.md"
         write(self.checklist, UNTICKED)
@@ -217,19 +222,56 @@ class WorkerStateTestCase(unittest.TestCase):
 
     # --- fixture helpers ----------------------------------------------------
 
-    def write_fixture(self, comments=(), labels=()):
-        """Stand in for the one tracker read a tick makes.
+    def write_fixture(self, comments=(), labels=(), pull_requests=None):
+        """Stand in for the tracker reads a tick makes.
 
         One record for this item, in the one format `scripts/tracker.py` documents. The
-        labels and the comments are every fact the tick reads, because a position is
-        computed from them and from the checklist file.
+        labels and the comments are every fact the tick reads in implementation, because a
+        position is computed from them and from the checklist file.
+
+        `pull_requests` is the second record type of that same format. A tick in human
+        review reads it through the branch, so each record carries a `head` key.
         """
         self.fixture = self.root / "gh.json"
         record = {"comments": list(comments), "labels": list(labels)}
-        self.fixture.write_text(json.dumps({"items": {str(ITEM): record}}))
+        self.fixture.write_text(
+            json.dumps(
+                {
+                    "items": {str(ITEM): record},
+                    "pull_requests": dict(pull_requests or {}),
+                }
+            )
+        )
         # A fresh fixture is a fresh case, so the write log starts empty too. A case that
         # asserts on two ticks of one fixture writes the fixture once.
         (self.root / "gh.json.writes").unlink(missing_ok=True)
+
+    def pull_request(self, state="MERGED", head=None):
+        """One pull request record for this worktree's branch, in the one format.
+
+        `merge_commit` names the commit `main` already holds. So step 5 of the close reads
+        the merge as landed and pulls nothing, which a fixture worktree with no remote
+        needs.
+        """
+        return {
+            str(PR): {
+                "state": state,
+                "merge_commit": self.rev("main"),
+                "head": BRANCH if head is None else head,
+            }
+        }
+
+    def teardown_marker(self):
+        """The file the teardown command touches, so a case reads whether step 8 ran."""
+        return self.root / "teardown-ran"
+
+    def close_flags(self, checkout="", branch="main"):
+        """The three close flags a tick carries: `(checkout, default branch, teardown)`.
+
+        The teardown command is a real shell command. So a case proves step 8 ran by
+        reading the file that command leaves, and no case removes a real worktree.
+        """
+        return (checkout, branch, f"touch {self.teardown_marker()}")
 
     def gate_run(self, command, code=0, sha=None):
         """One line of the Gate record, as a gate command appends it.
@@ -1003,8 +1045,8 @@ class WorkerStateTestCase(unittest.TestCase):
 
     def test_the_review_label_is_human_review_and_nothing_is_due(self):
         """A ticked checklist and a verdict here, so the `to-review` label is what
-        answers. Human review is the one position no transition is due in, so the
-        maintainer reads the pull request and the tick stays quiet."""
+        answers. The maintainer is reading the pull request, and no pull request for this
+        branch is merged, so the tick stays quiet."""
         write(self.checklist, TICKED)
         self.write_fixture(comments=[APPROVE], labels=HUMAN_REVIEW)
 
@@ -1013,6 +1055,104 @@ class WorkerStateTestCase(unittest.TestCase):
         self.assertTrue(line.startswith("nothing:"), line)
         self.assertIn("human review", line)
         self.assertIn(f"#{ITEM}", line)
+
+    # --- the merge is the second act (ADR 0057) -----------------------------
+
+    def test_a_merged_pull_request_closes_the_item_and_tears_the_worker_down(self):
+        """One tick reads the merge and runs the whole close. Nothing is typed.
+
+        The item closes, its work-state label comes off, and the teardown command runs.
+        That command removes the automation and the worktree, so a merged item leaves
+        neither behind. The line carries the plan, so the exit code and the reason stay
+        together.
+        """
+        write(self.checklist, TICKED)
+        self.write_fixture(labels=HUMAN_REVIEW, pull_requests=self.pull_request())
+
+        line = self.apply(close_flags=self.close_flags())
+
+        self.assertTrue(line.startswith("merged:"), line)
+        self.assertIn(f"#{PR}", line)
+        self.assertIn(BRANCH, line)
+        for step in ("4 pr merged", "5 pull", "6 worktree clean", "7 tracker"):
+            self.assertIn(f"{step} done", line)
+        self.assertIn("8 teardown done", line)
+        self.assertEqual(self.swaps(), [([TO_REVIEW], [])])
+        self.assertTrue(
+            any("issue close" in one for one in self.writes()), self.writes()
+        )
+        self.assertTrue(self.teardown_marker().is_file())
+
+    def test_an_open_pull_request_is_a_quiet_tick(self):
+        """The maintainer has not merged yet, so nothing is due and nothing is an error."""
+        write(self.checklist, TICKED)
+        self.write_fixture(
+            labels=HUMAN_REVIEW, pull_requests=self.pull_request(state="OPEN")
+        )
+
+        line = self.apply(expect=EXIT_NOTHING, close_flags=self.close_flags())
+
+        self.assertIn(f"#{PR}", line)
+        self.assertIn("open", line)
+        self.assertEqual(self.writes(), [])
+        self.assertFalse(self.teardown_marker().exists())
+
+    def test_a_branch_with_no_pull_request_at_all_is_a_quiet_tick(self):
+        """No record for this branch is no error either, so the two read the same way."""
+        write(self.checklist, TICKED)
+        self.write_fixture(
+            labels=HUMAN_REVIEW, pull_requests=self.pull_request(head="another-branch")
+        )
+
+        line = self.apply(expect=EXIT_NOTHING, close_flags=self.close_flags())
+
+        self.assertIn(BRANCH, line)
+        self.assertEqual(self.writes(), [])
+        self.assertFalse(self.teardown_marker().exists())
+
+    def test_a_dirty_worktree_refuses_the_close_and_asks_for_a_human(self):
+        """Uncommitted work has no reflog, so the one unrecoverable case refuses.
+
+        The refusal is the close seam's own, and this tick adds none. The item wears
+        `needs-human`, one comment names the files, and nothing is removed.
+        """
+        write(self.checklist, TICKED)
+        write(self.worktree / "unsaved.txt", "work nobody committed\n")
+        self.write_fixture(labels=HUMAN_REVIEW, pull_requests=self.pull_request())
+
+        line = self.apply(expect=EXIT_REFUSED, close_flags=self.close_flags())
+
+        self.assertIn("unsaved.txt", line)
+        self.assertEqual(self.work_states_after(HUMAN_REVIEW), [NEEDS_HUMAN])
+        comments = [one for one in self.writes() if "issue comment" in one]
+        self.assertEqual(len(comments), 1, self.writes())
+        self.assertIn("unsaved.txt", comments[0])
+        self.assertFalse(any("issue close" in one for one in self.writes()))
+        self.assertFalse(self.teardown_marker().exists())
+
+    def test_a_tick_with_no_teardown_command_closes_nothing(self):
+        """A close with no teardown leaves a schedule that ticks against a closed item.
+
+        So the tick refuses instead, and the line names the flag the precheck is missing.
+        """
+        write(self.checklist, TICKED)
+        self.write_fixture(labels=HUMAN_REVIEW, pull_requests=self.pull_request())
+
+        line = self.apply(expect=EXIT_REFUSED)
+
+        self.assertIn("--teardown-command", line)
+        self.assertEqual(self.writes(), [])
+
+    def test_the_phase_subcommand_reads_the_merge_and_writes_nothing(self):
+        """The plan half names the close that is due, and it runs none of it."""
+        write(self.checklist, TICKED)
+        self.write_fixture(labels=HUMAN_REVIEW, pull_requests=self.pull_request())
+
+        line = self.ask()
+
+        self.assertTrue(line.startswith("merged:"), line)
+        self.assertEqual(self.writes(), [])
+        self.assertFalse(self.teardown_marker().exists())
 
     def test_the_label_write_is_what_stops_a_repeat_of_the_same_fire(self):
         """The back-off window and its marker files retired with the wake. The applied
