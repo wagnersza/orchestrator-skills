@@ -333,6 +333,52 @@ scope — `gh auth status` should list `project`; if not, run
   re-resolve the ids and **report** a mismatch, don't silently rewrite. Ids change
   when a field is recreated, and a stale one fails every write.
 
+### 2b. Migrate the label vocabulary
+
+**One work-state family, four values, and it never stacks.** A repo set up under an
+earlier version carries two more families that this version deleted. This step is the
+only one that runs once and touches the whole tracker, so it is the only place the
+migration can run
+([ADR 0053](../orchestrator/docs/adr/0053-one-work-state-label-and-a-computed-position.md)).
+
+**Land this with no worker in flight.** Read the queue first. An item at `to-review` is
+safe. An item at `in-progress` is not, because its schedule ticks while the family goes.
+
+**Name every item that wears a deleted label before you delete anything.** The maintainer
+has to see what changed, and a deleted label takes its items with it:
+
+```bash
+for label in phase:impl phase:review phase:e2e to-merge; do
+  gh issue list --state all --label "$label" --json number,title,labels \
+    --jq --arg l "$label" '.[] | "\($l)\t#\(.number)\t\(.title)"'
+done
+```
+
+Report that list as a table, then take these three steps in order:
+
+1. **Create `needs-human`**, with the `gh label create` line from the `## Work-state
+   labels` section of `docs/agents/issue-tracker.md`. It is the one label that stops every
+   tick, so it exists before anything reads for it.
+2. **Write `needs-human` plus one comment on every open item that wore a deleted label**,
+   where that item is not at `to-review`. The comment says which label it lost and what
+   the maintainer has to decide. A paused item is safer than an item whose state nothing
+   can read.
+3. **Delete the two families**, one call per value:
+
+   ```bash
+   for label in phase:impl phase:review phase:e2e to-merge; do
+     gh label delete "$label" --yes
+   done
+   ```
+
+**A label that does not exist is not an error here.** A fresh repo has none of the four,
+so `gh label delete` reports one miss per absent label and the step is still complete. Say
+which of the four existed.
+
+**The `To merge` column stays on the board, and the maintainer deletes it.** That is a
+board edit and not a label. This repo stops writing the column, so an empty column costs
+nothing until they remove it.
+
 ## 3. Interview — one choice at a time
 
 Take these in order; each leads with a recommendation.
