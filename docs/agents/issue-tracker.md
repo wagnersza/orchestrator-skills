@@ -47,8 +47,8 @@ records why the family that cached the same answer is gone.
 
 Triage roles (`needs-triage`, `needs-info`, `ready-for-human`, `wontfix`) are a
 separate vocabulary — see `triage-labels.md`. The layer 5 story gate writes two more, and
-both stack — see [Story gate labels](#story-gate-labels). The project board's `Status`
-field is derived from the work-state labels above — see [Project board](#project-board).
+both stack — see [Story gate labels](#story-gate-labels). The project board is an input
+and nothing writes it — see [Project board](#project-board).
 
 Labels beyond GitHub's defaults don't exist in this repo yet. Create on first use:
 
@@ -89,8 +89,8 @@ it.
 
 The gate files no item for a candidate it drops, so nothing wears either family.
 
-**The `Deriving Status` table is unchanged.** `Status` derives from the work-state labels
-alone, so neither family writes a card. That is one statement for both families.
+**Neither family reaches the board.** Nothing writes a card at all, so no label of any
+family moves one. That is one statement for both families.
 
 Create on first use:
 
@@ -102,81 +102,45 @@ gh label create rating:worth-exploring --color D4C5F9 --description "The layer 5
 
 ## Project board
 
-This repo's issues are also cards on a GitHub Projects v2 board. **`Status` is a
-derived projection of the work-state labels above — not a second state machine.**
-Labels stay the source of truth; the board is written at every label transition and
-recomputed whenever the ready queue is read. Rationale:
-[`orchestrator/docs/adr/0009-labels-drive-board-status.md`](../../orchestrator/docs/adr/0009-labels-drive-board-status.md).
+This repo's issues are also cards on a GitHub Projects v2 board. **The board is an input,
+and nothing writes it.** One question is asked of it: is this item's card in the start
+column. That is the second fact of a ready-queue entry, beside the `ready-for-agent`
+label. Rationale:
+[`orchestrator/docs/adr/0054-the-board-is-an-input-not-a-mirror.md`](../../orchestrator/docs/adr/0054-the-board-is-an-input-not-a-mirror.md).
 
-Coordinates:
+Two coordinates, and the name of the start column:
 
 | What | Value |
 |------|-------|
 | Project | <https://github.com/users/wagnersza/projects/6> — `--owner wagnersza`, number `6` |
-| Project id | `PVT_kwHOAASnrs4BetWv` |
-| `Status` field id | `PVTSSF_lAHOAASnrs4BetWvzhZFi3U` |
+| Start column | `To do` |
 
-`Status` single-select option ids:
-
-| Option | Option id |
-|--------|-----------|
-| `Backlog` | `f75ad846` |
-| `Ready` | `61e4505c` |
-| `In progress` | `47fc9ee4` |
-| `In review` | `df73e18b` |
-| `Done` | `98236657` |
-
-### Deriving `Status`
-
-| Condition on the issue | `Status` |
-|---|---|
-| open, no work-state label (incl. `needs-triage` / `needs-info` / newly created) | `Backlog` |
-| open, `ready-for-agent`, **≥1 open blocker** | `Backlog` |
-| open, `ready-for-agent`, **0 open blockers** | `Ready` |
-| open, `in-progress` | `In progress` |
-| open, `to-review` | `In review` |
-| closed | `Done` |
-
-**Open-blocker count is the same predicate the ready queue already uses** — don't
-invent a second one. GitHub native issue dependencies:
-`gh api repos/<owner>/<repo>/issues/<n> --jq .issue_dependencies_summary.blocked_by`
-(open blockers only), falling back to the `Blocked by: #<n>` body line where
-dependencies aren't enabled. See the **Blocking** bullet under
-[Wayfinding operations](#wayfinding-operations) for the full contract.
-
-**`needs-human` has no column, so the card does not move.** The table above holds no row
-for it, and a reconcile pass writes no `Status` for an item that carries it. The item is
-paused where it stood, and the label is the whole record of that.
-
-Items labelled `user-story` are cards too. A `user-story` parent is never spawned
-directly, so its own labels lag its children: it sits in `In progress` while **any**
-child is `in-progress` or `to-review` — that **takes precedence over the parent's own
-`ready-for-agent`**, which it keeps for the whole run — and reaches `Done` only when
-the parent issue is itself closed. With no child in flight it falls back to the table
-unchanged.
-
-### The two calls
+### The one call
 
 ```bash
-# 1. resolve an issue number to its board item id
-ITEM=$(gh project item-list 6 --owner wagnersza --format json --limit 100 \
-         --jq '.items[] | select(.content.number==<n>) | .id')
-
-# 2. set Status
-gh project item-edit --id "$ITEM" \
-  --project-id PVT_kwHOAASnrs4BetWv \
-  --field-id   PVTSSF_lAHOAASnrs4BetWvzhZFi3U \
-  --single-select-option-id <option-id>
+gh project item-list 6 --owner wagnersza --format json --limit 100
 ```
 
-Step 2 is **idempotent** — writing the value a card already holds exits clean and
-changes nothing, so a reconcile pass over a consistent board is safe to run any
-time. The token needs the `project` scope (`gh auth refresh -s project`). An issue
-with no card yields an empty `$ITEM`: skip the write, don't fail.
+The reader walks the answer and matches the card whose `content.number` is the item. The
+`Status` name on that card is the answer, and an item with no card answers nothing. **A
+card with no status, an item with no card, and a repo with no board all read the same
+way**, so none of the three is an error.
 
-**A repo with no board leaves this section out entirely**, and every board write
-becomes a no-op — the orchestrator looks for this section, finds nothing, and runs
-on labels alone.
+The token needs the `read:project` scope (`gh auth refresh -s read:project`). **There is
+no write scope, because there is no write.**
+
+**A closed item reaches `Done` through the board's own built-in workflow.** GitHub Projects
+ships an **item closed to Done** workflow, and the maintainer enables it in the project
+settings. Nothing in this repo can switch it on, because that switch is not in the API.
+`/orchestrator-setup` reads whether it is on and says so.
+
+**A drag is intent, in every column.** No pass writes a card, so a card stays where the
+maintainer put it. A take-back is the maintainer removing `ready-for-agent`, or writing
+`needs-human` with a comment that says why.
+
+**A repo with no board leaves this section out entirely.** The board read then asks
+nothing, the `ready-for-agent` label alone is the whole gate, and that absence is never an
+error.
 
 ## Pull requests as a triage surface
 
