@@ -948,6 +948,8 @@ re-prompt is the response that works once. **The tick owns the count**, which is
 `Re-prompt:` comments on the work item. That is the shape the **Review round** number already
 takes, as the count of `Verdict:` comments. So no session holds either count in its context
 ([`docs/adr/0058-one-re-prompt-then-a-human.md`](docs/adr/0058-one-re-prompt-then-a-human.md)).
+**Only a comment that opens with the literal counts**, so a report or a note that quotes it
+spends no retry.
 
 - **The first stalled tick posts one `Re-prompt:` comment**, which carries what it saw and the
   unticked steps. Read that comment. Reset the worker's context

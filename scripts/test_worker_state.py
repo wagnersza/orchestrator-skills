@@ -2016,6 +2016,21 @@ class WorkerStateTestCase(unittest.TestCase):
             f"retry 1 of {RE_PROMPTS}", self.apply(stall=HALF_HOUR, expect=EXIT_APPLIED)
         )
 
+    def test_a_comment_that_only_quotes_the_literal_spends_no_retry(self):
+        """A review note and this repo's own prose both quote `Re-prompt:` mid-sentence. The
+        seam writes it at the start of a line, so only that shape counts. Otherwise writing
+        about a re-prompt spends one."""
+        quoting = [
+            "The tick posts one `Re-prompt:` comment on the first stall.",
+            "| stalled | one Re-prompt: comment, and no label |",
+        ]
+        self.stalling(comments=quoting)
+
+        line = self.apply(stall=HALF_HOUR, expect=EXIT_APPLIED)
+
+        self.assertIn(f"retry 1 of {RE_PROMPTS}", line)
+        self.assertEqual(self.swaps(), [])
+
     def test_the_re_prompt_bound_is_one_and_no_flag_raises_it(self):
         """A bound a caller can raise is a climb under another name. So the seam holds the
         number, and neither subcommand takes a flag for it."""

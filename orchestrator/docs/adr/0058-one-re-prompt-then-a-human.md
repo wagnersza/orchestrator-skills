@@ -96,6 +96,10 @@ This is a new ADR and not an edit to either of them, per
   write per stall rather than a write per tick.
 - **Four outcomes now carry no label**: `gates-unproven`, `verdict-request-changes`, `dead`
   and `unreadable`.
+- **The literal counts only where it opens a line**, which is where the tick writes it. A
+  bare substring test counted a review note that quotes the literal, and a maintainer who
+  writes about a re-prompt must not spend one. `Verdict:` is narrow for the same reason: its
+  pattern needs one of two values after the literal.
 - **The literal `Re-prompt:` is quoted here, in the Completion signal entry of
   [`orchestrator/CONTEXT.md`](../../CONTEXT.md), and in
   [`references/tracker-reads.md`](../../references/tracker-reads.md).** A writing pass leaves

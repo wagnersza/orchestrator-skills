@@ -287,6 +287,11 @@ VERDICT = re.compile(r"Verdict:\**\s*`?(" + "|".join(VERDICT_VALUES) + r")\b")
 # (ADR 0058).
 RE_PROMPT = "Re-prompt:"
 
+# A comment counts only where that literal opens a line, which is where this seam writes it.
+# A bare substring test counts a review note that quotes the literal, and a maintainer who
+# writes about a re-prompt must not spend one.
+RE_PROMPTED = re.compile(r"^\s*" + re.escape(RE_PROMPT), re.MULTILINE)
+
 # One re-prompt, and then a human. The bound is not an argument: a bound a caller can raise
 # is a climb under another name, and the climb is what ADR 0058 deletes.
 RE_PROMPTS = 1
@@ -480,8 +485,11 @@ def re_prompts_in(bodies):
     The re-prompt count, in the shape the **Review round** count already takes. It is
     scoped to the item and to nothing else, so no re-spawn resets it and a restart reads
     the number a maintainer reads. Nothing stores it (ADR 0058).
+
+    **The literal has to open a line**, which is where this seam writes it. So a review note
+    or a maintainer's comment that quotes the literal spends no retry.
     """
-    return sum(1 for body in bodies if RE_PROMPT in (body or ""))
+    return sum(1 for body in bodies if RE_PROMPTED.search(body or ""))
 
 
 # --- the Gate record (ADR 0036) ---------------------------------------------
