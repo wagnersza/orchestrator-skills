@@ -3,7 +3,7 @@
 
 Each one is the same question at a different moment. *Is a real agent at work in
 this worktree, and does that work need a decision now?* Readiness asks it before
-the first prompt. The phase predicate asks it once per **Item automation** tick.
+the first prompt. The tick predicate asks it once per **Item automation** tick.
 The wake asks it and delivers the answer. One seam answers all three, for every
 tool and every harness (ADR 0019).
 
@@ -14,7 +14,7 @@ this worktree? Exit 0 ready, non-zero not:
         --process '<the pattern the harness reference gives>'
 
 **`phase`** — read three facts on disk and two on the tracker, and answer one
-question: *is a **Phase** transition due for this work item?* This is the predicate
+question: *is a transition due for this work item?* This is the predicate
 an **Item automation** runs as its `--precheck`, so it blocks on nothing:
 
     python3 <plugin root>/scripts/worker_state.py phase --item 62 \\
@@ -31,63 +31,37 @@ an **Item automation** runs as its `--precheck`, so it blocks on nothing:
 
 **The code is the predicate and the line is the diagnosis.** Zero means a
 transition is due, whichever one it is, so a caller reads one bit. The line names
-one outcome from the table that follows, and the item's own `phase:*` label decides
+one outcome from the table that follows, and the computed **Position** decides
 which of them a tick can reach:
 
-| Outcome | Reachable in | The fact that fires it |
-|---|---|---|
-| `implementation-complete` | `phase:impl` | every box in the **Checklist** is ticked, and the **Gate record** proves every required layer green at `HEAD` |
-| `proof-complete` | `phase:e2e` | the same two facts, in the phase that proves the feature works |
-| `gates-unproven` | `phase:impl`, `phase:e2e` | the checklist reads complete, and the gate record does not prove it |
-| `verdict-approve` | `phase:review` | the newest `Verdict:` comment reads `approve` |
-| `verdict-request-changes` | `phase:review` | the newest one reads `request-changes`, inside the round bound |
-| `rounds-exhausted` | `phase:review` | `--rounds` `Verdict:` comments, and the newest one asks for changes |
-| `merge-requested` | no `phase:*` label | the item carries the `to-merge` label, or its card sits in the board column `--board-option` names |
-| `dead` | every phase | no live agent process with its working directory inside the worktree |
-| `stalled` | `phase:impl`, `phase:e2e` | a live process, and work product older than `--stall-after` |
-| `unreadable` | before the phase is read | the tracker read failed, so no fact is available |
+| Outcome | The fact that fires it |
+|---|---|
+| `implementation-complete` | every box in the **Checklist** is ticked, and the **Gate record** proves every required layer green at `HEAD` |
+| `gates-unproven` | the checklist reads complete, and the gate record does not prove it |
+| `verdict-approve` | the newest `Verdict:` comment reads `approve` |
+| `verdict-request-changes` | the newest one reads `request-changes`, inside the round bound |
+| `rounds-exhausted` | `--rounds` `Verdict:` comments, and the newest one asks for changes |
+| `dead` | no live agent process with its working directory inside the worktree |
+| `stalled` | a live process, and work product older than `--stall-after` |
+| `unreadable` | the tracker read failed, so no fact is available |
 
 A **Review round** count is the number of `Verdict:` comments on the work item. So
 nothing stores a counter, and `--rounds` is the whole bound.
 
-A work item with no `phase:*` label is in human review. One transition is due there,
-`merge-requested`, and every other read of that branch is a quiet tick. Either entry
-to a **Merge queue** fires it: the `to-merge` label, or the item's card in the board
-column that means a maintainer approved the merge (ADR 0037, ADR 0038).
-
-**This tick also computes the position, and it reads no label to do that.**
+**This tick computes the position, and it reads no label of its own to do that.**
 `position_of` answers where the item sits in its run, from the work-state label, the
 `Verdict:` comment list and the last write to the **Checklist**. The rule has one home,
 the Position entry of `orchestrator/CONTEXT.md`, and this module restates no part of it.
-**The `phase:*` read stays as the fallback.** Where the item wears one of those labels,
-that label picks the outcome row, so no outcome moves. The computed position answers where
-no phase label is written and no merge is asked for.
+A position of human review means the maintainer is reading the pull request. No
+transition is due there, so every read of that branch is a quiet tick.
 
 **`needs-human` answers before every fact except the tracker read.** The tick reads that
 label and exits quiet, whatever the checklist, the verdicts and the process say. It writes
 no back-off marker there, because a quiet tick is not a fire. Only the maintainer removes
 that label, so a paused item costs one cheap read a minute.
 
-**The label is read first and the board second.** The label arrives with the tracker
-read this tick already made, so it costs nothing. It is also the authoritative fact,
-once a session writes it. The board read is a second command that can fail, so it
-runs only where the label answers nothing. This order keeps the tick after a
-promotion as cheap as the one before it.
-
-**Three flags carry the board read**, because this seam parses no configuration file:
-`--board-project`, `--board-owner` and `--board-option`. Where any of the three is
-absent, this seam skips the board read and raises no error, so the label stays the
-only entry. A repo with no board is a supported configuration, which is the rule the
-whole board layer already follows. A project board is one tracker's own surface, so
-the **Tracker adapter** names that CLI and `--tracker-cli` does not reach it.
-
-**A board read that fails is not `unreadable`.** That outcome means no fact is
-available, and here the labels were read. So a failed board read falls back to the
-label, the tick stays quiet, and the cause rides the printed line. The item stays
-where it already was, and the next tick reads the board again a minute later.
-
-`unreadable` is the one outcome no `phase:*` label gates, because a read that
-failed cannot say which phase the item is in. It is an outcome and not a silence:
+`unreadable` is the one outcome no **Position** gates, because a read that
+failed cannot say where the item sits. It is an outcome and not a silence:
 a broken read for 21 ticks must not look like 21 quiet minutes. It goes through
 the same back-off as every other outcome, so it reports once per window.
 
@@ -95,7 +69,7 @@ the same back-off as every other outcome, so it reports once per window.
 process `stalled` needs. `dead` needs no stall window, so it reports in about a
 minute (ADR 0022).
 
-`gates-unproven` fires in place of `implementation-complete` or `proof-complete`, and
+`gates-unproven` fires in place of `implementation-complete`, and
 only where `--require-gate` names a command. So it needs a ticked checklist, and it
 can never compete with `dead` or `stalled`: both of those need an unticked one before
 a tick reaches them. Four causes fire it, and the printed line names which — a missing
@@ -121,18 +95,18 @@ directory. So the caller passes one directory that outlives every such move, and
 the markers still die with the work item.
 
 The two signals are work product, so neither can report success for a dead worker
-(ADR 0018). The item's phase names which one a tick reads, so no flag carries the
-worker's role:
+(ADR 0018). The item's **Position** names which one a tick reads, so no flag carries
+the worker's role:
 
-- **complete** — in `phase:impl` and `phase:e2e`, every box in
+- **complete** — in implementation, every box in
   `.orchestrator/checklist-<item>.md` is ticked, **and** the **Gate record** in
   `.orchestrator/gates-<item>.jsonl` holds a green line for every layer
   `--require-gate` names, at the current `HEAD`. A ticked box is a claim, and the
-  record is the fact behind it (ADR 0036). In `phase:review`, a comment on the work
+  record is the fact behind it (ADR 0036). In a review round, a comment on the work
   item carries a `Verdict:` line whose value is `approve` or `request-changes`.
-- **stalled** — in `phase:impl` and `phase:e2e`, the newer of the checklist file's
+- **stalled** — in implementation, the newer of the checklist file's
   write time and the branch's last commit time is older than `--stall-after`. This
-  is the freshness of work product, not the liveness of a shell. In `phase:review`
+  is the freshness of work product, not the liveness of a shell. In a review round
   the freshness fact is the newest `Verdict:` comment, and this seam reads no commit
   at all. A reviewer inherits the implementation's commit, so its fresh worktree
   starts life with work product that is already stale. A verdict that exists fires
@@ -569,7 +543,7 @@ def last_commit_time(worktree):
     return int(proc.stdout.strip())
 
 
-def newest_work_product(worktree, item, current):
+def newest_work_product(worktree, item):
     """`(timestamp, what it was)` for the freshest work product, or `(None, "")`.
 
     Two facts, and the newer one wins: the checklist file's write time and the
@@ -579,15 +553,11 @@ def newest_work_product(worktree, item, current):
     product still does not read as stalled. A dead one is reported by its absent
     process instead.
 
-    **In `phase:review` this function reads neither fact.** A reviewer's own verdict
-    is its work product, and its fresh worktree holds the implementation's commit and
-    the implementation's checklist. Both are stale on the reviewer's first minute, so
-    a long first read reported as a stall in about three minutes. A verdict that
-    exists fires its own outcome before this function runs. So a review tick that
-    gets here has no verdict, and no stall to prove.
+    **Only implementation reaches this function.** A review round always has a verdict
+    behind it, because that verdict is what computes the position. The verdict fires its
+    own outcome first. So a reviewer that has posted none is in implementation here, and
+    the commit it inherited is what dates its work.
     """
-    if current == PHASE_REVIEW:
-        return None, ""
     facts = []
     path = checklist_path(worktree, item)
     try:
@@ -600,91 +570,6 @@ def newest_work_product(worktree, item, current):
     if not facts:
         return None, ""
     return max(facts)
-
-
-# --- the Merge queue (ADR 0037, ADR 0038) -----------------------------------
-
-# The **Work-state label** that says a human read the item and approved the merge. It
-# is one of the two entries to a **Merge queue**, and the only one a repo with no board
-# has. Its string and its swap rule are owned by `docs/agents/issue-tracker.md`, the
-# same as every other label this seam reads.
-TO_MERGE = "to-merge"
-
-
-def merge_requested(item, labels, tracker, project=0, owner="", option=""):
-    """`(outcome, detail)` where this item asks to be merged, or `(None, detail)`.
-
-    The one transition due in human review, and the branch that read as a quiet tick
-    before this outcome existed. Either entry to a **Merge queue** fires it, and the
-    order between the two is the contract:
-
-    1. **the `to-merge` label**, which the caller already read this tick, and which is
-       the authoritative fact once a session writes it.
-    2. **the board column**, read through the three `--board-*` flags. It runs only
-       where the label answers nothing, because it is a command that can fail. The
-       board read goes through the same **Tracker adapter** the labels came from. So
-       the two reads can never name different repositories.
-
-    So a repo with no board still reaches the outcome. The tick after a promotion costs
-    no more than the one before it (ADR 0037, ADR 0038).
-
-    A board read that fails returns `(None, detail)` and never `unreadable`: the labels
-    were read, so a fact is available and the item stays where it already was. The
-    cause rides the quiet line, because a board that answers nothing for an hour must
-    not read as sixty quiet minutes.
-    """
-    if TO_MERGE in labels:
-        return "merge-requested", (
-            f"work item #{item} carries the {TO_MERGE} label, so a human read the item "
-            f"and approved the merge"
-        )
-    quiet = f"work item #{item} wears no phase:* label and no {TO_MERGE} label"
-    if not (project and owner and option):
-        return None, f"{quiet}, so it is in human review and no transition is due"
-    try:
-        status = tracker.board_status(item, project, owner)
-    except (TrackerError, OSError, json.JSONDecodeError) as exc:
-        # A tick prints one line, and the standard error of a failed command can hold
-        # many, so the cause collapses to one.
-        cause = " ".join(str(exc).split())
-        return None, (
-            f"{quiet}, and the board read failed, so the label was the only fact this "
-            f"tick: {cause}"
-        )
-    if status == option:
-        return "merge-requested", (
-            f"the card for work item #{item} sits in the {option!r} column of project "
-            f"{project}, and the {TO_MERGE} label is not written yet"
-        )
-    where = repr(status) if status else "no column"
-    return None, (
-        f"{quiet}, and its card is in {where} rather than {option!r}, so no transition "
-        f"is due"
-    )
-
-
-# --- the phase predicate (ADR 0022) -----------------------------------------
-
-# The **Phase** label family. Its strings, their swap rule and their
-# `gh label create` lines are owned by `docs/agents/issue-tracker.md`, and the
-# concept by the Phase entry of `orchestrator/CONTEXT.md`. This seam reads them and
-# writes none of them.
-PHASE_IMPL = "phase:impl"
-PHASE_REVIEW = "phase:review"
-PHASE_E2E = "phase:e2e"
-PHASES = (PHASE_IMPL, PHASE_REVIEW, PHASE_E2E)
-
-
-def phase_of(labels):
-    """The one `phase:*` label a work item wears, or an empty string.
-
-    The family is mutually exclusive, so the first match is the answer. An empty
-    string means human review, where no transition is due.
-    """
-    for label in PHASES:
-        if label in labels:
-            return label
-    return ""
 
 
 # --- the computed Position --------------------------------------------------
@@ -703,15 +588,6 @@ NEEDS_HUMAN = "needs-human"
 HUMAN_REVIEW = "human-review"
 REVIEW_ROUND = "review-round"
 IMPLEMENTATION = "implementation"
-
-# How each **Position** reads on the `phase:*` label the fallback still speaks. One tick
-# answers from a computed fact where the item wears no phase label. `HUMAN_REVIEW` is the
-# empty string, because human review has never been a phase.
-POSITION_PHASES = {
-    HUMAN_REVIEW: "",
-    REVIEW_ROUND: PHASE_REVIEW,
-    IMPLEMENTATION: PHASE_IMPL,
-}
 
 
 def checklist_written(worktree, item):
@@ -789,7 +665,8 @@ def transition(
 ):
     """`(outcome, detail)` for the transition this tick is due, or `(None, detail)`.
 
-    The order inside a phase is the contract. The **Completion signal** is read
+    `current` is the computed **Position**, and human review never reaches here. The
+    order inside a position is the contract. The **Completion signal** is read
     first, so a worker that finished and then exited reads as finished rather than
     as dead. `dead` comes next and needs no stall window. `stalled` comes last and
     needs the live process `dead` is the absence of, so the two never both fire.
@@ -797,41 +674,43 @@ def transition(
     The **Gate record** is read inside that first step, and only where the checklist
     reads complete. So `gates-unproven` fires in place of the finish it cannot prove,
     and it competes with neither of the other two (ADR 0036).
+
+    **A review round always answers.** `position_of` reads that position off a
+    `Verdict:` comment, so the comment list here can never be empty. One of the three
+    verdict outcomes always fires. That is why only implementation reads the checklist,
+    the process and the stall window that follow.
     """
-    if current == PHASE_REVIEW:
+    if current == REVIEW_ROUND:
         values = verdicts_in(bodies)
-        if values:
-            number = len(values)
-            if values[-1] == "approve":
-                return "verdict-approve", (
-                    f"a comment on work item #{item} carries Verdict: approve on "
-                    f"round {number} of {rounds}"
-                )
-            if number >= rounds:
-                return "rounds-exhausted", (
-                    f"work item #{item} carries {number} Verdict: comments against a "
-                    f"round bound of {rounds}, and the newest one asks for changes"
-                )
-            return "verdict-request-changes", (
-                f"a comment on work item #{item} carries Verdict: request-changes on "
+        number = len(values)
+        if values[-1] == "approve":
+            return "verdict-approve", (
+                f"a comment on work item #{item} carries Verdict: approve on "
                 f"round {number} of {rounds}"
             )
-        waiting = "no Verdict: comment yet"
-    else:
-        path = checklist_path(worktree, item)
-        ticked, total = boxes(path)
-        if total and ticked == total:
-            unproven = unproven_gates(worktree, item, required)
-            if unproven:
-                return "gates-unproven", (
-                    f"{unproven}, and every box in {path} is ticked "
-                    f"({ticked} of {total})"
-                )
-            outcome = (
-                "proof-complete" if current == PHASE_E2E else "implementation-complete"
+        if number >= rounds:
+            return "rounds-exhausted", (
+                f"work item #{item} carries {number} Verdict: comments against a "
+                f"round bound of {rounds}, and the newest one asks for changes"
             )
-            return outcome, f"every box in {path} is ticked ({ticked} of {total})"
-        waiting = f"{ticked} of {total} boxes ticked"
+        return "verdict-request-changes", (
+            f"a comment on work item #{item} carries Verdict: request-changes on "
+            f"round {number} of {rounds}"
+        )
+
+    path = checklist_path(worktree, item)
+    ticked, total = boxes(path)
+    if total and ticked == total:
+        unproven = unproven_gates(worktree, item, required)
+        if unproven:
+            return "gates-unproven", (
+                f"{unproven}, and every box in {path} is ticked ({ticked} of {total})"
+            )
+        return (
+            "implementation-complete",
+            f"every box in {path} is ticked ({ticked} of {total})",
+        )
+    waiting = f"{ticked} of {total} boxes ticked"
 
     found = live_process(worktree, pattern)
     if not found:
@@ -841,7 +720,7 @@ def transition(
         )
     pid, name, _ = found
 
-    newest, source = newest_work_product(worktree, item, current)
+    newest, source = newest_work_product(worktree, item)
     if newest is not None:
         age = time.time() - newest
         if age > stall_after:
@@ -851,8 +730,6 @@ def transition(
                 f"of {human(stall_after)}"
             )
         freshness = f"its work product is {human(age)} old"
-    elif current == PHASE_REVIEW:
-        freshness = "no Verdict: comment dates its work yet, so no stall can be proven"
     else:
         freshness = "it has no work product yet"
 
@@ -872,9 +749,6 @@ def phase(
     back_off=None,
     marker_dir=None,
     required=(),
-    board_project=0,
-    board_owner="",
-    board_option="",
 ):
     """The `phase` answer: `(exit code, the one line to print)`.
 
@@ -885,16 +759,11 @@ def phase(
 
     A worktree that is gone is answered first, so a torn-down worker is never
     reported as a stall. A tracker read that fails comes next, and it is the
-    `unreadable` outcome. No phase label gates that outcome, because a read that
-    failed cannot say which phase the item is in. `needs-human` follows, and it stops
-    the tick whatever the other facts say. The **Phase** label comes after that,
-    because it decides which of the other outcomes this tick can reach. An item
-    that wears none of those labels is in human review, where `merge_requested` is
-    the one transition that can be due.
-
-    **`position_of` answers where no phase label is written**, and the label stays the
-    fallback where one is. So an item that wears `in-progress` alone still reaches the
-    outcome its own facts name, and no outcome of a labelled item moves.
+    `unreadable` outcome. No **Position** gates that outcome, because a read that
+    failed cannot say where the item sits. `needs-human` follows, and it stops
+    the tick whatever the other facts say. The computed position comes after that,
+    because it decides which of the other outcomes this tick can reach. An item in
+    human review reaches none of them, so that branch is a quiet tick.
     """
     worktree = Path(os.path.realpath(worktree))
     if not worktree.is_dir():
@@ -929,17 +798,12 @@ def phase(
             f"reads no further and only the maintainer clears it"
         )
 
-    current = phase_of(labels)
-    if not current:
-        outcome, detail = merge_requested(
-            item, labels, tracker, board_project, board_owner, board_option
+    current = position_of(labels, bodies, checklist_written(worktree, item))
+    if current == HUMAN_REVIEW:
+        return EXIT_NOTHING, (
+            f"nothing: work item #{item} is in human review, so it waits for the "
+            f"maintainer to read the pull request and no transition is due"
         )
-        if outcome:
-            return fire(outcome, detail)
-        position = position_of(labels, bodies, checklist_written(worktree, item))
-        if position == HUMAN_REVIEW:
-            return EXIT_NOTHING, f"nothing: {detail}"
-        current = POSITION_PHASES[position]
 
     outcome, detail = transition(
         item, worktree, current, bodies, rounds, pattern, stall_after, required=required
@@ -1025,9 +889,6 @@ def wake(
     back_off=None,
     marker_dir=None,
     required=(),
-    board_project=0,
-    board_owner="",
-    board_option="",
     handle="",
     title="",
     send_command="",
@@ -1054,9 +915,6 @@ def wake(
         back_off=back_off,
         marker_dir=marker_dir,
         required=required,
-        board_project=board_project,
-        board_owner=board_owner,
-        board_option=board_option,
     )
     if code != EXIT_DUE:
         return code, [line]
@@ -1136,32 +994,6 @@ def add_tick_arguments(parser):
         "to the CLI's own default server",
     )
     parser.add_argument(
-        "--board-project",
-        default=0,
-        type=int,
-        metavar="NUMBER",
-        help="the number of the project board, which the caller resolves from the "
-        "board section of docs/agents/issue-tracker.md. It is one of the three flags "
-        "the merge-requested board read needs. With any of the three absent, that read "
-        "is skipped, and the to-merge label stays the only entry",
-    )
-    parser.add_argument(
-        "--board-owner",
-        default="",
-        metavar="OWNER",
-        help="who the project board belongs to, from the same section. A repo with no "
-        "board section passes no board flag at all, and that is a supported "
-        "configuration",
-    )
-    parser.add_argument(
-        "--board-option",
-        default="",
-        metavar="NAME",
-        help="the Status option that means a human approved the merge, which is the "
-        "column that a maintainer drags a reviewed card to. The caller resolves the "
-        "name from the same section, so this seam holds none of its own",
-    )
-    parser.add_argument(
         "--back-off",
         metavar="DURATION",
         help="how long one outcome stays suppressed after it fires, so an "
@@ -1189,7 +1021,7 @@ def add_tick_arguments(parser):
     )
     parser.add_argument(
         "--gh-fixture",
-        help="JSON that stands in for any tracker read, so a verdict and a phase "
+        help="JSON that stands in for any tracker read, so a verdict and a position "
         "need no network and no login (used by the tests). It keeps this name "
         "because scripts/close_item.py reads the same file in the same format",
     )
@@ -1204,7 +1036,7 @@ def main(argv=None):
         prog=f"python3 {Path(__file__).resolve()}",
         description=(
             "Answer what the Worker watch asks about one worker: is a live agent "
-            "process at work in this worktree, and is a Phase transition due for its "
+            "process at work in this worktree, and is a transition due for its "
             "work item. Reports and never acts — it composes no prompt, kills no "
             "process, writes no label and spawns nothing. Its wake delivers the line "
             "it printed, and every decision stays with the session that reads it."
@@ -1234,20 +1066,20 @@ def main(argv=None):
 
     tick = subcommands.add_parser(
         "phase",
-        help="is a Phase transition due for this work item? Exit 0 due, non-zero "
+        help="is a transition due for this work item? Exit 0 due, non-zero "
         "nothing to do",
         description=(
             "The predicate an Item automation runs as its --precheck. Exit 0 means a "
             "transition is due, and the printed line names which one: "
-            "implementation-complete, proof-complete, gates-unproven, "
+            "implementation-complete, gates-unproven, "
             "verdict-approve, verdict-request-changes, rounds-exhausted, "
-            "merge-requested, dead, stalled, unreadable. "
+            "dead, stalled, unreadable. "
             "Exit 1 means nothing to do, so the run records as skipped at no token "
-            "cost. Exit 3 means the worktree is gone. The item's own phase:* label "
-            "decides which outcomes a tick can reach. An item with no phase:* label "
-            "is in human review, where merge-requested is the one transition that can "
-            "be due. The one outcome no label gates is unreadable, because a read that "
-            "failed cannot say which phase the item is in."
+            "cost. Exit 3 means the worktree is gone. The computed Position "
+            "decides which outcomes a tick can reach, and it reads no label of its "
+            "own. An item in human review reaches none of them, so that branch is a "
+            "quiet tick. The one outcome no position gates is unreadable, because a "
+            "read that failed cannot say where the item sits."
         ),
     )
     add_tick_arguments(tick)
@@ -1337,9 +1169,6 @@ def main(argv=None):
             back_off=back_off,
             marker_dir=args.marker_dir,
             required=required,
-            board_project=args.board_project,
-            board_owner=args.board_owner,
-            board_option=args.board_option,
         )
         print(line)
         return code
@@ -1365,9 +1194,6 @@ def main(argv=None):
         back_off=back_off,
         marker_dir=args.marker_dir,
         required=required,
-        board_project=args.board_project,
-        board_owner=args.board_owner,
-        board_option=args.board_option,
         handle=args.handle,
         title=args.title,
         send_command=args.send_command,

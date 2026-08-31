@@ -66,7 +66,7 @@ The eight split in two, by whether the step needs judgement. **Steps 1 to 3 need
 **The actor for all eight steps is the orchestrator session**, and never a **Worker**. A worker can be idle or out of context when the human asks, and its worktree is what step 8 removes. The seam refuses rather than warns. An unmerged PR and a dirty worktree each stop the transaction with a distinct exit code. A refused transaction leaves the item at the review state, with its card at `In review`. Nothing destructive happens by default. Rationale, the rejected alternatives, and the risk accepted for the actor: `docs/adr/0015-close-is-a-deterministic-transaction.md` and `docs/adr/0016-the-orchestrator-merges-when-asked.md`.
 
 **A Merge train loops this transaction, and changes no step of it.** The eight steps and
-their order are the same whether the maintainer typed the ask or moved the card, teardown
+their order are the same whether the ask names one item or ten, teardown
 included. So a train adds one caller and no second merge path
 ([`docs/adr/0037-the-merge-queue-is-an-ordered-train.md`](docs/adr/0037-the-merge-queue-is-an-ordered-train.md)).
 _Avoid_: teardown (that names step 8 alone), close flow, closing sequence, wrap-up.
@@ -270,19 +270,20 @@ before the layer 5 story gate. An architecture opinion about a story that does n
 premature.
 
 **A failed proof stops the parent close.** A pass or a fail is a fact, and depth is a
-judgement, so this step can block where **Layer** 5 cannot. The parent stays open with
-`phase:e2e` in place, and each failure becomes a work item.
+judgement, so this step can block where **Layer** 5 cannot. The parent stays open at
+`in-progress`, and each failure becomes a work item.
 
 **It leaves two durable artifacts.** The first is an evidence note on the parent work item,
 with one line per user story. The second is the generated Playwright spec, committed on its
 own branch in a PR. The same **Commit slice** wires that spec into the project's own test
 command, so the proof becomes a regression test.
 
-**It adds no machinery.** The parent wears the existing `phase:e2e` label, so the **Worker
-watch** reads its **Checklist** and its **Gate record** with no edit. It reports the
-`proof-complete` outcome it already reports, and there is no new outcome, label string, exit
-code or config field. It is reachable only where the **Project recipe** boots something, so
-no story in this repo reaches one. Rationale, what it narrows and the accepted risks:
+**It adds no machinery.** The parent sits in the implementation **Position**, so the
+**Worker watch** reads its **Checklist** and its **Gate record** with no edit. It reports the
+`implementation-complete` outcome it already reports, and there is no new outcome, label
+string, exit code or config field. It is reachable only where the **Project recipe** boots
+something, so no story in this repo reaches one. Rationale, what it narrows and the accepted
+risks:
 [`docs/adr/0047-the-story-proof-runs-before-the-story-gate.md`](docs/adr/0047-the-story-proof-runs-before-the-story-gate.md).
 _Avoid_: wrap-up (the **Close transaction** entry already avoids it), e2e test, story gate
 (that names layer 5), smoke test.
@@ -307,14 +308,13 @@ _Avoid_: file list, scope, footprint, blast radius (the last one already stands 
 condition**), affected files.
 
 **Merge queue**:
-The set of open work items that are ready to merge. Two entry conditions, and either one is
-enough: the item carries the `to-merge` label, or its card sits in the board's `To merge`
-column (**Board status**). The set is read fresh at the moment a **Merge train** starts,
+The set of open work items the maintainer asked to merge. **The ask is typed, and it names
+the items.** No label records it, because a label restates an approval the maintainer
+already gave. The set is read fresh at the moment a **Merge train** starts,
 which is the rule the **Ready queue** already takes, so nothing holds it between reads.
 **It is a set and not a run**, because the order over it belongs to the train. An empty
-queue is the resting state. A repo with no board has the label as its only entry, and that
-is a supported configuration
-([`docs/adr/0038-the-to-merge-column-is-intent.md`](docs/adr/0038-the-to-merge-column-is-intent.md)).
+queue is the resting state. A later item makes the tick read a merged pull request instead
+([`docs/adr/0053-one-work-state-label-and-a-computed-position.md`](docs/adr/0053-one-work-state-label-and-a-computed-position.md)).
 _Avoid_: merge backlog, ready-to-merge list, merge candidates, close queue.
 
 **Merge train**:
@@ -338,54 +338,44 @@ The per-project orchestrator settings — tool, harness, model, adversarial-revi
 The one-time interview that writes the Config — the user describes environment, tool, harness/CLI, models, adversarial-review policy, and the project recipes (setup command, run-for-evidence recipe + port scheme, optional DB gate, evidence expectations). Same posture as `/setup-matt-pocock-skills`: explore, present findings, confirm, write. Also ensures the tracker config exists (calls `/setup-matt-pocock-skills` if `docs/agents/issue-tracker.md` is missing).
 
 **Work-state labels**:
-The tracker labels that gate the queue and mark progress (`ready-for-agent`, `in-progress`, review, done). Owned by `docs/agents/issue-tracker.md` (`/setup-matt-pocock-skills`), not the orchestrator config — single source of truth. During an adversarial-review loop the item stays `in-progress` (a worker still owns it); it flips to the review label only when the loop concludes.
+The tracker labels that gate the queue and mark progress. **One family, four values, and it never stacks**: `ready-for-agent`, `in-progress`, `to-review` and `needs-human`. Owned by `docs/agents/issue-tracker.md` (`/setup-matt-pocock-skills`), not the orchestrator config — single source of truth. During an adversarial-review loop the item stays `in-progress` (a worker still owns it); it flips to the review label only when the loop concludes.
 
-**A fifth state sits between the review label and closed: `to-merge`.** It means a human
-reviewed the item, and the answer is merge. It joins the same family, so it is mutually
-exclusive with the other four — swap, never stack. It is also the standing authorisation a
-**Merge train** runs on, so no step of that train asks the maintainer a second time
-([`docs/adr/0037-the-merge-queue-is-an-ordered-train.md`](docs/adr/0037-the-merge-queue-is-an-ordered-train.md)).
+**`needs-human` is the one label that stops the machine.** It means a seam or a session
+refused. Every tick reads it first and stays quiet, whatever the other facts say. It
+carries one comment that says why, and only the maintainer removes it. No seam writes it:
+a session writes it where it refuses. Where an item sits inside an owned run is a
+**Position**, and **no label records that**
+([`docs/adr/0053-one-work-state-label-and-a-computed-position.md`](docs/adr/0053-one-work-state-label-and-a-computed-position.md)).
 
 **Board status**:
-The `Status` field on a work item's card, where the tracker has a project board (GitHub Projects v2: `Backlog | Ready | To do | In progress | In review | To merge | Done`). A **derived projection of the Work-state labels, not a second state machine** — labels are the source of truth, and `Status` is written wherever a label is written, plus recomputed for every open item when the **Ready queue** is read (which is where drift is repaired; there is no sync command). `Backlog` covers both never-triaged and ready-but-blocked; `Ready` is exactly the ready queue, which is why the split is only knowable at queue time. A human drag is drift, not intent — it is overwritten. The derivation table and the board coordinates live in `docs/agents/issue-tracker.md`, alongside the labels; a repo with no board omits the section and every board write becomes a no-op. Rationale: `docs/adr/0009-labels-drive-board-status.md`.
+The `Status` field on a work item's card, where the tracker has a project board (GitHub Projects v2: `Backlog | Ready | To do | In progress | In review | Done`). A **derived projection of the Work-state labels, not a second state machine** — labels are the source of truth, and `Status` is written wherever a label is written, plus recomputed for every open item when the **Ready queue** is read (which is where drift is repaired; there is no sync command). `Backlog` covers both never-triaged and ready-but-blocked; `Ready` is exactly the ready queue, which is why the split is only knowable at queue time. A human drag is drift, not intent — it is overwritten. The derivation table and the board coordinates live in `docs/agents/issue-tracker.md`, alongside the labels; a repo with no board omits the section and every board write becomes a no-op. Rationale: `docs/adr/0009-labels-drive-board-status.md`.
 
-**Two columns are intent, and their direction is board to label.** A card
-the maintainer drags there is intent. The session reads that card once and writes the
-`to-merge` label, which is one entry to a **Merge queue**. The direction never reverses: the
-reconcile pass writes no `Status` for an item that carries `to-merge`, so the dragged card
-is not overwritten
-([`docs/adr/0038-the-to-merge-column-is-intent.md`](docs/adr/0038-the-to-merge-column-is-intent.md)).
-
-**`To do` is the second one, and it works the same way.** A card the maintainer drags there
-means "an agent can start this now". It is the second fact of a **Ready queue** entry, beside
-the `ready-for-agent` label, and the reconcile pass writes no `Status` for an item whose card
-sits there. So the board gains one column between `Ready` and `In progress`, and `Ready` keeps
-its old derivation while it stops meaning "an agent will take this"
+**One column is intent, and its direction is board to label.** `To do` is that column.
+A card the maintainer drags there means "an agent can start this now". It is the second fact
+of a **Ready queue** entry, beside the `ready-for-agent` label, and the reconcile pass writes
+no `Status` for an item whose card sits there. So the board gains one column between `Ready`
+and `In progress`, and `Ready` keeps its old derivation while it stops meaning "an agent will
+take this"
 ([`docs/adr/0045-a-story-start-is-automatic-under-two-roofs.md`](docs/adr/0045-a-story-start-is-automatic-under-two-roofs.md)).
 
-**No drag ever removes a label, in either column.** The promotion is one-way, so a card
-dragged back out of `To do` or `To merge` changes nothing. A take-back is the maintainer
-removing `ready-for-agent`, or writing `needs-human`, plus a comment that says why. Every
-other column stays a derived projection, and the drag rule in this entry holds for all of
-them.
+**No drag ever removes a label.** The promotion is one-way, so a card dragged back out of
+`To do` changes nothing. A take-back is the maintainer removing `ready-for-agent`, or
+writing `needs-human`, plus a comment that says why. Every other column stays a derived
+projection, and the drag rule in this entry holds for all of them. **`needs-human` has no
+column**, so a paused item keeps the `Status` it already had.
 _Avoid_: board state, column, board label, project status (the field is `Status`; the layer is Board status).
 
 **Project recipe**:
 Per-project commands the completion contract needs but that aren't tool/harness/model: setup command, run-for-evidence recipe + port scheme, optional DB gate, evidence expectations. Stored in Config so the skill body stays abstract ("boot per the run recipe", "if a DB gate is configured, satisfy it").
 
 **Checklist**:
-A persistent, file-based task list that survives context loss and works across every harness (unlike claude-only `TodoWrite`). Both the orchestrator and each worker keep one, so neither forgets a step (the documented "stalls before opening the MR" failure mode). Written as markdown checkboxes (`- [ ]` / `- [x]`) to `.orchestrator/checklist-<item>.md` at the worktree root (gitignored, torn down with the worktree). The worker ticks each step as it completes; the orchestrator reads the file to see exact progress and detect a stall (unchecked items + idle terminal → re-prompt with the remaining steps). **Where the Project recipe asks for browser proof, the proof is one more box.** It drops on the same blank-field rule every other box takes, and `run_recipe` is the field it reads. So "every box ticked" is the whole finish signal, and a worker works one list top to bottom. **The last box ends at the review note.** A worker posts that note and stops. The **Orchestrator** writes the review state, in one call with the removal of the `phase:review` label, because that pair names one moment (`docs/adr/0025-the-session-writes-the-review-state.md`).
-
-**Phase**:
-Which part of an owned run a **Work item** is in. A second label family, worn beside the **Work-state labels** rather than instead of them. Three values, **mutually exclusive inside the family — swap, never stack**: `phase:impl` (a worker is implementing), `phase:review` (a reviewer is reading the diff, fix rounds included), `phase:e2e` (a worker is proving the feature works through the **Browser surface**). So an owned item wears `in-progress` and exactly one `phase:*` label together. **Human review is `to-review` with no phase label**, because human review is already a work state. So removing the label *is* that transition, and no fact is written twice. **The Orchestrator writes that removal and `to-review` in one call**, and a **Worker** writes neither (`docs/adr/0025-the-session-writes-the-review-state.md`).
-
-**The Board status derivation does not read it.** `Status` keeps deriving from the work-state labels alone. So a phase change moves no card, and `docs/adr/0009-labels-drive-board-status.md` needs no edit. **A `user-story` parent also wears `phase:e2e` while its Story proof runs**, and that derivation still reads no phase label (`docs/adr/0047-the-story-proof-runs-before-the-story-gate.md`). The label strings, the swap rule and their `gh label create` lines live with every other label vocabulary, in `docs/agents/issue-tracker.md`. The tracker is the only store: a label survives a restart, a reboot and a teardown, so a session with no memory of the spawn recovers the phase with one read. `phase:e2e` is reachable only where the **Project recipe** boots something, so an item in this repo never wears it. Why a second family and not a second state machine, and the rejected options: `docs/adr/0021-phase-is-a-second-label-family.md`.
-_Avoid_: stage, step, state, status (the last two name the work-state axis this deliberately is not), workflow phase.
+A persistent, file-based task list that survives context loss and works across every harness (unlike claude-only `TodoWrite`). Both the orchestrator and each worker keep one, so neither forgets a step (the documented "stalls before opening the MR" failure mode). Written as markdown checkboxes (`- [ ]` / `- [x]`) to `.orchestrator/checklist-<item>.md` at the worktree root (gitignored, torn down with the worktree). The worker ticks each step as it completes; the orchestrator reads the file to see exact progress and detect a stall (unchecked items + idle terminal → re-prompt with the remaining steps). **Where the Project recipe asks for browser proof, the proof is one more box.** It drops on the same blank-field rule every other box takes, and `run_recipe` is the field it reads. So "every box ticked" is the whole finish signal, and a worker works one list top to bottom. **The last box ends at the review note.** A worker posts that note and stops. The **Orchestrator** writes the review state, and a **Worker** writes no work-state label at all (`docs/adr/0025-the-session-writes-the-review-state.md`).
 
 **Position**:
 Where a **Work item** sits inside its own run, computed from facts rather than read from a
-label. Three values: **human review**, **review round** and **implementation**. It is the
-answer the **Phase** family cached, and the **Worker watch** computes it in one function.
+label. Three values: **human review**, **review round** and **implementation**. The
+**Worker watch** computes it in one function, and the outcome a tick can reach follows
+from it.
 
 The rule, in this order:
 
@@ -394,11 +384,15 @@ The rule, in this order:
    review round.
 3. Otherwise the item is in implementation.
 
+**Human review is a work state, and never a position a worker owns.** So `to-review`
+answers first, and nothing restates it. No transition is due there: the maintainer is
+reading the pull request, and every read of that branch is a quiet tick.
+
 **Every fact it reads is a fact the tick already read.** Those facts are the **Work-state
 labels**, the `Verdict:` comment list, and when the **Checklist** file was last written.
 So a position costs no second tracker read and no second file.
 
-**A cached answer can be stale, and a computed one cannot.** The `phase:*` family stored
+**A cached answer can be stale, and a computed one cannot.** A second label family stored
 this answer beside the facts that make it. So the two can disagree, and nothing repairs a
 disagreement. A computed answer holds no second copy to repair.
 
@@ -406,31 +400,31 @@ disagreement. A computed answer holds no second copy to repair.
 label first and stays quiet, whatever the other facts say. So a paused item costs one
 cheap read a minute and wakes nobody.
 
-**The `phase:*` read stays for this wave, as the fallback.** Where an item still wears one
-of those labels, that label decides, so no outcome moves. The computed position answers
-where no phase label is written. The label family and this fallback both go with the next
-item of the same story. That item records the decision in an ADR of its own.
-_Avoid_: phase (that names the label family this replaces), stage, state, status (the last
+**A review round always has a verdict behind it.** That verdict is what computes the
+position, so the verdict fires its own outcome and only implementation reads the
+checklist, the process and the stall window. The cost is one accepted risk: a reviewer
+that has posted no verdict yet reads as an implementation worker. The label family that
+retired, what this supersedes and that risk:
+[`docs/adr/0053-one-work-state-label-and-a-computed-position.md`](docs/adr/0053-one-work-state-label-and-a-computed-position.md).
+_Avoid_: phase (that named the label family this replaces), stage, state, status (the last
 two name the work-state axis), progress.
 
 **Item automation**:
-One schedule per live **Work item**, owned by the **Tool** rather than by a session's shell, named `orchestrator-item-<N>`. It ticks once a minute. **Its precheck is the whole tick**: the **Worker watch** seam asked as a predicate, plus the delivery of the line that predicate printed. Where a **Phase** transition is due the seam wakes the **Orchestrator** with that line itself. **The target is that session's terminal handle, resolved at spawn.** The terminal title is the second target, and a comment on the work item is the third. The spawn report names which of the three is live (`docs/adr/0024-the-wake-target-is-a-resolved-handle.md`).
+One schedule per live **Work item**, owned by the **Tool** rather than by a session's shell, named `orchestrator-item-<N>`. It ticks once a minute. **Its precheck is the whole tick**: the **Worker watch** seam asked as a predicate, plus the delivery of the line that predicate printed. Where a transition is due the seam wakes the **Orchestrator** with that line itself. **The target is that session's terminal handle, resolved at spawn.** The terminal title is the second target, and a comment on the work item is the third. The spawn report names which of the three is live (`docs/adr/0024-the-wake-target-is-a-resolved-handle.md`).
 
 **No agent runs on a tick.** The precheck exits non-zero on every path, so every run records as skipped at no token cost. The schedule's own prompt and provider stay inert. So the only tokens the loop spends are the ones the **Orchestrator** spends when it answers a wake (`docs/adr/0027-the-tick-delivers-its-own-wake.md`).
 
-**It never acts.** It writes no label, composes no prompt, spawns nothing and merges nothing. **Delivery is not action**: the line it sends is the line it printed, and every decision stays with the session that reads it. **The automation decides when, and the session decides what** — the same split as a **Close transaction** and a **Worker watch**, applied a third time. So every destructive act stays in a session a human can interrupt. One per item, so a leaked schedule names the item it leaked from, and five siblings are five observed items. **One per item also means the schedule follows the live worker.** The session repoints its precheck at each **Phase** transition. So a review round watches the reviewer's worktree, and a fix round watches the implementation worktree again (`docs/adr/0026-the-automation-follows-the-live-worker.md`). Removal folds into step 8 of a **Close transaction**, through the teardown command the session passes in, which means a refused transaction leaves the item observed. A tool with no automation surface skips the tick and the spawn works unchanged. Rationale, the schedule that replaces the blocking watch, the `dead` and `stalled` split, and the rejected alternatives: `docs/adr/0022-item-automation-replaces-the-blocking-watch.md`.
+**It never acts.** It writes no label, composes no prompt, spawns nothing and merges nothing. **Delivery is not action**: the line it sends is the line it printed, and every decision stays with the session that reads it. **The automation decides when, and the session decides what** — the same split as a **Close transaction** and a **Worker watch**, applied a third time. So every destructive act stays in a session a human can interrupt. One per item, so a leaked schedule names the item it leaked from, and five siblings are five observed items. **One per item also means the schedule follows the live worker.** The session repoints its precheck at each transition. So a review round watches the reviewer's worktree, and a fix round watches the implementation worktree again (`docs/adr/0026-the-automation-follows-the-live-worker.md`). Removal folds into step 8 of a **Close transaction**, through the teardown command the session passes in, which means a refused transaction leaves the item observed. A tool with no automation surface skips the tick and the spawn works unchanged. Rationale, the schedule that replaces the blocking watch, the `dead` and `stalled` split, and the rejected alternatives: `docs/adr/0022-item-automation-replaces-the-blocking-watch.md`.
 
-**The `merge-requested` outcome answers a Merge queue.** It is reachable where the item
-wears the review state and no **Phase** label, which is the one branch of the tick that
-does nothing today. The fact behind it is the `to-merge` label, or a card that sits in the
-board's `To merge` column. It goes through the same `--back-off` window as every other
-outcome. **The tick still merges nothing, writes no label and spawns nothing**: the session
-that reads the wake writes the label and runs the **Merge train**
-([`docs/adr/0037-the-merge-queue-is-an-ordered-train.md`](docs/adr/0037-the-merge-queue-is-an-ordered-train.md)).
+**A tick in human review is quiet, and no outcome answers a Merge queue.** The maintainer
+reads the pull request there and then types the ask, so nothing on the tracker records it.
+**The tick still merges nothing, writes no label and spawns nothing**: the session that
+reads a wake is what acts
+([`docs/adr/0053-one-work-state-label-and-a-computed-position.md`](docs/adr/0053-one-work-state-label-and-a-computed-position.md)).
 _Avoid_: cron job, watcher, daemon, poller (each names a mechanism rather than the unit), run automation (`Run` is not a term this repo defines).
 
 **Worker watch**:
-The seam that observes a live **Worker**'s own work product and answers whether something needs a decision now. It is not a worker — it has no **Harness** and no **Model** — and it is not the orchestrator, because it decides nothing. **It reports and never acts.** Asked once per tick, it reads three facts on the file system plus the work item's labels and comments. It answers one bit: a **Phase** transition is due, or nothing is. The printed line names which outcome fired. It composes no prompt, kills no process, writes no label, and spawns nothing, so every destructive act stays in a session a human can interrupt. It holds no state that changes an answer, which is what makes a restart after each re-prompt free.
+The seam that observes a live **Worker**'s own work product and answers whether something needs a decision now. It is not a worker — it has no **Harness** and no **Model** — and it is not the orchestrator, because it decides nothing. **It reports and never acts.** Asked once per tick, it reads three facts on the file system plus the work item's labels and comments. It answers one bit: a transition is due, or nothing is. The printed line names which outcome fired. It composes no prompt, kills no process, writes no label, and spawns nothing, so every destructive act stays in a session a human can interrupt. It holds no state that changes an answer, which is what makes a restart after each re-prompt free.
 
 **It also delivers the line it printed, and that is not a decision.** The seam sends the wake to the first target that succeeds. That is the terminal handle, then the terminal title, then a comment on the **Work item**. Every prohibition above holds for that delivery, and the send carries nothing the seam chose. It exits non-zero on every path, which is what keeps an agent off a tick (`docs/adr/0027-the-tick-delivers-its-own-wake.md`).
 
@@ -448,16 +442,16 @@ The directory this plugin is installed in. It holds `scripts/`, so it is the onl
 _Avoid_: skill root, install path, plugin directory, `$CLAUDE_PLUGIN_ROOT` (that names a harness variable which is unset in the shell a skill body opens).
 
 **Completion signal**:
-How a **Worker**'s finish is detected. Two shapes, and a tick reads exactly one — the item's **Phase** names which, so no flag carries the worker's **Role**:
+How a **Worker**'s finish is detected. Two shapes, and a tick reads exactly one — the item's **Position** names which, so no flag carries the worker's **Role**:
 
-1. **A fully ticked checklist** — every box in `.orchestrator/checklist-<item>.md` is `- [x]`. This is the implementation worker's shape, read in `phase:impl` and in `phase:e2e`. It docks onto the completion contract the **Checklist** already is, so it adds no second place to record progress.
-2. **A `Verdict:` comment** on the **Work item** — the review worker's shape, read in `phase:review`, because a reviewer ticks no checklist. `Verdict:` is a fixed literal shared by the review prompt and the watch, and its value is `approve` or `request-changes`. It is quoted here, so a writing pass leaves it byte-identical.
+1. **A fully ticked checklist** — every box in `.orchestrator/checklist-<item>.md` is `- [x]`. This is the implementation worker's shape, read in the implementation position. It docks onto the completion contract the **Checklist** already is, so it adds no second place to record progress.
+2. **A `Verdict:` comment** on the **Work item** — the review worker's shape, read in a review round, because a reviewer ticks no checklist. `Verdict:` is a fixed literal shared by the review prompt and the watch, and its value is `approve` or `request-changes`. It is quoted here, so a writing pass leaves it byte-identical.
 
 **Shape 1 reads a third fact, and that is the Gate record.** A ticked checklist on its own says a worker believes it is done. A ticked checklist plus a green line for every required layer at the current `HEAD` says a machine agreed. A missing line, a malformed line, a non-zero exit or a stale `head_sha` fires the `gates-unproven` outcome instead. The **Orchestrator** then re-prompts the worker, and the item does not move to review. Which layers are required arrives as a repeatable flag the spawn resolves, so the seam still parses no config (`docs/adr/0036-a-gate-run-is-work-product.md`).
 
 Both are **work product**: a worker writes them by doing the work. So neither one reports a finish for a dead worker. `orca terminal read` and `orca terminal wait --for tui-idle` both did report one, which is the failure mode recorded in `docs/adr/0017-gate-worker-readiness-on-a-process-check.md`. Why these two shapes, and why a reviewer's stall detection is weaker as accepted risk: `docs/adr/0018-the-worker-watch-is-a-stateless-seam.md`. Why the same seam also answers readiness for every **Tool**: `docs/adr/0019-readiness-is-a-tool-agnostic-process-check.md`.
 
-**Both shapes are read once per tick, rather than polled in a loop.** An **Item automation** asks the seam for a **Phase** transition every minute. So a signal is read at that moment, from disk or from the tracker, and nothing is held between reads. Shape 2 carries one fact more under the tick: **the count of `Verdict:` comments is the Review round number**. So *round 2 of 3* is read from the tracker rather than remembered by a session. Why the tick replaces the loop: `docs/adr/0022-item-automation-replaces-the-blocking-watch.md`.
+**Both shapes are read once per tick, rather than polled in a loop.** An **Item automation** asks the seam for a transition every minute. So a signal is read at that moment, from disk or from the tracker, and nothing is held between reads. Shape 2 carries one fact more under the tick: **the count of `Verdict:` comments is the Review round number**. So *round 2 of 3* is read from the tracker rather than remembered by a session. Why the tick replaces the loop: `docs/adr/0022-item-automation-replaces-the-blocking-watch.md`.
 _Avoid_: done signal, exit signal, finish event, heartbeat (the last one names liveness, which is the signal this deliberately is not).
 
 **Gate**:
@@ -492,7 +486,7 @@ _Avoid_: gate log, gate report, audit trail, receipt (each one names a document 
 
 **Layer**:
 One of the five bands a **Gate** runs in, numbered 1 to 5. Layers 1 to 4 each hold one command, and each one stops a push. Layer 5 is advisory: it runs once per user story, and it emits candidate work items instead of an exit code. What that run leaves in the repo is the **Story gate report**. The word is **Layer** everywhere, and never "tier", because `_Avoid_: tier` already stands on **Role** and on **Cost profile**. One word must not name three axes. The five, with a command and a budget for each: `references/quality-gates.md`.
-_Avoid_: tier, band, gate level, stage (the last one names a step of a run, and **Phase** owns that axis).
+_Avoid_: tier, band, gate level, stage (the last one names a step of a run, and **Position** owns that axis).
 
 **Story gate report**:
 The HTML file `/improve-codebase-architecture` writes when **Layer** 5 runs. The orchestrator

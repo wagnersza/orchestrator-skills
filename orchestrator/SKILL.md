@@ -13,7 +13,7 @@ conflicts in the item's own worktree, on the maintainer's explicit instruction
 ([`docs/adr/0016-the-orchestrator-merges-when-asked.md`](docs/adr/0016-the-orchestrator-merges-when-asked.md)).
 
 The vocabulary (Tool, Harness, Model, Effort, Role, Vendor, Worker, Yolo mode,
-Adversarial review, Ready queue, Checklist, Project recipe, Phase, Item automation) is
+Adversarial review, Ready queue, Checklist, Project recipe, Position, Item automation) is
 defined in [`CONTEXT.md`](CONTEXT.md).
 
 ```
@@ -243,7 +243,7 @@ ids), and the two `gh` calls all live in that section of
 Two rules:
 
 - **Write the card wherever you write a label** — and nowhere else. Three places in
-  this skill: the claim at spawn (step 5), the wake that ends the phase axis
+  this skill: the claim at spawn (step 5), the wake that hands the item to human review
   ([On the wake](#on-the-wake--one-response-per-outcome)), and close (step 2). Plus the
   reconcile below. **This session writes all three.** A worker writes no card.
 - **A missing `## Project board` section means every board write is a no-op.** A
@@ -327,19 +327,18 @@ in `in-progress` or `to-review` still gets its card confirmed, and a closed item
 already reached `Done` at close. A `user-story` parent's card follows the same table
 against its own labels and state, per that section.
 
-**Report the Merge queue beside the ready queue.** This pass already holds every open
-item's labels, so the queue costs no second read: it is every open item that carries
-`to-merge`. **Promote a dragged card in this same pass.** This session writes the label for
-a card that sits in the board's `To merge` column with no label yet, and that promotion
-belongs to the pass which already reconciles the board
-([`docs/adr/0038-the-to-merge-column-is-intent.md`](docs/adr/0038-the-to-merge-column-is-intent.md)).
-Report the queue as its own capped list, under the ready queue. Then offer the train
+**Report every item at `to-review` beside the ready queue.** This pass already holds every
+open item's labels, so that list costs no second read. **No label records a merge ask.** The
+maintainer reads the pull request and types the ask, so this session offers the train and
+never infers one
+([`docs/adr/0053-one-work-state-label-and-a-computed-position.md`](docs/adr/0053-one-work-state-label-and-a-computed-position.md)).
+Report the list as its own capped list, under the ready queue. Then offer the train
 ([Merge the queue](#merge-the-queue)).
 
 **This read is the whole fallback where the tool supports no automation surface.** `cmux`
-and `herdr` create no schedule, so no tick fires and no `merge-requested` wake ever arrives
+and `herdr` create no schedule, so no tick fires and no wake ever arrives
 ([Start the tick](#start-the-tick--one-item-automation-per-worker)). A maintainer who asks
-what next still sees the queue, and can still ask for the train.
+what next still sees the list, and can still ask for the train.
 
 ## "Work a #N" — batch-spawn its unblocked children
 
@@ -409,14 +408,13 @@ and when the user names work with no number at all. The phrases that reach it ar
    prompt. Then **gate on readiness** before any prompt — see
    [Gate readiness before the first prompt](#gate-readiness-before-the-first-prompt).
 5. **Claim the item first** — swap `ready-for-agent` → `in-progress` on the
-   tracker (labels from `issue-tracker.md`) **and add `phase:impl` in the same
-   call**, before prompting, so the board reflects the worker and "what next?" won't
-   hand it out twice. One write for both families means the work state and the
-   **Phase** cannot disagree. Then **move its card to `In progress`**
-   ([Board status](#board-status)) — same step, so the label and the card never
-   disagree. The card derives from the work-state label alone, so the phase label
-   moves no card
-   ([`docs/adr/0021-phase-is-a-second-label-family.md`](docs/adr/0021-phase-is-a-second-label-family.md)).
+   tracker (labels from `issue-tracker.md`), before prompting, so the board
+   reflects the worker and "what next?" won't hand it out twice. **One label
+   swap, and one family**, so nothing can stack. Then **move its card to
+   `In progress`** ([Board status](#board-status)) — same step, so the label and
+   the card never disagree. Where the item sits inside the run is computed from
+   facts, so no second label is written here
+   ([`docs/adr/0053-one-work-state-label-and-a-computed-position.md`](docs/adr/0053-one-work-state-label-and-a-computed-position.md)).
    Apply any parent-promotion the tracker conventions
    define (idempotent) — including the parent's own card, which sits in
    `In progress` while any child does.
@@ -641,18 +639,17 @@ proof + full suite — unit tests alone are not enough); post the review note on
 the worker's last act.**
 
 **The worker writes no work-state label and moves no board card.** So the prompt hands
-it no `gh` command for either one. This session writes the review state itself, in one
-call with the removal of the `phase:review` label. It moves the card in the same step
-([On the wake](#on-the-wake--one-response-per-outcome)). The two labels name one moment,
-the end of the phase axis. One call is what keeps them consistent. A worker also cannot
+it no `gh` command for either one. This session writes the review state itself, and it
+moves the card in the same step
+([On the wake](#on-the-wake--one-response-per-outcome)). A worker cannot
 see that moment. Whether review is on, and which round the item is on, are facts this
 session resolves. Rationale:
 [`docs/adr/0025-the-session-writes-the-review-state.md`](docs/adr/0025-the-session-writes-the-review-state.md).
 
-**The `phase:*` label is not the worker's either.** This session owns the **Phase** axis
-at both ends: the spawn writes `phase:impl` (step 5), and the wake writes every transition
-after it. A worker that removes its own phase label leaves the tick with an item that reads as
-human review. That worker's finish then wakes nothing
+**One family means one swap, so nothing can stack.** This session owns that swap at both
+ends: the spawn writes `in-progress` (step 5), and the wake writes every transition after
+it. A worker that writes a work-state label of its own leaves the tick reading a state no
+session set
 ([On the wake](#on-the-wake--one-response-per-outcome)).
 
 **Harness shape:** a **claude** worker **does** enter the routed skill — the
@@ -680,7 +677,7 @@ the item. Check reuse before booting; tear down after evidence — per the recip
 automation** (op 11). One per worker, implementation and review alike. The **Tool** owns
 the schedule, so it outlives this session, a restart of the harness and a reboot. It
 ticks once a minute. A batch of five siblings gets five automations, one each.
-Definitions: the **Item automation** and **Phase** entries in
+Definitions: the **Item automation** and **Position** entries in
 [`CONTEXT.md`](CONTEXT.md). Rationale:
 [`docs/adr/0022-item-automation-replaces-the-blocking-watch.md`](docs/adr/0022-item-automation-replaces-the-blocking-watch.md).
 
@@ -698,15 +695,10 @@ python3 <plugin root>/scripts/worker_state.py wake --item <N> \
   --back-off <duration> --repo <owner>/<name> \
   --marker-dir <the implementation worktree from op 2>/.orchestrator \
   --tracker-cli <gh or glab> --tracker-host <host> \
-  --board-project <number> --board-owner <owner> --board-option <name> \
   --require-gate '<one per required layer, from config's gates: block>' \
   --handle <this session's terminal handle, from op 9> --title orchestrator \
   --send-command '<op 4, with {target} where the terminal goes and {text} where the line goes>'
 ```
-
-**Where the tracker config has no `## Project board` section, the spawn passes none of the
-three board flags.** That is a supported configuration, and the label path still fires
-`merge-requested` there.
 
 **`<plugin root>` is a literal path in this string, and never a shell variable.** The
 **Tool** stores the precheck and runs it a minute later, in a shell that saw no
@@ -729,22 +721,21 @@ names no harness, no tracker and no tool. So the spawn is the one place they are
 |---|---|---|
 | the plugin root | the preflight in [Resolve the plugin root](#resolve-the-plugin-root-and-prove-the-seam-runs) | which copy of the seam a tick runs, and whether it runs at all |
 | the round bound | config's `review.rounds` (default 3) | when `rounds-exhausted` fires instead of `verdict-request-changes` |
-| the proof-phase gate | a non-blank `run_recipe`, or an `evidence` bar that asks for UI proof | whether this item can ever reach `phase:e2e` — see [The proof phase](#the-proof-phase) |
+| the proof-box gate | a non-blank `run_recipe`, or an `evidence` bar that asks for UI proof | whether the worker's **Checklist** ships a proof box — see [The proof box](#the-proof-box) |
 | the harness process pattern | `references/harnesses/<harness>.md` | what the `dead` outcome looks for |
 | the stall window | longer than the item's slowest single step, so a worker thinking hard is never read as stalled | when `stalled` fires |
 | the required gate layers | config's `gates:` block — one `--require-gate` per non-blank command, minus `deep` under the `lite` profile, and never `story` | when `gates-unproven` fires in place of a finish. With none the record is never read ([`references/quality-gates.md`](references/quality-gates.md)) |
 | the marker directory | the item's implementation worktree (op 2), plus `/.orchestrator` | where a back-off marker lives, and what it outlives |
 | the tracker CLI | `docs/agents/issue-tracker.md` | which command reads the labels and the comments, and which posts the wake comment |
 | the tracker host | `docs/agents/issue-tracker.md`, where the tracker is self-hosted | which server those reads go to |
-| the board project, owner and Status option | the [`## Project board`](../docs/agents/issue-tracker.md#project-board) section of `docs/agents/issue-tracker.md` | whether `merge-requested` can fire from a dragged card, not only from the `to-merge` label |
 | this session's handle and title | op 9, against this session's own worktree | where the wake is delivered, `--handle` first and `--title` second |
 | the send command | the tool file's operation 4 | how the tick delivers one line to a terminal |
 
-Every value above is a flag on the command, except one. **The proof-phase gate is not a
-flag.** The item's own `phase:*` label is what gates that outcome. So the gate decides which
-label this session writes when the implementation finishes, and the seam reads that label.
-It is the same gate the Browser-surface preflight uses, so the two cannot disagree about
-when a proof phase applies.
+Every value above is a flag on the command, except one. **The proof-box gate is not a
+flag.** It decides whether the **Checklist** this session writes ships a proof box, and
+"every box ticked" then covers the proof. So the seam needs no second outcome for it. It is
+the same gate the Browser-surface preflight uses, so the two cannot disagree about when a
+proof is required.
 
 `--back-off` suppresses a repeat of one outcome for one item, so an unanswered wake does
 not queue sixty prompts in an hour. Pick a window at least as long as a fix round takes.
@@ -832,64 +823,47 @@ A tick wakes this session with the one line its precheck printed, and that line 
 of its outcomes. **The response is a lookup, not an interpretation.** Read the outcome,
 run its row, and report per [Reporting to the user](#reporting-to-the-user).
 
-**Write the `phase:*` label as the first act of every transition.** That write is what
-acknowledges the wake. It also stops a repeat fire on the same fact a minute later. It is
-also the mitigation ADR 0021 names for its own accepted risk, that an owned
-item with no phase label reads as human review. So it goes first and never last. A phase
-label moves no card ([Board status](#board-status)).
-
-**The transition that ends the phase axis writes two labels in one call.** The removal of
-the `phase:*` label and the write of the review state name one moment. So one row does
-both: it adds `to-review` in the same `gh issue edit`, and it moves the card to
-`In review`. There is then no first act and no second act to get wrong. The card derives
-from the work-state label alone, so that half of the pair is what moves it
-([Board status](#board-status)). **This session writes all three, and the worker writes
-none of them** — its last act is the review note. Rationale:
+**Three rows write a label, and it is one swap in one call.** The work-state family has
+four values and it never stacks, so a transition removes the old value and adds the new one
+in the same `gh issue edit`. It moves the card in the same step, because the card derives
+from that label ([Board status](#board-status)). That write is what acknowledges the wake,
+and it stops a repeat fire on the same fact a minute later. **This session writes both, and
+the worker writes neither** — its last act is the review note. Rationale:
 [`docs/adr/0025-the-session-writes-the-review-state.md`](docs/adr/0025-the-session-writes-the-review-state.md).
 
-**One row writes a work-state label and no phase label.** `merge-requested` fires in
-human review, where the item wears no `phase:*` label to change. So its first act is that
-work-state swap itself: it adds `to-merge`, removes the review state in the same call, and
-moves the card. That write still acknowledges the wake, and it still stops a repeat fire on
-the same fact a minute later.
+**Five rows write no label at all**, so nothing acknowledges those wakes and `--back-off`
+is what stops a repeat every minute.
 
 | Outcome | Write first | Then |
 |---|---|---|
-| `implementation-complete` | `phase:impl` → `phase:e2e` where the proof-phase gate holds; else → `phase:review` where review is on; else remove it **and add `to-review` in the same call, and move the card to `In review`** | Proof: [The proof phase](#the-proof-phase). Review on: [Adversarial review](#adversarial-review-when-configs-reviewenabled) steps 1 and 2. Step 1 also **repoints the precheck** at the reviewer's worktree, with the review harness's process pattern — below. Review off: this wake is the hand-off to a human. Report the finish, the label pair you wrote, and the review you can still offer, in one line |
-| `proof-complete` | **On a leaf item**: `phase:e2e` → `phase:review` where review is on; else remove it **and add `to-review` in the same call, and move the card to `In review`**. **On a `user-story` parent**: nothing yet, because the layer 5 story gate runs before that call. `--back-off` stops a repeat until it does | **Leaf**: the same two branches, with the proof already done. **Parent**: [The story proof](#the-story-proof), steps 4 to 7. Read the evidence note and the spec PR, run [The layer 5 story gate](#the-layer-5-story-gate), then end the phase axis in one call. **No adversarial review round runs on the parent** |
-| `gates-unproven` | nothing, because the item stays in the phase it is in | Reset the context and re-prompt — below. The line names one of four causes, so quote that cause and name the command to run again. Never move the item to review on this line |
-| `verdict-approve` | remove `phase:review` **and add `to-review` in the same call, and move the card to `In review`** | [Adversarial review](#adversarial-review-when-configs-reviewenabled) step 4 — gather evidence and hand the item to human review |
-| `verdict-request-changes` | nothing, because a fix round is inside `phase:review` | [Adversarial review](#adversarial-review-when-configs-reviewenabled) step 3, at the round the line names. That step also **repoints the precheck** back at the implementation worktree, with the implementation harness's pattern — below |
-| `rounds-exhausted` | remove `phase:review` **and add `to-review` in the same call, and move the card to `In review`** | Step 4 again — "after the last round regardless". The bound is spent, so offer no further round |
-| `merge-requested` | add `to-merge` **and remove the review state in the same call, and move the card to `To merge`** | [Merge the queue](#merge-the-queue). The item that woke this session is one entry to the queue, and the train resolves the whole set fresh |
-| `dead` | nothing, because the item stays in the phase it is in | Report, and **never re-prompt** — below |
+| `implementation-complete` | **On a leaf item, review on**: nothing, because a worker still owns the item. **Review off**: `in-progress` → `to-review` in one call, **and move the card to `In review`**. **On a `user-story` parent**: nothing yet, because the layer 5 story gate runs before that swap. `--back-off` stops a repeat until it does | **Leaf, review on**: [Adversarial review](#adversarial-review-when-configs-reviewenabled) steps 1 and 2. Step 1 also **repoints the precheck** at the reviewer's worktree, with the review harness's process pattern — below. **Leaf, review off**: this wake is the hand-off to a human. Report the finish, the label you wrote, and the review you can still offer, in one line. **Parent**: [The story proof](#the-story-proof), steps 4 to 7. Read the evidence note and the spec PR, run [The layer 5 story gate](#the-layer-5-story-gate), then swap the label in one call. **No adversarial review round runs on the parent** |
+| `gates-unproven` | nothing, because the item stays where it is | Reset the context and re-prompt — below. The line names one of four causes, so quote that cause and name the command to run again. Never move the item to review on this line |
+| `verdict-approve` | `in-progress` → `to-review` in one call, **and move the card to `In review`** | [Adversarial review](#adversarial-review-when-configs-reviewenabled) step 4 — gather evidence and hand the item to human review |
+| `verdict-request-changes` | nothing, because a fix round is still the same worker's work | [Adversarial review](#adversarial-review-when-configs-reviewenabled) step 3, at the round the line names. That step also **repoints the precheck** back at the implementation worktree, with the implementation harness's pattern — below |
+| `rounds-exhausted` | `in-progress` → `to-review` in one call, **and move the card to `In review`** | Step 4 again — "after the last round regardless". The bound is spent, so offer no further round |
+| `dead` | nothing, because the item stays where it is | Report, and **never re-prompt** — below |
 | `stalled` | nothing, for the same reason | Reset the context and re-prompt — below |
-| `unreadable` | nothing, because a read that failed cannot say which phase the item is in | Report in one line: the tracker read is broken, and the item is unobserved until that read works again |
+| `unreadable` | nothing, because a read that failed cannot say where the item sits | Report in one line: the tracker read is broken, and the item is unobserved until that read works again |
 
-**The item's phase is what makes the response a lookup.** The seam reads that label to
-decide which of the gated outcomes a tick can reach. So `implementation-complete` and
-`verdict-approve` can never arrive for one item on the same minute. `unreadable` is the one
-outcome no label gates: the read that failed is the read that carries the label.
-The on-demand door (`review #N adversarially`) is unchanged, and it writes `phase:review`
-itself.
+**The computed Position is what makes the response a lookup.** The seam computes where the
+item sits and reads no label of its own to do that. It reads the work-state label, the
+`Verdict:` comment list and the last write to the checklist. So `implementation-complete`
+and `verdict-approve` can never arrive for one item on the same minute. The rule has one
+home, the **Position** entry in [`CONTEXT.md`](CONTEXT.md), and this table restates no part
+of it. `unreadable` is the one outcome no position gates: the read that failed is the read
+that carries the facts. The on-demand door (`review #N adversarially`) is unchanged, and it
+needs no label of its own.
 
-**The tick also computes the position, and it reads no label to do that.** One function in
-the seam answers where the item sits in its run. It reads the work-state label, the
-`Verdict:` comment list and the last write to the checklist. The rule has one home, the
-**Position** entry in [`CONTEXT.md`](CONTEXT.md), and this table restates no part of it.
+**`needs-human` answers before every fact.** The tick reads that label first and stays
+quiet, so a paused item wakes nobody and no row above runs.
 
-**The `phase:*` read stays as the fallback for this wave.** Where the item wears one of
-those labels, that label still picks the row, so no row above moves. The computed position
-answers where no phase label is written. **`needs-human` answers before every fact.** The
-tick reads that label first and stays quiet, so a paused item wakes nobody.
-
-**Five rows write no label, because they are not phase transitions.** ADR 0021 rejected a
-`phase:fix` value, so a fix round stays inside `phase:review`. And `dead` and `stalled` say
-something about the worker rather than about the phase. `unreadable` says something about
-the tracker read, and a fact the tick never read cannot decide a label. `gates-unproven`
-says the work is not finished after all, so the item stays where it is
+**Why five rows write no label.** A fix round is still the same worker's work, so nothing
+changes state. `dead` and `stalled` say something about the worker rather than about the
+item. `unreadable` says something about the tracker read, and a fact the tick never read
+cannot decide a label. `gates-unproven` says the work is not finished after all, so the
+item stays where it is
 ([`docs/adr/0036-a-gate-run-is-work-product.md`](docs/adr/0036-a-gate-run-is-work-product.md)).
-Nothing acknowledges those five wakes, so `--back-off` is what stops a repeat every minute.
+
 **A repeat that carries the same round
 number, or the same checklist position, is a wake you already answered.** Say so in
 one line and do nothing. That stays a lookup, because the line carries both facts.
@@ -898,7 +872,7 @@ one line and do nothing. That stays a lookup, because the line carries both fact
 automation** per item stands, and a transition moves the work to a different worker. So the
 precheck follows it (op 13,
 [`references/tools/_operations.md`](references/tools/_operations.md)). The repoint sits in
-the same row as the phase-label write, so one transition is one step. It is not a repair the
+the same row as the label write, so one transition is one step. It is not a repair the
 maintainer has to remember:
 
 - `implementation-complete` points the precheck at the reviewer's worktree, with the review
@@ -913,9 +887,8 @@ maintainer has to remember:
 history all stay, so step 8 of a **Close transaction** still removes one schedule under one
 name. The edit fails closed: a rejected repoint leaves the old precheck running, and the
 item keeps an observer. **A row that names no next worker repoints nothing.**
-`verdict-approve` and `rounds-exhausted` end the phase axis. `dead`, `stalled`,
-`gates-unproven` and `unreadable` say nothing about which worker is live.
-`merge-requested` fires where no worker owns the item at all. Rationale:
+`verdict-approve` and `rounds-exhausted` hand the item to a human. `dead`, `stalled`,
+`gates-unproven` and `unreadable` say nothing about which worker is live. Rationale:
 [`docs/adr/0026-the-automation-follows-the-live-worker.md`](docs/adr/0026-the-automation-follows-the-live-worker.md).
 
 **The repointed precheck is the same `wake` command, with two flags changed.** `--worktree`
@@ -943,8 +916,8 @@ worker's push, and the item stops before review instead
 ([`docs/adr/0036-a-gate-run-is-work-product.md`](docs/adr/0036-a-gate-run-is-work-product.md)).
 
 **`dead` — a re-prompt cannot work, so nothing re-prompts.** No live agent process has its
-working directory inside the worktree, so nothing listens. Report which phase the item is
-in and where the worker got to. Then name the one human decision: tear the worker down and
+working directory inside the worktree, so nothing listens. Report where the item sits and
+where the worker got to. Then name the one human decision: tear the worker down and
 re-spawn a rung up. **Teardown keeps its confirmation** ([Safety](#safety)), because a
 tick cannot read intent in an uncommitted diff. This outcome needs no stall window, so it
 arrives about a minute after the worker exits.
@@ -972,21 +945,24 @@ answer, which is what keeps a re-prompt free. Rationale:
 and
 [`docs/adr/0022-item-automation-replaces-the-blocking-watch.md`](docs/adr/0022-item-automation-replaces-the-blocking-watch.md).
 
-### The proof phase
+### The proof box
 
-**An item enters `phase:e2e` only where the project recipe asks for a proof.** The gate is
-the one resolved at spawn: a non-blank `run_recipe`, or an `evidence` bar that asks for UI
-proof. Where neither holds, the phase is unreachable, and `implementation-complete` goes
-straight to review or to human review. **This repo is that case.** Its `run_recipe` is
-blank, and its `evidence` bar asks for a test run and resolved cross-references. So an item
-here goes `phase:impl`, then `phase:review` or human review, and it **never wears
-`phase:e2e`**
-([`docs/adr/0021-phase-is-a-second-label-family.md`](docs/adr/0021-phase-is-a-second-label-family.md)).
+**A worker's Checklist ships a proof box only where the project recipe asks for a proof.**
+The gate is the one resolved at spawn: a non-blank `run_recipe`, or an `evidence` bar that
+asks for UI proof. Where neither holds, the box drops before the send, and the checklist
+holds the boxes it always held. **This repo is that case.** Its `run_recipe` is
+blank, and its `evidence` bar asks for a test run and resolved cross-references. So no item
+here grows a proof box
+([`references/checklist.template.md`](references/checklist.template.md)).
+
+**The proof is one more box, and it needs no label and no outcome of its own.** So "every
+box ticked" already covers it, and one worker works one list top to bottom
+([`docs/adr/0053-one-work-state-label-and-a-computed-position.md`](docs/adr/0053-one-work-state-label-and-a-computed-position.md)).
 
 Where the gate does hold:
 
-1. **Write `phase:e2e`**, as the first act, like every other transition.
-2. **Re-prompt the implementation worker in its own worktree.** Not a fresh worker: that
+1. **Ship the proof box in the checklist**, at the position the template gives it.
+2. **The proof runs in the implementation worker's own worktree.** Not a fresh worker: that
    worktree already holds the branch, the checklist and the per-item `ports`. So the reset
    and the self-contained re-prompt rules apply to it unchanged
    ([Reset the worker's context before every re-prompt](#reset-the-workers-context-before-every-re-prompt)).
@@ -996,8 +972,9 @@ Where the gate does hold:
    already carries.
    Reason, and why an MCP transcript is not durable evidence:
    [`docs/adr/0012-playwright-cli-is-the-only-browser-surface.md`](docs/adr/0012-playwright-cli-is-the-only-browser-surface.md).
-4. **The finish is the same Completion signal**, a fully ticked checklist. The tick then
-   reports `proof-complete`, and the row above carries the item on.
+4. **The finish is the same Completion signal**, a fully ticked checklist with the proof box
+   ticked. The tick then reports `implementation-complete`, and the row above carries the
+   item on.
 
 ### Reset the worker's context before every re-prompt
 
@@ -1026,10 +1003,10 @@ loses the worker's reasoning and never its position. Rationale:
 
 ## Adversarial review (when config's `review.enabled`)
 
-When a work item reaches `phase:review` and review is enabled. **The tick is the actor that
-starts it** — its `implementation-complete` outcome, or `proof-complete` where a proof phase
-ran ([On the wake](#on-the-wake--one-response-per-outcome)). The label this session writes
-in answer to that wake is what puts the item in this flow.
+When a worker finishes a work item and review is enabled. **The tick is the actor that
+starts it** — its `implementation-complete` outcome
+([On the wake](#on-the-wake--one-response-per-outcome)). The item stays at `in-progress`
+through the whole loop, because a worker still owns it.
 
 **The round bound is the resolved `review.rounds`, and one value serves both halves.** It
 bounds the loop below, and it is the same number written into the tick's `--rounds` at spawn
@@ -1053,8 +1030,8 @@ outcome that reports the bound spent.
    ([On the wake](#on-the-wake--one-response-per-outcome)). The precheck is the same `wake`
    command. `--worktree` and `--process` then name this worktree and the review harness.
    **The automation is repointed, and never restarted**, so the schedule and its run history
-   both stay. The item's `phase:review` label is what makes the tick read a verdict
-   rather than a checklist. A reviewer needs no flag of its own.
+   both stay. The first `Verdict:` comment is what makes the tick read a verdict rather
+   than a checklist, so a reviewer needs no flag and no label of its own.
 2. **Prompt it to review** the diff/MR and the `make deep` report against the work
    item's acceptance criteria — drafted, then run through `prompt-improver` for the
    review model's profile, same as a spawn prompt. Say it's a **code-review prompt**:
@@ -1066,8 +1043,8 @@ outcome that reports the bound spent.
    or **request-changes + findings**.
 
    **The verdict carries a `Verdict:` line, and the prompt asks for it verbatim.** Its
-   value is `approve` or `request-changes`. That literal is what the tick reads in
-   `phase:review`, so a review whose comment omits it never wakes this session. Its count is
+   value is `approve` or `request-changes`. That literal is what puts the item in a review
+   round, so a review whose comment omits it never wakes this session. Its count is
    also the round number, so an omitted line loses the count with the wake. It is quoted
    in the **Completion signal** entry of [`CONTEXT.md`](CONTEXT.md), so a writing pass
    leaves it byte-identical.
@@ -1144,13 +1121,12 @@ outcome that reports the bound spent.
    [The prompt: checklist + completion contract](#the-prompt-checklist--completion-contract)
    applies to it unchanged.
 4. **On approve, or after the last round regardless:** gather evidence and flip
-   the item to **human review**. **That transition is one call: it removes the
-   `phase:review` label and it writes `to-review`.** The card moves to `In review` with it
-   ([Board status](#board-status)). **This session writes all three. The worker wrote
-   none of them**, because its last act was the review note. The item holds
-   `in-progress` and `phase:review` for the whole loop, because a worker owns it and a
-   fix round is inside the phase. So both labels change only here, at the one moment the
-   phase axis concludes
+   the item to **human review**. **That transition is one call: it swaps `in-progress` for
+   `to-review`.** The card moves to `In review` with it
+   ([Board status](#board-status)). **This session writes both. The worker wrote
+   neither**, because its last act was the review note. The item holds
+   `in-progress` for the whole loop, because a worker owns it and a fix round is that same
+   worker's work. So the label changes only here, at the one moment the loop concludes
    ([`docs/adr/0025-the-session-writes-the-review-state.md`](docs/adr/0025-the-session-writes-the-review-state.md)).
    Merge is always a human step.
 
@@ -1175,7 +1151,6 @@ before you touch anything:
 | "merge and close 20", "merge 20 and close it" | yes |
 | "close 20" | yes |
 | "wrap up 20" | yes |
-| the `to-merge` label, or a card in the `To merge` column | yes |
 | "flip 20 to review", "advance 20" | no |
 | ambiguous, or not said | ask first |
 
@@ -1185,9 +1160,9 @@ swap the label to the review state, move the card to `In review`
 ([Board status](#board-status)), and stop there. On the **ask first** row, ask in one
 line and wait.
 
-**The `to-merge` row is an ask too, recorded on the item instead of typed.** A maintainer
-who writes that label, or drags that card, decided for that one item after they read it.
-So a close inside a **Merge train** carries the same authority as a typed one
+**An ask that names many items is still one ask.** A maintainer who names ten items
+authorised ten closes, so a close inside a **Merge train** carries the same authority as a
+close of one item
 ([Merge the queue](#merge-the-queue),
 [`docs/adr/0037-the-merge-queue-is-an-ordered-train.md`](docs/adr/0037-the-merge-queue-is-an-ordered-train.md)).
 
@@ -1298,32 +1273,32 @@ is the **Story proof** entry in [`CONTEXT.md`](CONTEXT.md). Rationale, what it n
 the accepted risks:
 [`docs/adr/0047-the-story-proof-runs-before-the-story-gate.md`](docs/adr/0047-the-story-proof-runs-before-the-story-gate.md).
 
-**The reachability gate is the one the proof phase already uses**: a non-blank `run_recipe`,
-or an `evidence` bar that asks for UI proof ([The proof phase](#the-proof-phase)). This step
+**The reachability gate is the one the proof box already uses**: a non-blank `run_recipe`,
+or an `evidence` bar that asks for UI proof ([The proof box](#the-proof-box)). This step
 defines no second gate, so the two can never disagree. Where neither half holds, no story
 proof runs, and the parent goes to the layer 5 story gate. **This repo is the blank case.**
 Its `run_recipe` is blank, so no story here ever reaches a story proof.
 
 Where the gate does hold:
 
-1. **Write `in-progress` and `phase:e2e` on the parent, in one call**, and move its card to
-   `In progress` ([Board status](#board-status)). The card derives from the work-state label
-   alone, so the phase label moves no card.
+1. **Write `in-progress` on the parent**, and move its card to
+   `In progress` ([Board status](#board-status)). One label swap, the same as every other
+   transition.
 2. **Spawn the proof worker**, and start or repoint the **Item automation** — below.
-3. **The tick reports `proof-complete`**
+3. **The tick reports `implementation-complete` on the parent**
    ([On the wake](#on-the-wake--one-response-per-outcome)).
 4. **Read the evidence note and the spec PR.**
 5. **Run [The layer 5 story gate](#the-layer-5-story-gate)**, and triage every candidate it
    reports.
-6. **Remove `phase:e2e` and add `to-review` on the parent, in one call**, and move the card
-   to `In review`. Those two labels name one moment, the same as every other transition that
-   ends the phase axis ([On the wake](#on-the-wake--one-response-per-outcome)).
+6. **Swap `in-progress` for `to-review` on the parent, in one call**, and move the card
+   to `In review`. That is the same one swap every other transition makes
+   ([On the wake](#on-the-wake--one-response-per-outcome)).
 7. **The maintainer reads the spec PR, then asks for the close.** No session merges that PR
    unasked ([Close a task](#close-a-task)).
 
 **The worker is fresh, in its own worktree cut from the default branch.** That tree is the
 first place every child's merged code sits together, and no child's worktree ever held it.
-**This is the one difference from [The proof phase](#the-proof-phase) on a leaf item**, which
+**This is the one difference from [The proof box](#the-proof-box) on a leaf item**, which
 re-prompts the worker that is already there. **The role is `heavy`.** Resolve its
 `(model, effort)` pair from [`references/models.md`](references/models.md), the same as any
 other spawn ([Right model for the job](#right-model-for-the-job)). Everything else is
@@ -1352,8 +1327,8 @@ parent's own **Close transaction** removes it.
 
 **A failed proof stops the parent close.** The worker posts the finding on the parent as its
 evidence note, and it ticks no last box. So a real defect is not a stalled worker. This
-session then files each failure through `/to-tickets`, and it leaves the parent open with
-`phase:e2e` in place. It runs **no** layer 5 story gate, and it reports the pending human
+session then files each failure through `/to-tickets`, and it leaves the parent open at
+`in-progress`. It runs **no** layer 5 story gate, and it reports the pending human
 decision ([Reporting to the user](#reporting-to-the-user)). `gates-unproven`, `stalled` and
 `dead` keep the answers they already have
 ([On the wake](#on-the-wake--one-response-per-outcome)).
@@ -1421,24 +1396,21 @@ threshold and the accepted risk:
 
 ## Merge the queue
 
-This flow runs at two moments. A tick that reports `merge-requested`
-([On the wake](#on-the-wake--one-response-per-outcome)) is the first. A maintainer who asks
-for the queue after a ["What next?"](#what-next--pick-the-next-work) read is the second. It
-runs one **Merge train**: one ordered run over the **Merge queue**, both defined in
-[`CONTEXT.md`](CONTEXT.md).
+This flow runs when the maintainer asks for the queue, usually after a
+["What next?"](#what-next--pick-the-next-work) read. **No tick starts it**, because no label
+records a merge ask. It runs one **Merge train**: one ordered run over the **Merge queue**,
+both defined in [`CONTEXT.md`](CONTEXT.md).
 
 **The ordering rule and the park rule live in
 [`references/merge-train.md`](references/merge-train.md).** Read them there at the moment
 you need them, and never from memory. This section restates neither one. Rationale:
 [`docs/adr/0037-the-merge-queue-is-an-ordered-train.md`](docs/adr/0037-the-merge-queue-is-an-ordered-train.md).
 
-1. **Resolve the Merge queue fresh.** Every open item that carries `to-merge` is in it. So
-   is every open item whose card sits in the board's `To merge` column. **Promote each
-   dragged card to the label**, then read labels alone from there. That direction is board
-   to label, once, for that one column
-   ([`docs/adr/0038-the-to-merge-column-is-intent.md`](docs/adr/0038-the-to-merge-column-is-intent.md)).
-   The column read is a board read, so a repo with no board keeps the label as its only
-   entry ([Board status](#board-status)).
+1. **Resolve the Merge queue fresh.** The maintainer's ask names the items. Where the ask
+   names the queue rather than a list, read every open item at `to-review` and confirm the
+   set in one line before the train starts. Nothing on the tracker records the ask, so a
+   train never infers one
+   ([`docs/adr/0053-one-work-state-label-and-a-computed-position.md`](docs/adr/0053-one-work-state-label-and-a-computed-position.md)).
 2. **Ask the seam for the order.** Rank nothing yourself. `scripts/merge_train.py` plans a
    train, and it merges nothing.
 
@@ -1467,7 +1439,7 @@ you need them, and never from memory. This section restates neither one. Rationa
    prose, and `resolving-merge-conflicts` where step 1 conflicts. Then steps 4 to 8 through
    `scripts/close_item.py`, with `--execute --teardown`
    ([Close a task](#close-a-task)). **No step of the transaction changes, and their order
-   does not change.** The `to-merge` label is the standing authorisation, so no close
+   does not change.** The maintainer's ask is the standing authorisation, so no close
    inside a train asks a second time ([Safety](#safety)).
 6. **A late conflict parks the item, and the train continues.** Step 1 of the transaction
    is where it appears, because an earlier merge of this same train moved the default
@@ -1500,27 +1472,27 @@ it. Shape output for acting on, not for completeness:
   A batch-spawn reports the four fields **per child**, so a mixed batch shows two
   different skills. A spawn with no routed skill drops the field and keeps the other
   three.
-- **Restate position every turn, and carry the phase with it.** A worker's progress is
-  `phase:impl · checklist 4/7`, a review loop is `phase:review · round 2 of 3`. Every
-  report of an owned item says which phase it is in, because that is the fact a fresh
-  session cannot infer. Read the phase off the item's labels, the position off the
-  checklist file, and the round number off the count of `Verdict:` comments. Do not ask the
+- **Restate the position every turn, and carry the progress with it.** A worker's progress
+  is `implementation · checklist 4/7`, a review loop is `review round 2 of 3`. Every
+  report of an owned item says where it sits, because that is the fact a fresh
+  session cannot infer. The position is computed, so read it the way the seam does: the
+  work-state label, the `Verdict:` comment count and the checklist file. Do not ask the
   user to remember any of the three.
 - **A wake report names the outcome and the transition that ran.** The outcome is the
-  tick's own word: `implementation-complete`, `proof-complete`, `gates-unproven`,
-  `verdict-approve`, `verdict-request-changes`, `rounds-exhausted`, `merge-requested`,
+  tick's own word: `implementation-complete`, `gates-unproven`,
+  `verdict-approve`, `verdict-request-changes`, `rounds-exhausted`,
   `dead`, `stalled` or `unreadable`. Then
-  the phase label you wrote, then what you did. `#38 implementation-complete · phase:impl →
-  phase:review. Reviewer spawned, gpt-5.6-terra @ high.` **Where the wake ended the phase
-  axis, name the label pair you wrote.** That one call is the hand-off to a human:
-  `#38 verdict-approve · phase:review removed · to-review · card In review.`
-- **A story-proof line names the parent, the phase and the two artifacts.**
-  `#57 story proof · phase:e2e · evidence note on #57 · spec PR #64.` The parent number is
+  the label you wrote, then what you did. `#38 implementation-complete · in-progress held.
+  Reviewer spawned, gpt-5.6-terra @ high.` **Where the wake handed the item to a human,
+  name the swap you wrote.** That one call is the hand-off:
+  `#38 verdict-approve · in-progress → to-review · card In review.`
+- **A story-proof line names the parent and the two artifacts.**
+  `#57 story proof · evidence note on #57 · spec PR #64.` The parent number is
   the fact a fresh session cannot infer, because the item that woke this session was the last
   child ([The story proof](#the-story-proof)).
 - **Both counts come from the tracker, so restate both.**
   [On the wake](#on-the-wake--one-response-per-outcome) says how to read each one.
-  `#38 stalled at phase:impl ·
+  `#38 stalled in implementation ·
   checklist 4/7 · stall 1 of 2. Context reset, re-prompted with the unchecked boxes.` At
   `stall 2 of 2`, and on `dead`, the next step is a teardown — name it as the pending
   human decision.
@@ -1576,9 +1548,9 @@ refusal reason are spelled out, never compressed.
   explicit "merge and close" **is** that confirmation, so a second ask is friction
   rather than safety (the table in [Close a task](#close-a-task)). The data-loss case
   is a dirty tree, and step 6 of the transaction refuses it rather than warning.
-- **The `to-merge` label is the standing authorisation, so a Merge train asks no second
-  time.** The maintainer writes it per item, on an item they read, so it authorises one
-  transaction and never a whole session. Each close inside a train then runs all eight
+- **The maintainer's ask is the standing authorisation, so a Merge train asks no second
+  time.** The ask names the items, on items they read, so it authorises those
+  transactions and never a whole session. Each close inside a train then runs all eight
   steps, teardown included ([Merge the queue](#merge-the-queue),
   [`docs/adr/0037-the-merge-queue-is-an-ordered-train.md`](docs/adr/0037-the-merge-queue-is-an-ordered-train.md)).
 - **A second stall is one of the ambiguous cases, so it asks. So is a `dead` worker.** The

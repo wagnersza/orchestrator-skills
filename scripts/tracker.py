@@ -17,13 +17,13 @@ repository and the fixture. Where two trackers disagree, the branch is inside th
 one method that differs. So a new tracker lands here and in no seam.
 
 **One fixture format.** A fixture file stands in for every read, so a test closes an
-item and reads a phase with no network and no login. It holds one record per work
+item and reads its position with no network and no login. It holds one record per work
 item and one per pull request:
 
     {"items": {"54": {"state": "OPEN",
-                      "labels": ["in-progress", "phase:review"],
+                      "labels": ["in-progress"],
                       "comments": ["Verdict: approve", "an earlier note"],
-                      "board": "To merge",
+                      "board": "In review",
                       "card": "PVTI_x"}},
      "pull_requests": {"48": {"state": "MERGED", "merge_commit": "a1b2c3d"}}}
 

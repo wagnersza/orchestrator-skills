@@ -5,7 +5,7 @@ line out.
 Every case reads a real worktree in a temp directory, and asserts on the exit code and
 the printed line. Those are the two things a caller consumes. No mock of `subprocess`,
 no assertion about which internal function ran. No network and no agent run: a fixture
-file stands in for the label read, the comment read and the board read, so no tracker
+file stands in for the label read and the comment read, so no tracker
 CLI is called. `GIT_CONFIG_GLOBAL` and `GIT_CONFIG_SYSTEM` point at `os.devnull`, so
 the developer's git config cannot leak into a fixture.
 
@@ -86,18 +86,8 @@ EXIT_UNDELIVERED = 5
 # stub this suite writes onto `PATH`, so no test names a real Tool either.
 SEND = "sender terminal send --terminal {target} --text {text} --enter"
 
-IMPL = ["in-progress", "phase:impl"]
-REVIEW = ["in-progress", "phase:review"]
-E2E = ["in-progress", "phase:e2e"]
 CHANGES = "Verdict: request-changes"
-
-# The fifth Work-state label, and the board coordinates the merge-requested read needs.
-# Both come from docs/agents/issue-tracker.md and arrive as flags, so the column name
-# here is deliberately not the one that file holds. A name hardcoded in the seam fires
-# none of the board cases that follow.
-TO_MERGE = "to-merge"
-HUMAN_REVIEW = ["to-review"]
-COLUMN = "Ready to land"
+APPROVE = "Verdict: approve"
 
 # The one Work-state family, whose four values come from docs/agents/issue-tracker.md.
 # `needs-human` is the one that stops every tick.
@@ -107,6 +97,16 @@ TO_REVIEW = "to-review"
 NEEDS_HUMAN = "needs-human"
 WORK_STATES = (READY_FOR_AGENT, IN_PROGRESS, TO_REVIEW, NEEDS_HUMAN)
 
+# What a work item wears in each of the two positions a worker owns. A review round is
+# the same label plus a `Verdict:` comment, because the position is computed and no
+# second label records it.
+IMPL = [IN_PROGRESS]
+HUMAN_REVIEW = [TO_REVIEW]
+
+# The label strings this migration deleted. A repo whose migration has not run yet still
+# ticks, so a read of an item that still wears one must not crash.
+RETIRED = ("phase:impl", "phase:review", "phase:e2e", "to-merge")
+
 # The three computed Positions, named by the seam rather than by this file.
 POSITIONS = (
     worker_state.HUMAN_REVIEW,
@@ -114,33 +114,9 @@ POSITIONS = (
     worker_state.IMPLEMENTATION,
 )
 
-# How each `phase:*` label reads as a Position. Two phases mean one position, because
-# `phase:e2e` is a second implementation phase. This map is the migration guard: the
-# fallback and the computed answer must agree on every state the flow produces.
-PHASE_POSITIONS = {
-    worker_state.PHASE_IMPL: worker_state.IMPLEMENTATION,
-    worker_state.PHASE_E2E: worker_state.IMPLEMENTATION,
-    worker_state.PHASE_REVIEW: worker_state.REVIEW_ROUND,
-    "": worker_state.HUMAN_REVIEW,
-}
-BOARD_PROJECT = 9
-BOARD_OWNER = "fixture-owner"
-# The same three coordinates, in the two forms a case passes them. A subprocess case
-# passes flags. An in-process case passes the keyword arguments `main` names. One source
-# for both, so the two cannot drift apart.
-BOARD_ARGS = {
-    "board_project": BOARD_PROJECT,
-    "board_owner": BOARD_OWNER,
-    "board_option": COLUMN,
-}
-BOARD = (
-    "--board-project",
-    str(BOARD_PROJECT),
-    "--board-owner",
-    BOARD_OWNER,
-    "--board-option",
-    COLUMN,
-)
+# The board flags this migration deleted. They served the merge-requested outcome alone,
+# so both subcommands lose all three.
+BOARD_FLAGS = ("--board-project", "--board-owner", "--board-option")
 
 # The stall and back-off windows, in the seconds the predicate takes. The command line
 # takes `30m` and `1h`, and one case still proves that parse.
@@ -226,17 +202,15 @@ class WorkerStateTestCase(unittest.TestCase):
 
     # --- fixture helpers ----------------------------------------------------
 
-    def write_fixture(self, comments=(), labels=(), board=""):
-        """Stand in for the tracker read a phase tick makes, and for the board read.
+    def write_fixture(self, comments=(), labels=()):
+        """Stand in for the one tracker read a tick makes.
 
-        One record for this item, in the one format `scripts/tracker.py` documents.
-        `board` is the `Status` option on this item's card. With nothing passed the
-        record carries no board key at all, which is how an item with no card reads.
+        One record for this item, in the one format `scripts/tracker.py` documents. The
+        labels and the comments are every fact the tick reads, because a position is
+        computed from them and from the checklist file.
         """
         self.fixture = self.root / "gh.json"
         record = {"comments": list(comments), "labels": list(labels)}
-        if board:
-            record["board"] = board
         self.fixture.write_text(json.dumps({"items": {str(ITEM): record}}))
 
     def gate_run(self, command, code=0, sha=None):
@@ -593,7 +567,7 @@ class WorkerStateTestCase(unittest.TestCase):
 
     # --- phase: the predicate an Item automation runs -----------------------
 
-    def test_a_ticked_checklist_in_the_impl_phase_is_a_due_transition(self):
+    def test_a_ticked_checklist_in_implementation_is_a_due_transition(self):
         """Nothing is running here, so this also proves the Completion signal is
         read before liveness: a worker that finished and exited is not dead."""
         write(self.checklist, TICKED)
@@ -604,13 +578,6 @@ class WorkerStateTestCase(unittest.TestCase):
         self.assertTrue(line.startswith("implementation-complete:"), line)
         self.assertIn(str(self.checklist), line)
         self.assertIn("3 of 3", line)
-
-    def test_a_ticked_checklist_in_the_proof_phase_is_proof_complete(self):
-        """The same fact, and the Phase is what names the outcome."""
-        write(self.checklist, TICKED)
-        self.write_fixture(labels=E2E)
-
-        self.assertTrue(self.ask().startswith("proof-complete:"))
 
     def test_an_absent_checklist_is_not_a_completed_one(self):
         """Zero boxes is not "every box ticked" — that state holds between the
@@ -785,33 +752,38 @@ class WorkerStateTestCase(unittest.TestCase):
         for command in (QUICK, FULL, "make deep", "checks.sh"):
             self.assertNotIn(command, source, f"{command!r} is named in the seam")
 
-    def test_the_phase_label_picks_the_signal_and_the_two_never_substitute(self):
-        """A reviewer ticks no boxes and an implementation worker posts no verdict,
-        so neither signal may stand in for the other. The label is what chooses."""
+    def test_the_position_picks_the_signal_and_the_two_never_substitute(self):
+        """A reviewer ticks no boxes and an implementation worker posts no verdict, so
+        neither signal can stand in for the other. The computed Position is what
+        chooses, and a `Verdict:` comment is what puts an item in a review round."""
         write(self.checklist, TICKED)
-        self.write_fixture(labels=REVIEW)
-        self.child_in(self.worktree)
+        self.write_fixture(comments=[CHANGES], labels=IMPL)
 
-        line = self.ask(expect=EXIT_NOTHING)
-        self.assertTrue(line.startswith("nothing:"), line)
-        self.assertIn("no Verdict: comment yet", line)
+        line = self.ask()
+        self.assertTrue(line.startswith("verdict-request-changes:"), line)
+        self.assertNotIn("implementation-complete", line)
 
-        # And the mirror: a verdict does not finish an item in the impl phase.
-        write(self.checklist, UNTICKED)
-        self.write_fixture(comments=["Verdict: approve"], labels=IMPL)
-        self.assertTrue(self.ask(expect=EXIT_NOTHING).startswith("nothing:"))
+        # And the mirror: with no verdict the item is in implementation, where the
+        # ticked checklist is the whole signal.
+        self.write_fixture(labels=IMPL)
+        self.assertTrue(self.ask().startswith("implementation-complete:"))
 
-    def test_a_comment_with_no_verdict_line_does_not_fire(self):
-        """The literal is the signal, so prose about a verdict is not one."""
+    def test_a_comment_with_no_verdict_line_is_not_a_review_round(self):
+        """The literal is the signal, so prose about a verdict is neither an outcome
+        nor a Position. The item stays in implementation, where the checklist is
+        read."""
         self.write_fixture(
             comments=[
                 "I would approve this, but the verdict comes after the fix round"
             ],
-            labels=REVIEW,
+            labels=IMPL,
         )
         self.child_in(self.worktree)
 
-        self.assertIn("no Verdict: comment yet", self.ask(expect=EXIT_NOTHING))
+        line = self.ask(expect=EXIT_NOTHING)
+
+        self.assertIn("0 of 3 boxes ticked", line)
+        self.assertNotIn("Verdict", line)
 
     def test_each_verdict_value_is_its_own_due_transition(self):
         """Two verdicts, two responses, so the line must tell them apart."""
@@ -821,7 +793,7 @@ class WorkerStateTestCase(unittest.TestCase):
         ):
             self.write_fixture(
                 comments=[f"## Findings\n\nnone of note\n\nVerdict: {value}\n"],
-                labels=REVIEW,
+                labels=IMPL,
             )
             line = self.ask()
 
@@ -833,7 +805,7 @@ class WorkerStateTestCase(unittest.TestCase):
     def test_rounds_exhausted_fires_at_the_passed_in_bound_and_never_at_three(self):
         """The bound is the argument, so the same three rounds are exhausted under
         3 and not under 5, and two rounds are exhausted under 2."""
-        self.write_fixture(comments=[CHANGES] * 3, labels=REVIEW)
+        self.write_fixture(comments=[CHANGES] * 3, labels=IMPL)
 
         line = self.ask(rounds=3)
         self.assertTrue(line.startswith("rounds-exhausted:"), line)
@@ -844,7 +816,7 @@ class WorkerStateTestCase(unittest.TestCase):
         self.assertTrue(under_five.startswith("verdict-request-changes:"), under_five)
         self.assertIn("round 3 of 5", under_five)
 
-        self.write_fixture(comments=[CHANGES] * 2, labels=REVIEW)
+        self.write_fixture(comments=[CHANGES] * 2, labels=IMPL)
         line = self.ask(rounds=2)
         self.assertTrue(line.startswith("rounds-exhausted:"), line)
         self.assertIn("round bound of 2", line)
@@ -852,9 +824,7 @@ class WorkerStateTestCase(unittest.TestCase):
     def test_an_approve_at_the_bound_reads_as_approve_and_not_as_exhausted(self):
         """Both hand the item to human review, and approve is the stronger fact:
         the reviewer said yes, so no loop was cut short."""
-        self.write_fixture(
-            comments=[CHANGES, CHANGES, "Verdict: approve"], labels=REVIEW
-        )
+        self.write_fixture(comments=[CHANGES, CHANGES, "Verdict: approve"], labels=IMPL)
 
         line = self.ask(rounds=3)
 
@@ -864,14 +834,14 @@ class WorkerStateTestCase(unittest.TestCase):
     def test_the_round_count_comes_from_the_tracker_and_nothing_stores_a_counter(self):
         """A Review round number is the count of Verdict: comments, so two ticks
         read round 1 twice and round 2 arrives with a second comment."""
-        self.write_fixture(comments=[CHANGES], labels=REVIEW)
+        self.write_fixture(comments=[CHANGES], labels=IMPL)
         before = self.disk_state()
 
         self.assertIn("round 1 of 3", self.ask())
         self.assertIn("round 1 of 3", self.ask())
         self.assertEqual(before, self.disk_state())
 
-        self.write_fixture(comments=[CHANGES] * 2, labels=REVIEW)
+        self.write_fixture(comments=[CHANGES] * 2, labels=IMPL)
         self.assertIn("round 2 of 3", self.ask())
 
     def test_a_dead_worker_fires_with_no_stall_window_elapsed(self):
@@ -883,7 +853,7 @@ class WorkerStateTestCase(unittest.TestCase):
 
         self.assertTrue(line.startswith("dead:"), line)
         self.assertIn(str(self.worktree), line)
-        self.assertIn("phase:impl", line)
+        self.assertIn(worker_state.IMPLEMENTATION, line)
 
     def test_a_stall_needs_a_live_process_and_stale_work_product(self):
         """Both halves, because a re-prompt only helps where something listens."""
@@ -913,32 +883,31 @@ class WorkerStateTestCase(unittest.TestCase):
         self.assertTrue(line.startswith("dead:"), line)
         self.assertNotIn("stalled", line)
 
-    def test_a_reviewer_is_never_stalled_by_the_commit_it_inherited(self):
-        """A reviewer's worktree holds the implementation's commit and checklist, so
-        both are already stale on its first minute. In `phase:review` the seam reads
-        neither one, and the freshness fact is the newest `Verdict:` comment. With no
-        verdict, no stall can be proven, so a long first read is a quiet tick."""
-        self.write_fixture(labels=REVIEW)
+    def test_a_reviewer_before_its_first_verdict_reads_as_implementation(self):
+        """The accepted cost of one label family. No label records a review round, so a
+        reviewer that has posted no verdict yet reads as an implementation worker. The
+        stale commit it inherited can then fire a stall, and a verdict is what moves the
+        item into a review round. The fault that matters is still reported: a reviewer
+        with no live process is dead, with no window elapsed."""
+        self.write_fixture(labels=IMPL)
         self.backdate(3600)
         child = self.child_in(self.worktree)
 
-        line = self.ask(stall=HALF_HOUR, expect=EXIT_NOTHING)
+        line = self.ask(stall=HALF_HOUR)
 
-        self.assertTrue(line.startswith("nothing:"), line)
-        self.assertNotIn("stalled", line)
-        self.assertIn("no Verdict: comment yet", line)
-        # The same stale state in the implementation phase is a stall, which is what
-        # makes this the phase's rule and not a dropped signal.
-        self.write_fixture(labels=IMPL)
-        self.assertTrue(self.ask(stall=HALF_HOUR).startswith("stalled:"))
+        self.assertTrue(line.startswith("stalled:"), line)
+        quiet = self.ask(stall=FOUR_HOURS, expect=EXIT_NOTHING)
+        self.assertIn(worker_state.IMPLEMENTATION, quiet)
 
-        # And dropping the stall clock costs no coverage of the failure that
-        # matters: a reviewer with no live process is dead, with no window elapsed.
-        self.write_fixture(labels=REVIEW)
+        # A verdict arrives, and the same stale worktree is a review round instead.
+        self.write_fixture(comments=[APPROVE], labels=IMPL)
+        self.assertTrue(self.ask(stall=HALF_HOUR).startswith("verdict-approve:"))
+
         self.stop(child)
+        self.write_fixture(labels=IMPL)
         dead = self.ask(stall=FOUR_HOURS)
         self.assertTrue(dead.startswith("dead:"), dead)
-        self.assertIn("phase:review", dead)
+        self.assertIn(worker_state.IMPLEMENTATION, dead)
 
     def test_a_quiet_minute_is_nothing_to_do(self):
         """The common case, and the one that must cost no tokens."""
@@ -952,15 +921,18 @@ class WorkerStateTestCase(unittest.TestCase):
         self.assertIn(str(child.pid), line)
         self.assertNotEqual(EXIT_NOTHING, EXIT_DUE)
 
-    def test_no_phase_label_is_human_review_and_nothing_is_due(self):
-        """A ticked checklist here, so the label is what gates the outcome."""
+    def test_the_review_label_is_human_review_and_nothing_is_due(self):
+        """A ticked checklist and a verdict here, so the `to-review` label is what
+        answers. Human review is the one position no transition is due in, so the
+        maintainer reads the pull request and the tick stays quiet."""
         write(self.checklist, TICKED)
-        self.write_fixture(labels=["to-review"])
+        self.write_fixture(comments=[APPROVE], labels=HUMAN_REVIEW)
 
         line = self.ask(expect=EXIT_NOTHING)
 
         self.assertTrue(line.startswith("nothing:"), line)
-        self.assertIn("no phase:* label", line)
+        self.assertIn("human review", line)
+        self.assertIn(f"#{ITEM}", line)
 
     def test_the_back_off_marker_suppresses_a_second_fire_and_then_stops(self):
         """An unanswered wake must not queue sixty prompts in an hour, and it must
@@ -1052,10 +1024,9 @@ class WorkerStateTestCase(unittest.TestCase):
         self.assertTrue(line.startswith("suppressed:"), line)
 
         # And with no --marker-dir the marker lands where it always did.
-        self.write_fixture(labels=E2E)
         default = self.ask(back_off=AN_HOUR)
-        self.assertTrue(default.startswith("proof-complete:"), default)
-        self.assertTrue(self.marker("proof-complete").is_file())
+        self.assertTrue(default.startswith("implementation-complete:"), default)
+        self.assertTrue(self.marker("implementation-complete").is_file())
 
     def test_a_proof_box_is_one_more_box_and_it_needs_no_second_signal(self):
         """The proof is a checklist box where the project recipe asks for browser proof.
@@ -1078,8 +1049,8 @@ class WorkerStateTestCase(unittest.TestCase):
     # --- the computed Position ----------------------------------------------
 
     def test_each_position_is_computed_from_facts_and_not_from_a_label(self):
-        """Three values, three distinct strings, and no `phase:*` label in any of the
-        facts. The label the rule does read is a work-state label."""
+        """Three values, three distinct strings, and no label of their own. The one
+        label the rule reads is a work-state label."""
         self.assertEqual(len(set(POSITIONS)), 3)
 
         self.assertEqual(self.position([TO_REVIEW]), worker_state.HUMAN_REVIEW)
@@ -1109,25 +1080,24 @@ class WorkerStateTestCase(unittest.TestCase):
             worker_state.IMPLEMENTATION,
         )
 
-    def test_the_computed_position_agrees_with_the_phase_label(self):
-        """The migration guard. The fallback and the computed answer say the same thing
-        on every state the flow produces. That agreement is what lets the next item
-        delete the label family. `phase:review` before the first verdict is the one legal
-        state the two disagree on, and the fallback is what covers it until then."""
+    def test_a_retired_label_reads_as_nothing_and_crashes_no_tick(self):
+        """The migration guard. A repo whose label migration has not run yet still ticks,
+        and an item there can still wear a deleted label. Each one is an unknown string
+        now, so the position comes from the work-state label and the facts beside it."""
         write(self.checklist, TICKED)
 
-        for labels, comments in (
-            (IMPL, ()),
-            (E2E, ()),
-            (REVIEW, ["Verdict: approve"]),
-            (REVIEW, [CHANGES]),
-            (HUMAN_REVIEW, ()),
-            ([*HUMAN_REVIEW, TO_MERGE], ()),
-        ):
+        for retired in RETIRED:
+            self.write_fixture(labels=[IN_PROGRESS, retired])
+            self.assertTrue(self.ask().startswith("implementation-complete:"), retired)
+
+            self.write_fixture(comments=[APPROVE], labels=[IN_PROGRESS, retired])
+            self.assertTrue(self.ask().startswith("verdict-approve:"), retired)
+
+            # An item that wears the deleted label alone reads as implementation, and
+            # `to-review` beside it is still human review.
+            self.assertEqual(self.position([retired]), worker_state.IMPLEMENTATION)
             self.assertEqual(
-                self.position(labels, comments),
-                PHASE_POSITIONS[worker_state.phase_of(labels)],
-                labels,
+                self.position([TO_REVIEW, retired]), worker_state.HUMAN_REVIEW
             )
 
     def test_no_position_is_reachable_from_two_work_state_labels_at_once(self):
@@ -1148,28 +1118,52 @@ class WorkerStateTestCase(unittest.TestCase):
             reaches = self.position([label], facts) == worker_state.HUMAN_REVIEW
             self.assertEqual(reaches, label == TO_REVIEW, label)
 
-    def test_the_computed_position_answers_where_no_phase_label_is_written(self):
-        """The new answer in place. An item that wears `in-progress` alone has no phase
-        label to read, and the tick still reaches the outcome its own facts name. So the
-        next item deletes the fallback and no outcome moves."""
+    def test_the_computed_position_is_the_only_answer(self):
+        """The computed position in place, with no label family behind it. An item that
+        wears `in-progress` alone reaches the outcome its own facts name. This holds in
+        both positions a worker owns."""
         write(self.checklist, TICKED)
         self.write_fixture(labels=[IN_PROGRESS])
 
         self.assertTrue(self.ask().startswith("implementation-complete:"))
 
-        self.write_fixture(comments=["Verdict: approve"], labels=[IN_PROGRESS])
+        self.write_fixture(comments=[APPROVE], labels=[IN_PROGRESS])
         self.assertTrue(self.ask().startswith("verdict-approve:"))
 
-    def test_the_phase_label_stays_the_fallback_so_no_outcome_moves(self):
-        """Nothing changes behaviour in this item. The facts here compute as a review
-        round, and the `phase:impl` label is what the tick reads instead."""
-        write(self.checklist, TICKED)
-        self.write_fixture(comments=["Verdict: approve"], labels=IMPL)
+    def test_no_outcome_the_tick_prints_names_two_work_state_labels(self):
+        """The guard against the class of bug #155 reported, applied to the printed
+        line. One work-state family means one label in play, so no line a tick prints
+        can name two of the four values. That is what a session reads to pick its
+        response, and two labels in one line is what made it pick the wrong row."""
+        lines = []
 
-        self.assertEqual(
-            self.position(IMPL, ["Verdict: approve"]), worker_state.REVIEW_ROUND
-        )
-        self.assertTrue(self.ask().startswith("implementation-complete:"))
+        write(self.checklist, TICKED)
+        self.write_fixture(labels=IMPL)
+        lines.append(self.ask())
+        lines.append(self.ask(required=REQUIRED))
+
+        for comments in ([APPROVE], [CHANGES], [CHANGES] * 3):
+            self.write_fixture(comments=comments, labels=IMPL)
+            lines.append(self.ask(rounds=3))
+
+        self.write_fixture(comments=[APPROVE], labels=HUMAN_REVIEW)
+        lines.append(self.ask(expect=EXIT_NOTHING))
+
+        self.write_fixture(labels=[*IMPL, NEEDS_HUMAN])
+        lines.append(self.ask(expect=EXIT_NOTHING))
+
+        write(self.checklist, UNTICKED)
+        self.write_fixture(labels=IMPL)
+        lines.append(self.ask(stall=FOUR_HOURS))
+        self.child_in(self.worktree)
+        self.backdate(3600)
+        lines.append(self.ask(stall=HALF_HOUR))
+        self.break_fixture()
+        lines.append(self.ask())
+
+        for line in lines:
+            named = [label for label in WORK_STATES if label in line]
+            self.assertLessEqual(len(named), 1, f"{named} both named in: {line}")
 
     def test_a_needs_human_label_keeps_every_tick_quiet(self):
         """The one label that stops the machine. Every other fact in each case here is a
@@ -1180,204 +1174,50 @@ class WorkerStateTestCase(unittest.TestCase):
         for labels in (
             [NEEDS_HUMAN],
             [*IMPL, NEEDS_HUMAN],
-            [*REVIEW, NEEDS_HUMAN],
-            [NEEDS_HUMAN, TO_MERGE],
+            [*HUMAN_REVIEW, NEEDS_HUMAN],
+            [NEEDS_HUMAN, *RETIRED],
         ):
-            self.write_fixture(
-                comments=["Verdict: approve"], labels=labels, board=COLUMN
-            )
+            self.write_fixture(comments=[APPROVE], labels=labels)
             before = {path for path, _ in self.disk_state()}
 
-            line = self.ask(expect=EXIT_NOTHING, back_off=AN_HOUR, **BOARD_ARGS)
+            line = self.ask(expect=EXIT_NOTHING, back_off=AN_HOUR)
 
             self.assertTrue(line.startswith("nothing:"), line)
             self.assertIn(NEEDS_HUMAN, line)
             self.assertIn(f"#{ITEM}", line)
             self.assertEqual({path for path, _ in self.disk_state()}, before, labels)
 
-    # --- merge-requested: the one transition due in human review ------------
+    # --- what the deleted merge-requested outcome leaves behind --------------
 
-    def test_the_to_merge_label_fires_merge_requested(self):
-        """Entry one to a Merge queue, and the only one a repo with no board has. No
-        board flag is passed here at all, so the label answers on its own."""
-        self.write_fixture(labels=[TO_MERGE])
-
-        line = self.ask()
-
-        self.assertTrue(line.startswith("merge-requested:"), line)
-        self.assertIn(f"#{ITEM}", line)
-        self.assertIn(TO_MERGE, line)
-
-    def test_a_card_in_the_named_column_fires_merge_requested(self):
-        """Entry two. The item still wears the review state and carries no to-merge
-        label, so the card is the whole of the fact."""
-        self.write_fixture(labels=HUMAN_REVIEW, board=COLUMN)
-
-        line = self.ask(**BOARD_ARGS)
-
-        self.assertTrue(line.startswith("merge-requested:"), line)
-        self.assertIn(COLUMN, line)
-        self.assertIn(f"#{ITEM}", line)
-
-    def test_a_card_anywhere_else_leaves_the_item_in_human_review(self):
-        """The option name is the whole of the match. So a card in another column is
-        no ask, and an item with no card at all is no ask either."""
-        self.write_fixture(labels=HUMAN_REVIEW, board="In review")
-
-        parked = self.ask(expect=EXIT_NOTHING, **BOARD_ARGS)
-        self.assertTrue(parked.startswith("nothing:"), parked)
-        self.assertIn("In review", parked)
-        self.assertIn(COLUMN, parked)
-
-        self.write_fixture(labels=HUMAN_REVIEW)
-        uncarded = self.ask(expect=EXIT_NOTHING, **BOARD_ARGS)
-        self.assertTrue(uncarded.startswith("nothing:"), uncarded)
-        self.assertIn("no phase:* label", uncarded)
-
-    def test_the_board_read_is_the_recipe_the_tracker_file_holds(self):
-        """One call, with the three flags in it and no filter of its own. The stub CLI
-        records the argv, so neither a board nor a login has to exist."""
-        log = self.fake_cli(
-            "gh",
-            issue={"labels": [{"name": "to-review"}], "comments": []},
-            project={"items": [{"status": COLUMN, "content": {"number": ITEM}}]},
-        )
-
-        line = self.tick(*BOARD, "--repo", "owner/name", fixture=False, expect=EXIT_DUE)
-
-        self.assertTrue(line.startswith("merge-requested:"), line)
-        self.assertEqual(
-            log.read_text().splitlines(),
-            [
-                f"issue view {ITEM} --json comments,labels --repo owner/name",
-                "project item-list 9 --owner fixture-owner --format json --limit 100",
-            ],
-        )
-
-    def test_a_card_for_another_item_is_not_this_item_s_card(self):
-        """One board read returns every card, so the item number is what picks one."""
-        self.fake_cli(
-            "gh",
-            issue={"labels": [{"name": "to-review"}], "comments": []},
-            project={"items": [{"status": COLUMN, "content": {"number": ITEM + 1}}]},
-        )
-
-        line = self.tick(*BOARD, fixture=False, expect=EXIT_NOTHING)
-
-        self.assertTrue(line.startswith("nothing:"), line)
-        self.assertIn("no column", line)
-
-    def test_a_missing_board_flag_skips_the_board_read_and_raises_nothing(self):
-        """All three flags or none of the read. A repo with no board section passes no
-        board flag, and the label path has to keep working there."""
-        # Each of the three coordinates absent in turn, derived from `BOARD_ARGS`. So a
-        # fourth coordinate cannot escape this case.
-        partials = tuple(
-            {name: value for name, value in BOARD_ARGS.items() if name != absent}
-            for absent in BOARD_ARGS
-        )
-
-        self.write_fixture(labels=HUMAN_REVIEW, board=COLUMN)
-        for flags in partials:
-            line = self.ask(expect=EXIT_NOTHING, **flags)
-            self.assertTrue(line.startswith("nothing:"), line)
-            self.assertIn("no phase:* label", line)
-
-        self.write_fixture(labels=[TO_MERGE], board=COLUMN)
-        for flags in partials:
-            fired = self.ask(**flags)
-            self.assertTrue(fired.startswith("merge-requested:"), fired)
-
-        # And against a real CLI nothing reaches the board: the stub logs one line,
-        # and it is the tracker read.
-        log = self.fake_cli("gh", issue={"labels": [{"name": "to-review"}]})
-        quiet = self.tick(
-            "--board-owner", "fixture-owner", fixture=False, expect=EXIT_NOTHING
-        )
-        self.assertTrue(quiet.startswith("nothing:"), quiet)
-        self.assertEqual(len(log.read_text().splitlines()), 1, log.read_text())
-
-    def test_a_failed_board_read_falls_back_to_the_label_and_is_not_unreadable(self):
-        """The labels were read, so a fact is available and `unreadable` is a lie here.
-        The tick stays quiet and it does not crash. The cause rides the line, so a
-        board that answers nothing for an hour is not sixty silent minutes."""
-        log = self.fake_cli("gh", issue={"labels": [{"name": "to-review"}]})
-
-        line = self.tick(*BOARD, fixture=False, expect=EXIT_NOTHING)
-
-        self.assertTrue(line.startswith("nothing:"), line)
-        self.assertNotIn("unreadable", line)
-        self.assertIn("gh project item-list", line)
-        self.assertEqual(len(line.splitlines()), 1, line)
-
-        # The same broken board with the label already written: the label answers
-        # first, so nothing reaches the board at all.
-        self.fake_cli("gh", issue={"labels": [{"name": TO_MERGE}]})
-        fired = self.tick(*BOARD, fixture=False, expect=EXIT_DUE)
-        self.assertTrue(fired.startswith("merge-requested:"), fired)
-        self.assertNotIn("project", log.read_text().splitlines()[-1])
-
-    def test_merge_requested_respects_the_back_off_window(self):
-        """One marker per (item, outcome) pair, and this outcome is one more pair. So
-        an unanswered merge ask does not wake the session every minute."""
-        self.write_fixture(labels=[TO_MERGE])
-
-        first = self.ask(back_off=AN_HOUR)
-        held = self.ask(back_off=AN_HOUR, expect=EXIT_NOTHING)
-
-        self.assertTrue(first.startswith("merge-requested:"), first)
-        self.assertTrue(held.startswith("suppressed:"), held)
-        self.assertIn("merge-requested", held)
-        self.assertTrue(self.marker("merge-requested").is_file())
-
-    def test_merge_requested_is_unreachable_in_every_phase(self):
-        """The absence of a phase:* label is the gate. So an item that still wears one
-        keeps the outcome that phase owns, whatever the label and the card say."""
-        write(self.checklist, TICKED)
-
-        for labels, outcome in (
-            (IMPL, "implementation-complete"),
-            (E2E, "proof-complete"),
-            (REVIEW, "verdict-approve"),
-        ):
-            self.write_fixture(
-                comments=["Verdict: approve"],
-                labels=[*labels, TO_MERGE],
-                board=COLUMN,
-            )
-
-            line = self.ask(**BOARD_ARGS)
-
-            self.assertTrue(line.startswith(f"{outcome}:"), line)
-            self.assertNotIn("merge-requested", line)
-
-    def test_every_board_flag_appears_in_help(self):
-        """A caller resolves all three from the tracker file, so both subcommands have
-        to name them where a caller looks for a flag."""
+    def test_the_board_flags_are_gone_from_both_subcommands(self):
+        """They served the merge-requested outcome alone, so the outcome and the three
+        coordinates go together. A flag left in the parser is a flag a caller resolves
+        for nothing. The board section of the tracker file no longer feeds a tick."""
         for subcommand in ("phase", "wake"):
             out = self.run_seam(subcommand, "--help", lines=400)
 
-            for flag in ("--board-project", "--board-owner", "--board-option"):
-                self.assertIn(flag, out, f"{subcommand} --help")
+            for flag in BOARD_FLAGS:
+                self.assertNotIn(flag, out, f"{subcommand} --help still names {flag}")
+            self.assertNotIn("board", out.lower(), f"{subcommand} --help names a board")
 
-    def test_merge_requested_takes_no_new_exit_code(self):
-        """`phase` still answers 0 for a due transition, and `wake` still exits 4 for
-        a delivered line and 5 for one no target took."""
-        self.fake_sender(accept=("H1",))
-        self.write_fixture(labels=[TO_MERGE])
-
-        self.assertTrue(self.tick(expect=EXIT_DUE).startswith("merge-requested:"))
-
-        delivered = self.wake(handle="H1", send=SEND)
-        self.assertTrue(delivered.startswith("delivered:"), delivered)
-        self.assertIn("merge-requested:", delivered)
-
-        self.fake_sender(accept=())
-        self.fake_cli("gh")  # no payload, so the comment target fails as well
-        undelivered = self.wake(
-            handle="H1", send=SEND, expect=EXIT_UNDELIVERED, lines=3
+    def test_a_tick_makes_one_tracker_read_and_never_a_board_read(self):
+        """One read answers every fact a tick needs: the labels and the comments. The
+        board read was a second command that can fail, and it went with the outcome it
+        served. The stub CLI logs one line, so nothing reaches a project board."""
+        log = self.fake_cli(
+            "gh",
+            issue={"labels": [{"name": IN_PROGRESS}], "comments": []},
+            project={"items": [{"status": "To land", "content": {"number": ITEM}}]},
         )
-        self.assertTrue(undelivered.startswith("undelivered:"), undelivered)
+        write(self.checklist, TICKED)
+
+        line = self.tick("--repo", "owner/name", fixture=False, expect=EXIT_DUE)
+
+        self.assertTrue(line.startswith("implementation-complete:"), line)
+        self.assertEqual(
+            log.read_text().splitlines(),
+            [f"issue view {ITEM} --json comments,labels --repo owner/name"],
+        )
 
     def test_the_glab_reads_carry_the_host_where_each_one_needs_it(self):
         """Two reads, two places for the host. A bare owner/name in the API path
@@ -1385,7 +1225,7 @@ class WorkerStateTestCase(unittest.TestCase):
         The stub CLI records the argv, so neither CLI has to be installed."""
         log = self.fake_cli(
             "glab",
-            issue={"labels": ["in-progress", "phase:review"]},
+            issue={"labels": [IN_PROGRESS]},
             api=[{"body": "Verdict: approve"}],
         )
 
@@ -1417,7 +1257,7 @@ class WorkerStateTestCase(unittest.TestCase):
         log = self.fake_cli(
             "gh",
             issue={
-                "labels": [{"name": "phase:review"}],
+                "labels": [{"name": IN_PROGRESS}],
                 "comments": [{"body": "Verdict: approve"}],
             },
         )
@@ -1468,33 +1308,27 @@ class WorkerStateTestCase(unittest.TestCase):
         self.assertNotEqual(EXIT_GONE, EXIT_DUE)
 
     def test_every_outcome_exits_zero_and_every_quiet_one_does_not(self):
-        """The whole exit-code contract in one place. A due transition is 0 whichever
-        outcome fired, and the printed line names which one. No quiet outcome can
-        read as a transition."""
+        """The whole exit-code contract in one place, and the whole outcome table with
+        it. Eight outcomes, and a due transition is 0 whichever one fired. The printed
+        line names which. No quiet outcome can read as a transition."""
         due = {}
 
         write(self.checklist, TICKED)
         self.write_fixture(labels=IMPL)
         due["implementation-complete"] = self.tick(expect=EXIT_DUE)
 
-        self.write_fixture(labels=E2E)
-        due["proof-complete"] = self.tick(expect=EXIT_DUE)
-
         # The same ticked checklist, with a required layer nothing on disk proves.
         self.write_fixture(labels=IMPL)
         due["gates-unproven"] = self.tick(*GATES, expect=EXIT_DUE)
 
-        self.write_fixture(comments=["Verdict: approve"], labels=REVIEW)
+        self.write_fixture(comments=["Verdict: approve"], labels=IMPL)
         due["verdict-approve"] = self.tick(expect=EXIT_DUE)
 
-        self.write_fixture(comments=[CHANGES], labels=REVIEW)
+        self.write_fixture(comments=[CHANGES], labels=IMPL)
         due["verdict-request-changes"] = self.tick(expect=EXIT_DUE)
 
-        self.write_fixture(comments=[CHANGES] * 3, labels=REVIEW)
+        self.write_fixture(comments=[CHANGES] * 3, labels=IMPL)
         due["rounds-exhausted"] = self.tick(rounds=3, expect=EXIT_DUE)
-
-        self.write_fixture(labels=HUMAN_REVIEW, board=COLUMN)
-        due["merge-requested"] = self.tick(*BOARD, expect=EXIT_DUE)
 
         write(self.checklist, UNTICKED)
         self.write_fixture(labels=IMPL)
@@ -1513,12 +1347,10 @@ class WorkerStateTestCase(unittest.TestCase):
             sorted(
                 [
                     "implementation-complete",
-                    "proof-complete",
                     "gates-unproven",
                     "verdict-approve",
                     "verdict-request-changes",
                     "rounds-exhausted",
-                    "merge-requested",
                     "dead",
                     "stalled",
                     "unreadable",
@@ -1793,7 +1625,7 @@ class WorkerStateTestCase(unittest.TestCase):
         self.ask(stall=FOUR_HOURS, expect=EXIT_NOTHING)  # nothing to do
         self.assertEqual(stalled_state, self.disk_state())
 
-        self.write_fixture(comments=[CHANGES], labels=REVIEW)
+        self.write_fixture(comments=[CHANGES], labels=IMPL)
         with_verdict = self.disk_state()
         self.ask()  # verdict-request-changes
         self.assertEqual(with_verdict, self.disk_state())

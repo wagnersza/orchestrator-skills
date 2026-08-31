@@ -101,7 +101,8 @@ gates:
 - **review** — when `enabled`, the orchestrator asserts `models.review.model`'s
   vendor differs from the impl role's (see `references/models.md`). It runs up to
   `rounds` fix↔review cycles, then hands to human review regardless.
-- **Work-state labels** (`ready-for-agent`, `in-progress`, review, done) come from
+- **Work-state labels** — one family, four values, and it never stacks
+  (`ready-for-agent`, `in-progress`, `to-review`, `needs-human`) — come from
   `docs/agents/issue-tracker.md`, not this file — single source of truth. So do the
   **project board** coordinates, in its `## Project board` section: the project
   owner/number, the `Status` field id, and the option ids. The board's `Status` is a

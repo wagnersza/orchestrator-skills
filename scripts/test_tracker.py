@@ -84,9 +84,9 @@ class TrackerTest(unittest.TestCase):
             items={
                 str(ITEM): {
                     "state": "OPEN",
-                    "labels": ["in-progress", "phase:review"],
+                    "labels": ["in-progress"],
                     "comments": ["Verdict: approve"],
-                    "board": "To merge",
+                    "board": "In review",
                     "card": "PVTI_x",
                 }
             },
@@ -96,13 +96,13 @@ class TrackerTest(unittest.TestCase):
 
         self.assertEqual(
             one.item_facts(ITEM),
-            (["in-progress", "phase:review"], ["Verdict: approve"]),
+            (["in-progress"], ["Verdict: approve"]),
         )
         self.assertEqual(
             one.issue(ITEM),
-            {"state": "OPEN", "labels": ["in-progress", "phase:review"]},
+            {"state": "OPEN", "labels": ["in-progress"]},
         )
-        self.assertEqual(one.board_status(ITEM, 6, "someone"), "To merge")
+        self.assertEqual(one.board_status(ITEM, 6, "someone"), "In review")
         self.assertEqual(one.board_card(ITEM, 6, "someone"), "PVTI_x")
         self.assertEqual(
             one.pull_request(PR), {"state": "MERGED", "merge_commit": "a1b2c3d"}
@@ -147,16 +147,16 @@ class TrackerTest(unittest.TestCase):
             ["gh", "pr", "view", str(PR), "--json", "state,mergeCommit"],
         )
         self.assertEqual(
-            one.label_argv(ITEM, remove=["to-review"], add=["to-merge"]),
+            one.label_argv(ITEM, remove=["in-progress"], add=["to-review"]),
             [
                 "gh",
                 "issue",
                 "edit",
                 str(ITEM),
                 "--remove-label",
-                "to-review",
+                "in-progress",
                 "--add-label",
-                "to-merge",
+                "to-review",
             ],
         )
         self.assertEqual(one.close_argv(ITEM), ["gh", "issue", "close", str(ITEM)])
@@ -194,16 +194,16 @@ class TrackerTest(unittest.TestCase):
         )
         # The label swap has its own subcommand and its own two flags.
         self.assertEqual(
-            one.label_argv(ITEM, remove=["to-review"], add=["to-merge"]),
+            one.label_argv(ITEM, remove=["in-progress"], add=["to-review"]),
             [
                 "glab",
                 "issue",
                 "update",
                 str(ITEM),
                 "--label",
-                "to-merge",
-                "--unlabel",
                 "to-review",
+                "--unlabel",
+                "in-progress",
                 *where,
             ],
         )
@@ -260,13 +260,13 @@ class TrackerTest(unittest.TestCase):
         log = self.fake_cli(
             "gh",
             answer=json.dumps(
-                {"labels": [{"name": "phase:impl"}], "comments": [{"body": "a note"}]}
+                {"labels": [{"name": "in-progress"}], "comments": [{"body": "a note"}]}
             ),
         )
 
         facts = tracker.Tracker(repo=REPO).item_facts(ITEM)
 
-        self.assertEqual(facts, (["phase:impl"], ["a note"]))
+        self.assertEqual(facts, (["in-progress"], ["a note"]))
         self.assertEqual(
             log.read_text().splitlines(),
             [f"issue view {ITEM} --json comments,labels --repo {REPO}"],
@@ -276,13 +276,13 @@ class TrackerTest(unittest.TestCase):
         """One command takes the host in its repository argument, and one as a flag."""
         log = self.fake_cli(
             "glab",
-            issue={"labels": ["phase:impl"]},
+            issue={"labels": ["in-progress"]},
             api=[{"body": "a note"}],
         )
 
         facts = tracker.Tracker(cli=tracker.GLAB, host=HOST, repo=REPO).item_facts(ITEM)
 
-        self.assertEqual(facts, (["phase:impl"], ["a note"]))
+        self.assertEqual(facts, (["in-progress"], ["a note"]))
         self.assertEqual(
             log.read_text().splitlines(),
             [
@@ -346,13 +346,13 @@ class TrackerTest(unittest.TestCase):
         log = self.fake_cli(
             "gh",
             answer=json.dumps(
-                {"items": [{"status": "To merge", "content": {"number": ITEM}}]}
+                {"items": [{"status": "In review", "content": {"number": ITEM}}]}
             ),
         )
 
         one = tracker.Tracker(cli=tracker.GLAB, host=HOST, repo=REPO)
 
-        self.assertEqual(one.board_status(ITEM, 6, "someone"), "To merge")
+        self.assertEqual(one.board_status(ITEM, 6, "someone"), "In review")
         self.assertEqual(
             log.read_text().splitlines(),
             ["project item-list 6 --owner someone --format json --limit 100"],
@@ -362,7 +362,7 @@ class TrackerTest(unittest.TestCase):
         self.fake_cli(
             "gh",
             answer=json.dumps(
-                {"items": [{"status": "To merge", "content": {"number": 99}}]}
+                {"items": [{"status": "In review", "content": {"number": 99}}]}
             ),
         )
 
