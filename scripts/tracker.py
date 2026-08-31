@@ -23,13 +23,13 @@ item and one per pull request:
     {"items": {"54": {"state": "OPEN",
                       "labels": ["in-progress"],
                       "comments": ["Verdict: approve", "an earlier note"],
-                      "board": "In review",
-                      "card": "PVTI_x"}},
+                      "board": "To do"}},
      "pull_requests": {"48": {"state": "MERGED", "merge_commit": "a1b2c3d"}}}
 
-`board` is the `Status` option name on that item's card, and `card` is the id that
-addresses the card. Every key is optional. An item that is absent from a key reads
-as an item with none of that fact, and a key that is absent reads the same way.
+`board` is the `Status` option name on that item's card. It is the one fact the board
+answers, and no caller writes it back (ADR 0054). Every key is optional. An item that
+is absent from a key reads as an item with none of that fact, and a key that is absent
+reads the same way.
 
 In fixture mode a write runs nothing. It appends its command to
 `<fixture path>.writes`, one per line. That file is what a test reads to see which
@@ -262,8 +262,12 @@ class Tracker:
     def board_status(self, item, project, owner):
         """The `Status` option name on this work item's card, or an empty string.
 
-        An empty string covers two facts: an item with no card, and a card with no
-        status. A caller compares the name it wants, so neither fact is an error.
+        **This is the one question the board answers, and nothing writes it back**
+        (ADR 0054). A caller asks whether the name is the start column.
+
+        An empty string covers three facts: no board at all, an item with no card, and
+        a card with no status. A caller compares the name it wants, so none of the
+        three is an error.
         """
         if self.fixture is not None:
             return str(self._item(item).get("board") or "")
@@ -272,22 +276,6 @@ class Tracker:
             if (entry.get("content") or {}).get("number") == item:
                 return str(entry.get("status") or "")
         return ""
-
-    def board_card(self, item, project, owner):
-        """The id that addresses this work item's card, or an empty string.
-
-        The filter runs in the CLI here, because the caller wants the one card. The
-        walk in `board_status` answers the other question from the same read.
-        """
-        if self.fixture is not None:
-            return str(self._item(item).get("card") or "")
-        return run(
-            self._board_list_argv(
-                project,
-                owner,
-                f".items[] | select(.content.number=={item}) | .id",
-            )
-        ).strip()
 
     # --- the argv a seam runs or prints
 
@@ -358,25 +346,8 @@ class Tracker:
             return []
         return self.comment_argv(item, body)
 
-    def card_argv(self, card, project_id, field_id, option_id):
-        """The argv that writes one card's `Status`.
-
-        A repeat of this write changes nothing, so a part-applied close is
-        resumable.
-        """
-        return [
-            GH,
-            "project",
-            "item-edit",
-            "--id",
-            card,
-            "--project-id",
-            project_id,
-            "--field-id",
-            field_id,
-            "--single-select-option-id",
-            option_id,
-        ]
+    # There is no card write here. The board is an input, so this adapter holds one
+    # board read and no board write (ADR 0054).
 
     def comment_argv(self, item, body):
         """The argv that posts one comment on a work item.
@@ -405,15 +376,18 @@ class Tracker:
             *self._repo_flag(),
         ]
 
-    def _board_list_argv(self, project, owner, jq=""):
+    def _board_list_argv(self, project, owner):
         """The argv of the one board read, which is the recipe the tracker file holds.
 
         A project board is one tracker's own surface, so this builder names that CLI
         and the CLI name on this object does not reach it. A repo on the other
         tracker has no such board, so it passes no board argument and this read
         never runs there.
+
+        **One caller, and it walks the answer in Python.** A `--jq` filter here was a
+        second parser of the same recipe, and it served the card write alone (ADR 0054).
         """
-        argv = [
+        return [
             GH,
             "project",
             "item-list",
@@ -425,9 +399,6 @@ class Tracker:
             "--limit",
             str(BOARD_LIMIT),
         ]
-        if jq:
-            argv += ["--jq", jq]
-        return argv
 
     # --- the writes a seam makes
 

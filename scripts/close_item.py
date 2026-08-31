@@ -32,17 +32,19 @@ The five steps, and what each one does:
 | 4. PR merged? | refuse if not. Nothing else has run, so the item is untouched |
 | 5. pull the merge | do it. A step, not a gate — behind is normal after a merge |
 | 6. worktree clean? | refuse if dirty, and name the files. Nothing recovers that |
-| 7. label, close, card | one step, so a label cannot move without its card |
+| 7. label and close | one step, so an item cannot close without its label moving |
 | 8. remove the worktree | only with `--execute --teardown` |
 
-Three things this seam never learns, because each one turns it from a testable
+**Step 7 writes no board card.** The board is an input, and the board's own built-in
+**item closed to Done** workflow is what moves a card to `Done` (ADR 0054). So this
+seam takes no board coordinate and holds no board.
+
+Two things this seam never learns, because each one turns it from a testable
 part into a coupled one:
 
 - **The workspace tool.** The teardown command arrives as `--teardown-command`.
   The caller reads it from `references/tools/<tool>.md` and substitutes the ids.
   So a new tool stays a Markdown change and no `orca` command is written here.
-- **The project board.** The coordinates arrive as arguments. This seam reads no
-  Markdown and holds no board.
 - **Which tracker it talks to.** `--tracker-cli`, `--tracker-host` and
   `--tracker-repo` name it, and the caller reads all three from the repo's tracker
   configuration. Every command then comes from the **Tracker adapter** in
@@ -85,14 +87,6 @@ STATUS_REFUSED = "refused"
 STATUS_SKIPPED = "skipped"
 STATUS_BLOCKED = "blocked"
 STATUS_FAILED = "failed"
-
-BOARD_ARGS = (
-    "project_number",
-    "project_owner",
-    "project_id",
-    "status_field_id",
-    "done_option_id",
-)
 
 
 class GitError(RuntimeError):
@@ -192,7 +186,7 @@ def build_plan(args, tracker):
     else:
         reason = (
             f"PR #{args.pr} is {pr_state.lower()}, and not merged. Nothing else ran, "
-            f"so the item keeps its review state and its card keeps `In review`."
+            f"so the item keeps its review state."
         )
         refusal = {"step": 4, "reason": reason, "exit_code": EXIT_PR_NOT_MERGED}
         steps.append(step(4, "pr merged", read_pr, STATUS_REFUSED, reason))
@@ -278,17 +272,18 @@ def build_plan(args, tracker):
                     )
                 )
 
-    # --- 7. the label, the close and the card, as one step. A label that moves
-    #        without its card cannot happen while they share a step.
+    # --- 7. the label and the close, as one step. An item that closes without its
+    #        label moving cannot happen while they share a step. There is no card
+    #        part: the board is an input, and its own workflow writes `Done` (ADR 0054).
     parts = tracker_parts(args, tracker)
     if refusal:
         status, note = STATUS_BLOCKED, not_reached(refusal)
     elif all(part["status"] in (STATUS_DONE, STATUS_SKIPPED) for part in parts):
-        status, note = STATUS_DONE, "the label, the item and the card are already set"
+        status, note = STATUS_DONE, "the label and the item are already set"
     else:
         status, note = (
             STATUS_TODO,
-            ("one step, so the label and the card always move together"),
+            ("one step, so the label and the close always move together"),
         )
     steps.append(
         step(
@@ -339,9 +334,11 @@ def tracker_parts(args, tracker):
     Each part is idempotent, which is what makes a part-applied close resumable:
     a re-run finds the parts that landed already `done` and finishes the rest.
 
-    There are three writes where the close command records the closing reason itself,
-    and four where that reason needs its own write. The seam asks the adapter which of
+    There are two writes where the close command records the closing reason itself,
+    and three where that reason needs its own write. The seam asks the adapter which of
     the two it has, so the seam names no tracker (ADR 0040).
+
+    **No part of step 7 writes a board card** (ADR 0054).
     """
     issue = tracker.issue(args.issue)
     labels = issue.get("labels") or []
@@ -373,7 +370,7 @@ def tracker_parts(args, tracker):
     )
 
     note = note_part(args, tracker)
-    return [label, *([note] if note else []), close, card_part(args, tracker)]
+    return [label, *([note] if note else []), close]
 
 
 def note_part(args, tracker):
@@ -400,39 +397,6 @@ def note_part(args, tracker):
         STATUS_TODO,
         "posts the closing reason, before the close. This tracker closes an item with "
         "no reason flag, so the reason is its own write",
-    )
-
-
-def card_part(args, tracker):
-    """The board write, or a no-op where there is no board to write to."""
-    missing = [
-        "--" + name.replace("_", "-") for name in BOARD_ARGS if not getattr(args, name)
-    ]
-    if missing:
-        return part(
-            "card",
-            [],
-            STATUS_SKIPPED,
-            f"there is no board write, because {', '.join(missing)} is absent. A repo "
-            f"with no board runs on labels alone",
-        )
-    card = tracker.board_card(args.issue, args.project_number, args.project_owner)
-    if not card:
-        return part(
-            "card",
-            [],
-            STATUS_SKIPPED,
-            f"issue #{args.issue} has no card on project {args.project_number}",
-        )
-    argv = tracker.card_argv(
-        card, args.project_id, args.status_field_id, args.done_option_id
-    )
-    return part(
-        "card",
-        argv,
-        STATUS_TODO,
-        "writes the card. A repeat of this write changes nothing, so a part-applied "
-        "close is resumable",
     )
 
 
@@ -614,20 +578,8 @@ def main(argv=None):
         "the checkout on disk, so the tracker project takes an argument of its own. "
         "With no value, every command goes to the clone the working directory holds",
     )
-    parser.add_argument(
-        "--project-number",
-        help="the number of the board. Step 7 writes no card unless all five board "
-        "arguments are present. One tracker has no board of this kind, so a repo there "
-        "passes none of the five and step 7 writes no card",
-    )
-    parser.add_argument("--project-owner", help="the owner of the board")
-    parser.add_argument("--project-id", help="the node id of the board")
-    parser.add_argument(
-        "--status-field-id", help="the id of the status field on the board"
-    )
-    parser.add_argument(
-        "--done-option-id", help="the id of the done option in that status field"
-    )
+    # There is no board argument. Step 7 writes no card, so this seam needs no board
+    # coordinate at all (ADR 0054).
     parser.add_argument(
         "--teardown-command",
         help="the command that removes the worktree, with the ids already in it. "
