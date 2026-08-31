@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Architecture review — orchestrator-skills</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script type="module">
+      import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+      mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "loose" });
+    </script>
+    <style>
+      .seam { stroke-dasharray: 4 4; }
+      .mod { border-width: 2px; }
+      .deepbox { background: linear-gradient(135deg, #0f172a, #1e293b); }
+      .mass { background-image: repeating-linear-gradient(45deg, rgba(15,23,42,.08) 0 6px, transparent 6px 12px); }
+    </style>
+  </head>
+  <body class="bg-stone-50 text-slate-900 font-sans">
+    <main class="max-w-5xl mx-auto px-6 py-12 space-y-12">
+
+      <header class="space-y-4">
+        <div>
+          <h1 class="text-3xl font-bold tracking-tight">Architecture review — orchestrator-skills</h1>
+          <p class="text-sm text-slate-600 mt-1">
+            Layer 5 story gate · user story
+            <a class="underline" href="https://github.com/wagnersza/orchestrator-skills/issues/200">#200</a>
+            · commit <code class="font-mono">933cbfa</code> · 2026-08-31
+          </p>
+        </div>
+        <div class="rounded-lg border border-slate-200 bg-white p-4 text-sm">
+          <p class="font-semibold mb-2">Direction read</p>
+          <p class="text-slate-700">
+            The four Python seams: <code class="font-mono">scripts/worker_state.py</code>,
+            <code class="font-mono">scripts/close_item.py</code>,
+            <code class="font-mono">scripts/merge_train.py</code>,
+            <code class="font-mono">scripts/tracker.py</code>.
+            Story #200 moved the transition write into the tick, made a merged pull request the
+            trigger that closes an item, and cut the stall response to one re-prompt.
+          </p>
+        </div>
+        <div class="flex flex-wrap gap-3 text-xs text-slate-600">
+          <span class="inline-flex items-center gap-2"><span class="w-4 h-4 border-2 border-slate-400 bg-white inline-block"></span> module</span>
+          <span class="inline-flex items-center gap-2"><svg width="28" height="8"><line class="seam" x1="0" y1="4" x2="28" y2="4" stroke="#64748b" stroke-width="2"/></svg> seam</span>
+          <span class="inline-flex items-center gap-2"><svg width="28" height="8"><line x1="0" y1="4" x2="28" y2="4" stroke="#dc2626" stroke-width="2"/></svg> duplication / leak</span>
+          <span class="inline-flex items-center gap-2"><span class="w-4 h-4 deepbox inline-block"></span> deep module</span>
+        </div>
+        <div class="rounded-lg border border-slate-200 bg-white p-4">
+          <p class="font-semibold text-sm mb-3">Mass of the four seams, in lines</p>
+          <div class="space-y-2 text-xs font-mono">
+            <div class="flex items-center gap-2"><span class="w-40">worker_state.py</span><div class="h-5 bg-slate-800" style="width:100%"></div><span>1618</span></div>
+            <div class="flex items-center gap-2"><span class="w-40">close_item.py</span><div class="h-5 bg-slate-600" style="width:39%"></div><span>632</span></div>
+            <div class="flex items-center gap-2"><span class="w-40">tracker.py</span><div class="h-5 bg-slate-500" style="width:31%"></div><span>509</span></div>
+            <div class="flex items-center gap-2"><span class="w-40">merge_train.py</span><div class="h-5 bg-slate-400" style="width:26%"></div><span>424</span></div>
+          </div>
+          <p class="text-xs text-slate-500 mt-3">Its test file is 2299 lines, the largest file in the repo.</p>
+        </div>
+      </header>
+
+      <section id="candidates" class="space-y-10">
+
+        <!-- CANDIDATE 1 -->
+        <article class="rounded-xl border-2 border-emerald-200 bg-white p-6 space-y-5">
+          <div class="flex items-start justify-between gap-4">
+            <h2 class="text-xl font-bold">Extract the git module the two seams each rebuilt</h2>
+            <div class="flex gap-2 shrink-0">
+              <span class="px-2 py-1 rounded bg-emerald-100 text-emerald-800 text-xs font-semibold">Strong</span>
+              <span class="px-2 py-1 rounded bg-slate-100 text-slate-700 text-xs font-mono">in-process</span>
+            </div>
+          </div>
+
+          <div class="font-mono text-sm text-slate-700">
+            scripts/close_item.py:93,100,129 · scripts/merge_train.py:93,108,150
+          </div>
+
+          <div class="grid md:grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 p-4">
+              <p class="text-xs font-semibold text-slate-500 mb-2">BEFORE</p>
+              <pre class="mermaid">
+flowchart TB
+  subgraph CI["close_item.py"]
+    A1["GitError :93"]
+    A2["git() :100"]
+    A3["dirty_files() :129"]
+  end
+  subgraph MT["merge_train.py"]
+    B1["GitError :93"]
+    B2["git() :108"]
+    B3["dirty_files() :150"]
+  end
+  A1 -.dup.- B1
+  A2 -.dup.- B2
+  A3 -.dup.- B3
+  classDef dup stroke:#dc2626,stroke-width:2px,fill:#fef2f2;
+  class A1,A2,A3,B1,B2,B3 dup
+              </pre>
+            </div>
+            <div class="rounded-lg border border-slate-200 p-4">
+              <p class="text-xs font-semibold text-slate-500 mb-2">AFTER</p>
+              <div class="space-y-3">
+                <div class="flex gap-3">
+                  <div class="flex-1 mod border-slate-300 rounded p-2 text-center text-xs font-mono bg-white">close_item.py</div>
+                  <div class="flex-1 mod border-slate-300 rounded p-2 text-center text-xs font-mono bg-white">merge_train.py</div>
+                </div>
+                <svg width="100%" height="26" viewBox="0 0 200 26">
+                  <line x1="50" y1="0" x2="100" y2="22" stroke="#64748b" stroke-width="1.5"/>
+                  <line x1="150" y1="0" x2="100" y2="22" stroke="#64748b" stroke-width="1.5"/>
+                  <line class="seam" x1="0" y1="24" x2="200" y2="24" stroke="#64748b" stroke-width="1.5"/>
+                </svg>
+                <div class="deepbox rounded p-4 text-center">
+                  <p class="text-white font-mono text-sm">scripts/git.py</p>
+                  <p class="text-slate-400 text-xs mt-1">GitError · git() · dirty_files()</p>
+                </div>
+              </div>
+              <p class="text-xs text-slate-500 mt-3">One module. Two adapters above the seam, so the seam is real, not hypothetical.</p>
+            </div>
+          </div>
+
+          <div class="grid md:grid-cols-3 gap-4 text-sm">
+            <div><p class="font-semibold text-slate-500 text-xs mb-1">PROBLEM</p><p>Two seams each hold their own <code class="font-mono">git()</code>, <code class="font-mono">GitError</code> and porcelain parser, so a fix to one leaves the other wrong.</p></div>
+            <div><p class="font-semibold text-slate-500 text-xs mb-1">SOLUTION</p><p>One <code class="font-mono">scripts/git.py</code> module. Both seams import it, the way both already import <code class="font-mono">tracker.py</code>.</p></div>
+            <div><p class="font-semibold text-slate-500 text-xs mb-1">WINS</p>
+              <ul class="list-disc list-inside text-slate-700 space-y-0.5">
+                <li>Fix once, fixed in both</li>
+                <li>Porcelain parsed in one place</li>
+                <li>One <code class="font-mono">GitError</code>, not two</li>
+                <li>Tests hit one interface</li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="rounded border border-slate-200 bg-stone-50 p-3 text-sm">
+            <p class="font-semibold text-xs text-slate-500 mb-1">DELETION TEST</p>
+            <p>Delete <code class="font-mono">scripts/git.py</code> and the three functions reappear in two files. Complexity concentrates, so the module earns its keep. The precedent is <a class="underline" href="https://github.com/wagnersza/orchestrator-skills/blob/main/orchestrator/docs/adr/0040-the-tracker-is-one-adapter-behind-both-seams.md">ADR 0040</a>, which put the tracker behind one adapter for exactly this reason.</p>
+          </div>
+        </article>
+
+        <!-- CANDIDATE 2 -->
+        <article class="rounded-xl border-2 border-emerald-200 bg-white p-6 space-y-5">
+          <div class="flex items-start justify-between gap-4">
+            <h2 class="text-xl font-bold">Give the two ADR 0056 files distinct numbers</h2>
+            <div class="flex gap-2 shrink-0">
+              <span class="px-2 py-1 rounded bg-emerald-100 text-emerald-800 text-xs font-semibold">Strong</span>
+              <span class="px-2 py-1 rounded bg-slate-100 text-slate-700 text-xs font-mono">navigability</span>
+            </div>
+          </div>
+
+          <div class="font-mono text-sm text-slate-700">
+            orchestrator/docs/adr/0056-the-adapter-orders-a-multi-write-close.md<br/>
+            orchestrator/docs/adr/0056-the-tick-applies-the-transition-it-computed.md
+          </div>
+
+          <div class="grid md:grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 p-4">
+              <p class="text-xs font-semibold text-slate-500 mb-2">BEFORE — one number, two decisions</p>
+              <pre class="mermaid">
+flowchart LR
+  R1["ADR 0057 says<br/>'ADR 0056'"] --> T
+  R2["ADR 0058 says<br/>'ADR 0056'"] --> T
+  T["0056-the-tick-applies-<br/>the-transition"]
+  A["0056-the-adapter-orders-<br/>a-multi-write-close"]
+  C["CONTEXT.md:213"] --> A
+  T -.collides.- A
+  classDef bad stroke:#dc2626,stroke-width:2px,fill:#fef2f2;
+  class T,A bad
+              </pre>
+            </div>
+            <div class="rounded-lg border border-slate-200 p-4">
+              <p class="text-xs font-semibold text-slate-500 mb-2">AFTER — one number, one decision</p>
+              <div class="space-y-2 text-xs font-mono">
+                <div class="mod border-slate-300 rounded p-2 bg-white">0056-the-adapter-orders-a-multi-write-close.md</div>
+                <div class="mod border-emerald-400 rounded p-2 bg-emerald-50">0059-the-tick-applies-the-transition-it-computed.md</div>
+                <p class="font-sans text-slate-600 pt-2">The lower number keeps its file, because it merged first and <code>CONTEXT.md:213</code> already points at it. The later one renumbers above the highest in use, and its three inbound references move with it.</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="grid md:grid-cols-3 gap-4 text-sm">
+            <div><p class="font-semibold text-slate-500 text-xs mb-1">PROBLEM</p><p>Two children of #200 each took the next free number. "ADR 0056" now names two decisions, and three ADRs use that phrase meaning only one of them.</p></div>
+            <div><p class="font-semibold text-slate-500 text-xs mb-1">SOLUTION</p><p>Renumber the later file to <code class="font-mono">0059</code>, and update its three inbound references.</p></div>
+            <div><p class="font-semibold text-slate-500 text-xs mb-1">WINS</p>
+              <ul class="list-disc list-inside text-slate-700 space-y-0.5">
+                <li>One number, one decision</li>
+                <li>A spoken reference resolves</li>
+                <li>Supersession chain readable</li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="rounded border border-amber-300 bg-amber-50 p-3 text-sm">
+            <p class="font-semibold text-xs text-amber-800 mb-1">WHY NO GATE CAUGHT IT</p>
+            <p><code class="font-mono">scripts/test_links.py</code> checks link targets, and every link uses the full filename. So every link resolves and the suite is green. The collision lives in the number, which no test reads. This is the ADR twin of the version-bump collision <code class="font-mono">CLAUDE.md</code> already warns about.</p>
+          </div>
+        </article>
+
+        <!-- CANDIDATE 3 -->
+        <article class="rounded-xl border-2 border-amber-200 bg-white p-6 space-y-5">
+          <div class="flex items-start justify-between gap-4">
+            <h2 class="text-xl font-bold">Lift the CLI plane out of the watch</h2>
+            <div class="flex gap-2 shrink-0">
+              <span class="px-2 py-1 rounded bg-amber-100 text-amber-800 text-xs font-semibold">Worth exploring</span>
+              <span class="px-2 py-1 rounded bg-slate-100 text-slate-700 text-xs font-mono">in-process</span>
+            </div>
+          </div>
+
+          <div class="font-mono text-sm text-slate-700">
+            scripts/worker_state.py:1318–1614 · main() 197 lines · add_tick_arguments() 85 lines
+          </div>
+
+          <div class="grid md:grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 p-4">
+              <p class="text-xs font-semibold text-slate-500 mb-2">BEFORE — 18% of the module is argument plumbing</p>
+              <div class="space-y-1">
+                <div class="mass border-2 border-slate-300 rounded" style="height:150px">
+                  <p class="text-xs font-mono p-2 text-slate-600">predicates, position, transition<br/>lines 319–1312</p>
+                </div>
+                <div class="border-2 border-red-400 bg-red-50 rounded" style="height:44px">
+                  <p class="text-xs font-mono p-2 text-red-800">CLI plane · lines 1318–1614 (296)</p>
+                </div>
+              </div>
+              <p class="text-xs text-slate-500 mt-2">Three entry points take 8, 8 and 9 parameters. <code class="font-mono">main()</code> hand-threads each one.</p>
+            </div>
+            <div class="rounded-lg border border-slate-200 p-4">
+              <p class="text-xs font-semibold text-slate-500 mb-2">AFTER — one value crosses the seam</p>
+              <div class="space-y-2">
+                <div class="mod border-slate-300 rounded p-2 text-xs font-mono bg-white">scripts/worker_state_cli.py</div>
+                <svg width="100%" height="22" viewBox="0 0 200 22">
+                  <line x1="100" y1="0" x2="100" y2="18" stroke="#64748b" stroke-width="1.5"/>
+                  <line class="seam" x1="0" y1="20" x2="200" y2="20" stroke="#64748b" stroke-width="1.5"/>
+                </svg>
+                <div class="border-2 border-emerald-400 bg-emerald-50 rounded p-2 text-xs font-mono">TickRequest(item, worktree, pattern, rounds, stall_after, required, review, close_flags)</div>
+                <svg width="100%" height="22" viewBox="0 0 200 22">
+                  <line x1="100" y1="0" x2="100" y2="20" stroke="#64748b" stroke-width="1.5"/>
+                </svg>
+                <div class="deepbox rounded p-3 text-center">
+                  <p class="text-white font-mono text-xs">worker_state.py</p>
+                  <p class="text-slate-400 text-xs mt-1">tick(request, tracker)</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="grid md:grid-cols-3 gap-4 text-sm">
+            <div><p class="font-semibold text-slate-500 text-xs mb-1">PROBLEM</p><p>The interface is wide: <code class="font-mono">tick</code> takes 9 parameters and <code class="font-mono">main</code> spends 197 lines threading them. Every new flag touches three signatures.</p></div>
+            <div><p class="font-semibold text-slate-500 text-xs mb-1">SOLUTION</p><p>One frozen value object at the seam, and the argument parsing in its own module.</p></div>
+            <div><p class="font-semibold text-slate-500 text-xs mb-1">WINS</p>
+              <ul class="list-disc list-inside text-slate-700 space-y-0.5">
+                <li>Nine parameters become one</li>
+                <li>A new flag touches one place</li>
+                <li>Tests build a value, not a call</li>
+                <li>Module drops to ~1300 lines</li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="rounded border border-amber-300 bg-amber-50 p-3 text-sm">
+            <p class="font-semibold text-xs text-amber-800 mb-1">WHY NOT STRONG</p>
+            <p>Item <a class="underline" href="https://github.com/wagnersza/orchestrator-skills/issues/184">#184</a> already cut this from fifteen positional arguments to keyword ones, and 2299 lines of test cross the current interface happily. So the pain is real but it is not blocking, and the churn is wide.</p>
+          </div>
+        </article>
+
+        <!-- CANDIDATE 4 -->
+        <article class="rounded-xl border-2 border-slate-200 bg-white p-6 space-y-4">
+          <div class="flex items-start justify-between gap-4">
+            <h2 class="text-xl font-bold">Share the worktree-resolution line inside the watch</h2>
+            <div class="flex gap-2 shrink-0">
+              <span class="px-2 py-1 rounded bg-slate-200 text-slate-700 text-xs font-semibold">Speculative</span>
+            </div>
+          </div>
+          <div class="font-mono text-sm text-slate-700">scripts/worker_state.py:421 · scripts/worker_state.py:960</div>
+          <p class="text-sm"><code class="font-mono">Path(os.path.realpath(worktree))</code> appears twice in one file. A shared helper would replace two lines with two lines plus a definition.</p>
+          <div class="rounded border border-slate-200 bg-stone-50 p-3 text-sm">
+            <p class="font-semibold text-xs text-slate-500 mb-1">DELETION TEST</p>
+            <p>Delete the helper and one line reappears twice. Complexity moves, it does not concentrate. That is a pass-through, so this files nothing.</p>
+          </div>
+        </article>
+
+      </section>
+
+      <section id="top-recommendation" class="rounded-xl deepbox p-6 text-white space-y-3">
+        <h2 class="text-xl font-bold">Top recommendation</h2>
+        <p class="text-slate-200">
+          Start with <span class="font-semibold text-white">the two ADR 0056 files</span>. It is the smallest
+          change on the page, it is the only finding that is already wrong on <code class="font-mono">main</code>
+          rather than merely awkward, and it decays: every ADR written from here on inherits an ambiguous
+          predecessor. No gate catches it, because the collision is in the number and the tests read the target.
+        </p>
+        <p class="text-slate-200">
+          Then <span class="font-semibold text-white">extract <code class="font-mono">scripts/git.py</code></span>.
+          Two real adapters sit above that seam today, and ADR 0040 already set the precedent for the tracker.
+        </p>
+        <p class="text-slate-400 text-sm">
+          Layer 5 is advisory. It holds no exit code, so nothing here stops a merge
+          (<a class="underline" href="https://github.com/wagnersza/orchestrator-skills/blob/main/orchestrator/docs/adr/0033-the-story-gate-is-advisory.md">ADR 0033</a>).
+        </p>
+      </section>
+
+    </main>
+  </body>
+</html>
