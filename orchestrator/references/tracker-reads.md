@@ -146,9 +146,9 @@ tick read one item the same way.
 
 ## Whether a merge request is merged, and the commit it landed as
 
-The two facts step 4 of a **Close transaction** gates on. Where the flows need it:
-**Steps 4 to 8** and **Merge the queue**. `scripts/close_item.py` runs this read through
-the **Tracker adapter**, and it prints the same command in its plan
+The two facts step 4 of a **Close transaction** gates on. Where the flows need it: **On the
+tick**, which is where that transaction runs. `scripts/close_item.py` makes this read
+through the **Tracker adapter**, and it prints the same command in its plan
 ([`../CONTEXT.md`](../CONTEXT.md), **Tracker adapter**).
 
 ```bash

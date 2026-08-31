@@ -47,28 +47,29 @@ _Avoid_: unattended mode, skip-permissions.
 An optional review of a worker's output by a second worker running a **different-vendor** model (e.g. implement with opus-5, review with gpt-5.6). Config names the review model + effort explicitly (`models.review`) and the orchestrator asserts its vendor differs from the impl model's. The review worker runs on the impl branch (own worktree) and reads the diff/MR against the acceptance criteria. Its prompt asks for **coverage, not filtering** — a "only high-severity" bar makes every current model silently drop real bugs.
 
 **Review round**:
-One cycle of adversarial review: the review worker posts a verdict (approve / request-changes + findings). On **request-changes**, the orchestrator re-prompts the **original impl worker** with the findings to fix, then re-reviews. Bounded at **3 rounds**. After approve — or after the 3rd round regardless — the orchestrator gathers evidence and moves the item to **human review**. The human reviews after the fixes, and the decision to merge stays theirs. Where the human then asks this session to merge and close, the orchestrator carries out that decision as a **Close transaction**. No worker merges, and no session merges unasked (`docs/adr/0016-the-orchestrator-merges-when-asked.md`).
+One cycle of adversarial review: the review worker posts a verdict (approve / request-changes + findings). On **request-changes**, the orchestrator re-prompts the **original impl worker** with the findings to fix, then re-reviews. Bounded at **3 rounds**. After approve — or after the 3rd round regardless — the orchestrator gathers evidence and moves the item to **human review**. The human reviews after the fixes, and merge stays a human step. The maintainer merges on the tracker, and that merge is what fires the **Close transaction** on the next tick. No worker merges, no session merges, and nothing is typed ([`docs/adr/0057-the-merge-is-the-second-act.md`](docs/adr/0057-the-merge-is-the-second-act.md)).
 
 **Close transaction**:
-The eight steps that finish a **Work item**, in one fixed order, after the human asks for them:
+The five steps that finish a **Work item**, in one fixed order, once its pull request is merged. They keep the numbers 4 to 8 they held when the transaction had eight, because `scripts/close_item.py` prints those numbers in every plan:
 
-1. Resolve conflicts against the default branch.
-2. Push the mergeable branch.
-3. Merge the PR.
 4. Verify the merge landed.
 5. Pull the merge into the local default branch.
 6. Verify the worktree is clean.
 7. Flip the **Work-state labels** and close the item, as one step.
 8. Remove the worktree.
 
-The eight split in two, by whether the step needs judgement. **Steps 1 to 3 need judgement, so they belong to prose.** No script reads two versions of a change and decides what the merged file means. Step 1 invokes the **resolving-merge-conflicts** skill. **Steps 4 to 8 need no judgement, so they belong to the seam.** They are predicates, a pull, two tracker writes and a passed-in teardown command, which makes them an ordering and nothing else. One seam owns that ordering, because ordering is what code holds perfectly and prose holds poorly. That seam is `scripts/close_item.py`. This entry names it before it exists: the term is declared here, and the file lands with the flow change that consumes it.
+**Steps 1 to 3 left the transaction, and the maintainer holds them.** They were resolve the conflicts against the default branch, push the mergeable branch, and merge the pull request. All three need judgement, and no script reads two versions of a change and decides what the merged file means. The maintainer does all three on the tracker instead. A conflict is visible in the pull request, where the tracker already shows it. **resolving-merge-conflicts** stays a verb the maintainer asks for ([`docs/adr/0057-the-merge-is-the-second-act.md`](docs/adr/0057-the-merge-is-the-second-act.md)).
 
-**The actor for all eight steps is the orchestrator session**, and never a **Worker**. A worker can be idle or out of context when the human asks, and its worktree is what step 8 removes. The seam refuses rather than warns. An unmerged PR and a dirty worktree each stop the transaction with a distinct exit code. A refused transaction leaves the item at the review state. Nothing destructive happens by default. Rationale, the rejected alternatives, and the risk accepted for the actor: `docs/adr/0015-close-is-a-deterministic-transaction.md` and `docs/adr/0016-the-orchestrator-merges-when-asked.md`.
+**The five that stay need no judgement, so they belong to the seam.** They are two predicates, a pull, two tracker writes and a passed-in teardown command, which makes them an ordering and nothing else. One seam owns that ordering, because ordering is what code holds perfectly and prose holds poorly. That seam is `scripts/close_item.py`.
 
-**A Merge train loops this transaction, and changes no step of it.** The eight steps and
-their order are the same whether the ask names one item or ten, teardown
-included. So a train adds one caller and no second merge path
-([`docs/adr/0037-the-merge-queue-is-an-ordered-train.md`](docs/adr/0037-the-merge-queue-is-an-ordered-train.md)).
+**The actor for all five steps is the tick of an Item automation**, and never a session and never a **Worker**. **The trigger is a merged pull request, and no verb and no label authorises it.** The **Worker watch** reads the branch off the worktree it watches, then asks the **Tracker adapter** for the pull request opened from that branch. Where the answer reads `MERGED`, it runs the five steps in its own process. The seam refuses rather than warns. An unmerged pull request and a dirty worktree each stop the transaction with a distinct exit code. **A refused transaction writes `needs-human` plus one comment that names what stopped it**, so the item stops rather than retrying every minute. Nothing is removed without a teardown command. Rationale, the rejected alternatives, and the risk accepted for an unattended actor: `docs/adr/0015-close-is-a-deterministic-transaction.md` and [`docs/adr/0057-the-merge-is-the-second-act.md`](docs/adr/0057-the-merge-is-the-second-act.md).
+
+**A Merge train loops this transaction, and changes no step of it.** The five steps and
+their order are the same whether one merge fires one close or a train runs ten, teardown
+included. So a train adds one caller and no second merge path. **No tick calls a train**,
+and it stays a verb the maintainer asks for
+([`docs/adr/0037-the-merge-queue-is-an-ordered-train.md`](docs/adr/0037-the-merge-queue-is-an-ordered-train.md),
+narrowed by [`docs/adr/0057-the-merge-is-the-second-act.md`](docs/adr/0057-the-merge-is-the-second-act.md)).
 _Avoid_: teardown (that names step 8 alone), close flow, closing sequence, wrap-up.
 
 **prompt-improver**:
@@ -99,7 +100,7 @@ One collision is real: the `ponytail` shortest-explanation rule conflicts with t
 _Avoid_: documentation, docs, copy, text (all four are broader than the four classes).
 
 **resolving-merge-conflicts**:
-The external skill that owns **all** procedure for an in-progress merge or rebase conflict. It holds how to read the current state, how to find the intent behind each side, how to resolve a hunk, and which project checks to run afterwards. A dependency, not vendored — it ships inside `mattpocock-skills` (<https://github.com/mattpocock/skills>), so the plugin this repo already declares provides it. There is nothing separate to install. This repo states only *when* to invoke it: step 1 of a **Close transaction**, in the orchestrator session, inside the item's worktree, before the merge. It copies no step of the procedure. Same posture as **prompt-improver** and **simple-english**, for the same reason: a copied rule set drifts from the upstream that maintains it. Install shapes and the check: `references/requirements.md`.
+The external skill that owns **all** procedure for an in-progress merge or rebase conflict. It holds how to read the current state, how to find the intent behind each side, how to resolve a hunk, and which project checks to run afterwards. A dependency, not vendored — it ships inside `mattpocock-skills` (<https://github.com/mattpocock/skills>), so the plugin this repo already declares provides it. There is nothing separate to install. This repo states only *when* to invoke it: **where the maintainer asks for it**, in the orchestrator session, inside the item's worktree. No flow reaches it by itself, because the merge that used to need it is the maintainer's own act now ([`docs/adr/0057-the-merge-is-the-second-act.md`](docs/adr/0057-the-merge-is-the-second-act.md)). It copies no step of the procedure. Same posture as **prompt-improver** and **simple-english**, for the same reason: a copied rule set drifts from the upstream that maintains it. Install shapes and the check: `references/requirements.md`.
 _Avoid_: conflict resolution, merge resolution (both name the job, not the dependency), git merge skill.
 
 **Browser surface**:
@@ -209,7 +210,7 @@ Where work items live (GitHub / GitLab / local markdown). The orchestrator does 
 _Avoid_: issue tracker, board (when the layer is meant).
 
 **Tracker adapter**:
-`scripts/tracker.py` — the one module that holds every tracker command the two Python seams run or print. One class, and a tracker is four values on it: the CLI name, the host, the repository and the fixture. Where two trackers disagree about a command, the branch is inside the one method that differs. So a new tracker lands here and in no seam. The commands are the verified ones `references/tracker-reads.md` holds as prose, and a read is checked before it is parsed in both places. It receives every per-repo value as an argument and reads no configuration file, which is what keeps it separate from the **Tracker** entry above. One fixture format serves every test under `scripts/`: one record per **Work item**, and one per pull request. **A difference between two trackers can also be a count of commands.** One tracker closes a **Work item** and records the reason in the same command, and the other has no reason flag at all. **So the adapter answers the writes that close an item and the order they run in.** A caller iterates that answer, and it assembles no order of its own. The order matters, because an item that closes first closes with no reason on it. A caller reads no CLI name either (`docs/adr/0056-the-adapter-orders-a-multi-write-close.md`). Rationale, and the deferral it reverses: `docs/adr/0040-the-tracker-is-one-adapter-behind-both-seams.md`.
+`scripts/tracker.py` — the one module that holds every tracker command the two Python seams run or print. One class, and a tracker is four values on it: the CLI name, the host, the repository and the fixture. Where two trackers disagree about a command, the branch is inside the one method that differs. So a new tracker lands here and in no seam. The commands are the verified ones `references/tracker-reads.md` holds as prose, and a read is checked before it is parsed in both places. It receives every per-repo value as an argument and reads no configuration file, which is what keeps it separate from the **Tracker** entry above. One fixture format serves every test under `scripts/`: one record per **Work item**, and one per pull request. A pull request record carries a `head` key. One read asks for the pull request opened from a branch, because a tick holds the branch and never a number. **A difference between two trackers can also be a count of commands.** One tracker closes a **Work item** and records the reason in the same command, and the other has no reason flag at all. **So the adapter answers the writes that close an item and the order they run in.** A caller iterates that answer, and it assembles no order of its own. The order matters, because an item that closes first closes with no reason on it. A caller reads no CLI name either (`docs/adr/0056-the-adapter-orders-a-multi-write-close.md`). Rationale, and the deferral it reverses: `docs/adr/0040-the-tracker-is-one-adapter-behind-both-seams.md`.
 _Avoid_: tracker client, tracker wrapper, tracker layer (each one suggests a stack this deliberately is not), CLI abstraction.
 
 **Work item**:
@@ -308,26 +309,30 @@ _Avoid_: file list, scope, footprint, blast radius (the last one already stands 
 condition**), affected files.
 
 **Merge queue**:
-The set of open work items the maintainer asked to merge. **The ask is typed, and it names
-the items.** No label records it, because a label restates an approval the maintainer
-already gave. The set is read fresh at the moment a **Merge train** starts,
-which is the rule the **Ready queue** already takes, so nothing holds it between reads.
-**It is a set and not a run**, because the order over it belongs to the train. An empty
-queue is the resting state. A later item makes the tick read a merged pull request instead
-([`docs/adr/0053-one-work-state-label-and-a-computed-position.md`](docs/adr/0053-one-work-state-label-and-a-computed-position.md)).
+The set of open work items the maintainer asked to order and test-merge as one run. **The
+ask is typed, and it names the items.** No label records it, because a label restates an
+approval the maintainer already gave. The set is read fresh at the moment a **Merge train**
+starts, which is the rule the **Ready queue** already takes, so nothing holds it between
+reads. **It is a set and not a run**, because the order over it belongs to the train. An
+empty queue is the resting state, and it is now the usual one. One merge closes one item on
+the next tick, so no queue forms unless the maintainer asks for a train
+([`docs/adr/0057-the-merge-is-the-second-act.md`](docs/adr/0057-the-merge-is-the-second-act.md)).
 _Avoid_: merge backlog, ready-to-merge list, merge candidates, close queue.
 
 **Merge train**:
 One ordered run over a **Merge queue**. It resolves the order from a seam,
-`scripts/merge_train.py`, then runs one full **Close transaction** per item in that order,
-teardown included. So a merged item leaves no worktree and no schedule behind, because step
-8 of each transaction is that teardown. **A branch that conflicts is parked, and the train
-keeps moving**: the session drops that item back to the review state, comments the
-conflicting paths on the work item, and carries on with the next branch. Nothing unattended
-decides what a merged file means. The three ordering steps, the park rule and the seam's
-contract: [`references/merge-train.md`](references/merge-train.md). Rationale, the rejected
+`scripts/merge_train.py`, and it hands the maintainer that order. **The maintainer merges
+in it, and each merge closes its own item on the next tick.** So a merged item leaves no
+worktree and no schedule behind, because step 8 of each **Close transaction** is that
+teardown. **A branch that conflicts is parked, and the train keeps moving**: the session
+reports the conflicting paths on the work item and carries on with the next branch. Nothing
+unattended decides what a merged file means. **No tick calls a train.** The whole run exists
+for one case: a maintainer who wants ten branches ordered and test-merged before they merge
+any of them. The three ordering steps, the park rule and the seam's contract:
+[`references/merge-train.md`](references/merge-train.md). Rationale, the rejected
 alternatives and the accepted risk:
-[`docs/adr/0037-the-merge-queue-is-an-ordered-train.md`](docs/adr/0037-the-merge-queue-is-an-ordered-train.md).
+[`docs/adr/0037-the-merge-queue-is-an-ordered-train.md`](docs/adr/0037-the-merge-queue-is-an-ordered-train.md),
+narrowed by [`docs/adr/0057-the-merge-is-the-second-act.md`](docs/adr/0057-the-merge-is-the-second-act.md).
 _Avoid_: merge queue (that names the set, not the run), batch merge, auto-merge, merge
 sequence.
 
@@ -392,8 +397,11 @@ The rule, in this order:
 3. Otherwise the item is in implementation.
 
 **Human review is a work state, and never a position a worker owns.** So `to-review`
-answers first, and nothing restates it. No transition is due there: the maintainer is
-reading the pull request, and every read of that branch is a quiet tick.
+answers first, and nothing restates it. **One transition is due there, and a merged pull
+request is the fact behind it.** The tick reads the branch off the worktree and asks for the
+pull request opened from it. An open pull request is a quiet tick, and a branch with no pull
+request is a quiet tick. A merged one is a whole **Close transaction**
+([`docs/adr/0057-the-merge-is-the-second-act.md`](docs/adr/0057-the-merge-is-the-second-act.md)).
 
 **Every fact it reads is a fact the tick already read.** Those facts are the **Work-state
 labels**, the `Verdict:` comment list, and when the **Checklist** file was last written.
@@ -408,8 +416,9 @@ label first and stays quiet, whatever the other facts say. So a paused item cost
 cheap read a minute and moves nowhere.
 
 **Human review is also where an applied transition stops repeating.** A tick that writes
-the review state leaves the item in the one position no transition is due in. So the next
-tick reads that label, stays quiet, and no suppression window is needed
+the review state leaves the item in a position whose one transition waits on the
+maintainer's own merge. So the next tick reads that label, reads no merge, stays quiet, and
+no suppression window is needed
 ([`docs/adr/0056-the-tick-applies-the-transition-it-computed.md`](docs/adr/0056-the-tick-applies-the-transition-it-computed.md)).
 
 **A review round always has a verdict behind it.** That verdict is what computes the
@@ -426,22 +435,25 @@ One schedule per live **Work item**, owned by the **Tool** rather than by a sess
 
 **No agent runs on a tick.** The precheck exits non-zero on every path, so every run records as skipped at no token cost. The schedule's own prompt and provider stay inert. So the loop spends no tokens at all between the spawn of a worker and the maintainer's own reading of the pull request.
 
-**It acts on one thing, and one only: the work-state label of the item it watches.** It composes no prompt, kills no process, moves no card, merges nothing and spawns nothing. **At most one transition lands per run**, which is what stops a wrong computation cascading inside one minute. **The automation decides when, and the seam decides what** — the same split as a **Close transaction**, applied again. So every other destructive act stays in a session a human can interrupt. One per item, so a leaked schedule names the item it leaked from, and five siblings are five observed items. **One per item also means the schedule follows the live worker.** A session repoints the precheck when it spawns the next worker. So a review round watches the reviewer's worktree, and a fix round watches the implementation worktree again (`docs/adr/0026-the-automation-follows-the-live-worker.md`). Removal folds into step 8 of a **Close transaction**, through the teardown command the session passes in, which means a refused transaction leaves the item observed. A tool with no automation surface skips the tick and the spawn works unchanged. Rationale, the schedule that replaces the blocking watch, the `dead` and `stalled` split, and the rejected alternatives: `docs/adr/0022-item-automation-replaces-the-blocking-watch.md`.
+**It acts on two things: the work-state label of the item it watches, and the close of that item once its pull request merges.** It composes no prompt, kills no process, moves no card, merges nothing and spawns nothing. **At most one transition lands per run**, which is what stops a wrong computation cascading inside one minute. **The automation decides when, and the seam decides what** — the same split as a **Close transaction**, applied again. One per item, so a leaked schedule names the item it leaked from, and five siblings are five observed items. **One per item also means the schedule follows the live worker.** A session repoints the precheck when it spawns the next worker. So a review round watches the reviewer's worktree, and a fix round watches the implementation worktree again (`docs/adr/0026-the-automation-follows-the-live-worker.md`). Removal is step 8 of the **Close transaction** the tick itself runs, through the teardown command the spawn passes into the precheck. So a refused transaction leaves the item observed. A tool with no automation surface skips the tick and the spawn works unchanged. Rationale, the schedule that replaces the blocking watch, the `dead` and `stalled` split, and the rejected alternatives: `docs/adr/0022-item-automation-replaces-the-blocking-watch.md`.
 
-**A tick in human review is quiet, and no outcome answers a Merge queue.** The maintainer
-reads the pull request there and then types the ask, so nothing on the tracker records it.
-**The tick still merges nothing, moves no card and spawns nothing**
-([`docs/adr/0053-one-work-state-label-and-a-computed-position.md`](docs/adr/0053-one-work-state-label-and-a-computed-position.md)).
+**A tick in human review reads the pull request for the item's branch.** A merged one closes
+the item, removes the worktree and removes the schedule. So the maintainer merges and types
+nothing, and no label records the ask. **The tick still merges nothing, moves no card and
+spawns nothing**
+([`docs/adr/0057-the-merge-is-the-second-act.md`](docs/adr/0057-the-merge-is-the-second-act.md)).
 _Avoid_: cron job, watcher, daemon, poller (each names a mechanism rather than the unit), run automation (`Run` is not a term this repo defines).
 
 **Worker watch**:
-The seam that observes a live **Worker**'s own work product and answers whether something needs a decision now. It is not a worker — it has no **Harness** and no **Model** — and it is not the orchestrator, because it composes nothing. Asked once per tick, it reads three facts on the file system plus the work item's labels and comments. It answers one outcome. The printed line names which one fired. It composes no prompt, kills no process, moves no card and spawns nothing, so every destructive act but one stays in a session a human can interrupt. It holds no state that changes an answer and it writes no file, which is what makes a restart after each re-prompt free.
+The seam that observes a live **Worker**'s own work product and answers whether something needs a decision now. It is not a worker — it has no **Harness** and no **Model** — and it is not the orchestrator, because it composes nothing. Asked once per tick, it reads three facts on the file system plus the work item's labels and comments. In human review it reads one fact more, and that is the pull request opened from the item's branch. It answers one outcome. The printed line names which one fired. It composes no prompt, kills no process, moves no card and spawns nothing, so every destructive act but the close stays in a session a human can interrupt. It holds no state that changes an answer and it writes no file, which is what makes a restart after each re-prompt free.
 
-**The one thing it writes is the transition it computed.** One function inside the seam owns every **Work-state label** swap, and it runs in the process that read those labels. The removals and the addition are one tracker write, so the two can never land apart. **At most one transition lands per run.** Three outcomes carry a transition, and every other outcome refuses and leaves the item where it is (`docs/adr/0056-the-tick-applies-the-transition-it-computed.md`).
+**The one thing it writes is the transition it computed.** One function inside the seam owns every **Work-state label** swap, and it runs in the process that read those labels. The removals and the addition are one tracker write, so the two can never land apart. **At most one transition lands per run.** Three outcomes carry a label swap, and every other outcome refuses and leaves the item where it is (`docs/adr/0056-the-tick-applies-the-transition-it-computed.md`).
+
+**One outcome carries a whole Close transaction instead of a label swap, and it is `merged`.** The seam imports `scripts/close_item.py` and runs steps 4 to 8 in its own process. So one **Tracker adapter** serves both seams, and one read of the item serves both. That close is the one destructive act that left a session a human can interrupt, and two refusals in that seam stand in front of it ([`docs/adr/0057-the-merge-is-the-second-act.md`](docs/adr/0057-the-merge-is-the-second-act.md)).
 
 **Two subcommands read one plan.** `phase` computes and writes nothing at all, so a maintainer dry-runs one item against a live tracker. `tick` computes through the same code path and then applies. That is the plan-and-execute split a **Close transaction** already holds, applied a second time.
 
-**The watch decides when and what, and the session decides everything else** — spawns, prompts, merges and reports. Ordering is what code holds perfectly and prose holds poorly, so the watch is a seam, `scripts/worker_state.py`. The seam counts nothing. The session reads the stall count from the **Tracker** and restates it in its report (`docs/adr/0023-the-stall-count-is-a-tracker-comment.md`). One **Item automation** per spawn, impl and review alike, because an opt-in observer is off exactly when the maintainer forgets. Rationale, the rejected alternatives, the reviewer accepted risk, and the context reset that goes with a re-prompt: `docs/adr/0018-the-worker-watch-is-a-stateless-seam.md`. The same seam answers readiness for every **Tool** with one check: `docs/adr/0019-readiness-is-a-tool-agnostic-process-check.md`.
+**The watch decides when and what, and the session decides everything else** — spawns, prompts and reports. The merge is the maintainer's own act, and no session and no tick makes one. Ordering is what code holds perfectly and prose holds poorly, so the watch is a seam, `scripts/worker_state.py`. The seam counts nothing. The session reads the stall count from the **Tracker** and restates it in its report (`docs/adr/0023-the-stall-count-is-a-tracker-comment.md`). One **Item automation** per spawn, impl and review alike, because an opt-in observer is off exactly when the maintainer forgets. Rationale, the rejected alternatives, the reviewer accepted risk, and the context reset that goes with a re-prompt: `docs/adr/0018-the-worker-watch-is-a-stateless-seam.md`. The same seam answers readiness for every **Tool** with one check: `docs/adr/0019-readiness-is-a-tool-agnostic-process-check.md`.
 
 **The blocking poll loop has retired, and the seam has not.** A loop in a background process of the orchestrator's own shell dies with that shell. It reports nothing when it does. So the trigger is an **Item automation**, and the seam is asked once per tick as a predicate. The exit-code contract survives, the statelessness survives, and the split above survives. What retired is the `watch` subcommand, with its bounded maximum wait and its per-role completion flag. The stall window survives as an argument to the predicate. `docs/adr/0022-item-automation-replaces-the-blocking-watch.md` narrows ADR 0018 to that extent and no further.
 _Avoid_: watchdog, monitor, supervisor, liveness probe (each implies restart authority this thing does not have).
