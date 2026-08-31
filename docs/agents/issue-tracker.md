@@ -41,8 +41,9 @@ where it refuses.
 
 **Where an item sits inside an owned run is computed, and no label records it.** The
 **Position** entry of
-[`orchestrator/CONTEXT.md`](../../orchestrator/CONTEXT.md) holds that rule, and the
-family that cached the same answer is gone.
+[`orchestrator/CONTEXT.md`](../../orchestrator/CONTEXT.md) holds that rule, and
+[`orchestrator/docs/adr/0053-one-work-state-label-and-a-computed-position.md`](../../orchestrator/docs/adr/0053-one-work-state-label-and-a-computed-position.md)
+records why the family that cached the same answer is gone.
 
 Triage roles (`needs-triage`, `needs-info`, `ready-for-human`, `wontfix`) are a
 separate vocabulary — see `triage-labels.md`. The layer 5 story gate writes two more, and
