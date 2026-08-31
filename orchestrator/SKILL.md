@@ -36,7 +36,8 @@ in the target repo. **Before anything else, load it.** If it's missing, run
 Work-state labels and the tracker CLI come from `docs/agents/issue-tracker.md`
 (written by `/setup-matt-pocock-skills`), **not** the orchestrator config. If that
 file is missing, run `/setup-matt-pocock-skills` first. That file also owns the
-**project board** coordinates — see [Board status](#board-status).
+**project board** coordinates, and there are two of them — see
+[Board status](#board-status).
 
 **The reads every flow makes come from
 [`references/tracker-reads.md`](references/tracker-reads.md).** That file holds one read
@@ -232,26 +233,26 @@ This resolution is independent of the other two. Verb → skill stays
 
 ## Board status
 
-Where the tracker config has a **`## Project board`** section, every work item is
-also a card with a `Status` field. **Labels are the source of truth; `Status` is
-derived from them** — never a second state machine you advance separately. The
-derivation table, the board coordinates (project number, `Status` field id, option
-ids), and the two `gh` calls all live in that section of
+Where the tracker config has a **`## Project board`** section, every work item is also a
+card. **The board is an input, and nothing writes it.** One question is asked of it: is
+this item's card in the start column. That is the second fact of a
+[ready queue](#what-next--pick-the-next-work) entry, beside the `ready-for-agent` label.
+The two coordinates, the name of that column and the one read live in that section of
 `docs/agents/issue-tracker.md`; read them from there, never from memory. Rationale:
-[`docs/adr/0009-labels-drive-board-status.md`](docs/adr/0009-labels-drive-board-status.md).
+[`docs/adr/0054-the-board-is-an-input-not-a-mirror.md`](docs/adr/0054-the-board-is-an-input-not-a-mirror.md).
 
-Two rules:
+Three rules:
 
-- **Write the card wherever you write a label** — and nowhere else. Three places in
-  this skill: the claim at spawn (step 5), the wake that hands the item to human review
-  ([On the wake](#on-the-wake--one-response-per-outcome)), and close (step 2). Plus the
-  reconcile below. **This session writes all three.** A worker writes no card.
-- **A missing `## Project board` section means every board write is a no-op.** A
-  repo with no board is a supported configuration — skip the write silently and
-  carry on with labels. Never fail a spawn or a close over the board.
-
-The write is idempotent, so re-writing a value a card already holds is free. An
-issue with no card resolves to an empty item id: skip it, don't fail.
+- **Write no card, anywhere.** No flow below moves one, and no seam takes a board
+  coordinate. A card write was a projection of the label, and it had seven writers that
+  each could forget it. **A closed item reaches `Done` through the board's own built-in
+  item closed to Done workflow**, which the maintainer enables in the project settings.
+- **A drag is intent, in every column.** Nothing overwrites a card, so a card stays where
+  the maintainer put it. A take-back is the maintainer removing `ready-for-agent`, or
+  writing `needs-human` plus a comment that says why.
+- **A missing `## Project board` section means the board read asks nothing.** A repo with
+  no board is a supported configuration, and the label alone is the whole gate. Never fail
+  a spawn or a close over the board.
 
 ## Right model for the job
 
@@ -311,21 +312,8 @@ start in parallel), then fill to at least 5 with the soonest-unblocked blocked
 items (fewest open deps first), noting what each waits on. Offer to spawn a worker
 for whichever the user picks.
 
-**Reconcile the board here.** This read is the one moment every open item's labels
-*and* open-blocker count are already in hand — which is exactly what the
-`Backlog`/`Ready` split needs — so it's where board drift gets repaired. There is no
-separate sync command. For each open item, derive `Status` from the table in
-`issue-tracker.md`'s [`## Project board`](../docs/agents/issue-tracker.md#project-board)
-section and write it; the write is idempotent, so a consistent board costs nothing
-and no card moves. Report only the cards that **changed** (`#4 In progress → In
-review`), one line, after the queue — an unchanged board says nothing. Skip the
-whole pass if the section is absent, and never let a board error block the queue
-answer: the queue is the deliverable, the reconcile is a side effect.
-
-The reconcile covers **every open item**, not just the ready ones — an item sitting
-in `in-progress` or `to-review` still gets its card confirmed, and a closed item
-already reached `Done` at close. A `user-story` parent's card follows the same table
-against its own labels and state, per that section.
+**This read writes nothing to the board.** There is no reconcile pass and no sync command,
+because the board is an input ([Board status](#board-status)).
 
 **Report every item at `to-review` beside the ready queue.** This pass already holds every
 open item's labels, so that list costs no second read. **No label records a merge ask.** The
@@ -408,16 +396,13 @@ and when the user names work with no number at all. The phrases that reach it ar
    prompt. Then **gate on readiness** before any prompt — see
    [Gate readiness before the first prompt](#gate-readiness-before-the-first-prompt).
 5. **Claim the item first** — swap `ready-for-agent` → `in-progress` on the
-   tracker (labels from `issue-tracker.md`), before prompting, so the board
-   reflects the worker and "what next?" won't hand it out twice. **One label
-   swap, and one family**, so nothing can stack. Then **move its card to
-   `In progress`** ([Board status](#board-status)) — same step, so the label and
-   the card never disagree. Where the item sits inside the run is computed from
-   facts, so no second label is written here
+   tracker (labels from `issue-tracker.md`), before prompting, so "what next?"
+   won't hand it out twice. **One label swap, and one family**, so nothing can
+   stack. **Move no card**, because the board is an input
+   ([Board status](#board-status)). Where the item sits inside the run is computed
+   from facts, so no second label is written here
    ([`docs/adr/0053-one-work-state-label-and-a-computed-position.md`](docs/adr/0053-one-work-state-label-and-a-computed-position.md)).
-   Apply any parent-promotion the tracker conventions
-   define (idempotent) — including the parent's own card, which sits in
-   `In progress` while any child does.
+   Apply any parent-promotion the tracker conventions define (idempotent).
 6. **Write the checklist + deliver the prompt** — see below.
 7. **Follow-along panel** (op 7, if the tool supports it) — open the work item as
    a tab inside the worker's worktree.
@@ -638,10 +623,9 @@ proof + full suite — unit tests alone are not enough); post the review note on
 **work item** (What to review / Main changes / How to test / Evidence). **That note is
 the worker's last act.**
 
-**The worker writes no work-state label and moves no board card.** So the prompt hands
-it no `gh` command for either one. This session writes the review state itself, and it
-moves the card in the same step
-([On the wake](#on-the-wake--one-response-per-outcome)). A worker cannot
+**The worker writes no work-state label, and neither does anything else about the
+board.** So the prompt hands it no `gh` command at all. This session writes the review
+state itself ([On the wake](#on-the-wake--one-response-per-outcome)). A worker cannot
 see that moment. Whether review is on, and which round the item is on, are facts this
 session resolves. Rationale:
 [`docs/adr/0025-the-session-writes-the-review-state.md`](docs/adr/0025-the-session-writes-the-review-state.md).
@@ -825,10 +809,10 @@ run its row, and report per [Reporting to the user](#reporting-to-the-user).
 
 **Three rows write a label, and it is one swap in one call.** The work-state family has
 four values and it never stacks, so a transition removes the old value and adds the new one
-in the same `gh issue edit`. It moves the card in the same step, because the card derives
-from that label ([Board status](#board-status)). That write is what acknowledges the wake,
-and it stops a repeat fire on the same fact a minute later. **This session writes both, and
-the worker writes neither** — its last act is the review note. Rationale:
+in the same `gh issue edit`. **It moves no card**, because the board is an input
+([Board status](#board-status)). That write is what acknowledges the wake,
+and it stops a repeat fire on the same fact a minute later. **This session writes the
+label, and the worker writes none** — its last act is the review note. Rationale:
 [`docs/adr/0025-the-session-writes-the-review-state.md`](docs/adr/0025-the-session-writes-the-review-state.md).
 
 **Five rows write no label at all**, so nothing acknowledges those wakes and `--back-off`
@@ -836,11 +820,11 @@ is what stops a repeat every minute.
 
 | Outcome | Write first | Then |
 |---|---|---|
-| `implementation-complete` | **On a leaf item, review on**: nothing, because a worker still owns the item. **Review off**: `in-progress` → `to-review` in one call, **and move the card to `In review`**. **On a `user-story` parent**: nothing yet, because the layer 5 story gate runs before that swap. `--back-off` stops a repeat until it does | **Leaf, review on**: [Adversarial review](#adversarial-review-when-configs-reviewenabled) steps 1 and 2. Step 1 also **repoints the precheck** at the reviewer's worktree, with the review harness's process pattern — below. **Leaf, review off**: this wake is the hand-off to a human. Report the finish, the label you wrote, and the review you can still offer, in one line. **Parent**: [The story proof](#the-story-proof), steps 4 to 7. Read the evidence note and the spec PR, run [The layer 5 story gate](#the-layer-5-story-gate), then swap the label in one call. **No adversarial review round runs on the parent** |
+| `implementation-complete` | **On a leaf item, review on**: nothing, because a worker still owns the item. **Review off**: `in-progress` → `to-review` in one call. **On a `user-story` parent**: nothing yet, because the layer 5 story gate runs before that swap. `--back-off` stops a repeat until it does | **Leaf, review on**: [Adversarial review](#adversarial-review-when-configs-reviewenabled) steps 1 and 2. Step 1 also **repoints the precheck** at the reviewer's worktree, with the review harness's process pattern — below. **Leaf, review off**: this wake is the hand-off to a human. Report the finish, the label you wrote, and the review you can still offer, in one line. **Parent**: [The story proof](#the-story-proof), steps 4 to 7. Read the evidence note and the spec PR, run [The layer 5 story gate](#the-layer-5-story-gate), then swap the label in one call. **No adversarial review round runs on the parent** |
 | `gates-unproven` | nothing, because the item stays where it is | Reset the context and re-prompt — below. The line names one of four causes, so quote that cause and name the command to run again. Never move the item to review on this line |
-| `verdict-approve` | `in-progress` → `to-review` in one call, **and move the card to `In review`** | [Adversarial review](#adversarial-review-when-configs-reviewenabled) step 4 — gather evidence and hand the item to human review |
+| `verdict-approve` | `in-progress` → `to-review` in one call | [Adversarial review](#adversarial-review-when-configs-reviewenabled) step 4 — gather evidence and hand the item to human review |
 | `verdict-request-changes` | nothing, because a fix round is still the same worker's work | [Adversarial review](#adversarial-review-when-configs-reviewenabled) step 3, at the round the line names. That step also **repoints the precheck** back at the implementation worktree, with the implementation harness's pattern — below |
-| `rounds-exhausted` | `in-progress` → `to-review` in one call, **and move the card to `In review`** | Step 4 again — "after the last round regardless". The bound is spent, so offer no further round |
+| `rounds-exhausted` | `in-progress` → `to-review` in one call | Step 4 again — "after the last round regardless". The bound is spent, so offer no further round |
 | `dead` | nothing, because the item stays where it is | Report, and **never re-prompt** — below |
 | `stalled` | nothing, for the same reason | Reset the context and re-prompt — below |
 | `unreadable` | nothing, because a read that failed cannot say where the item sits | Report in one line: the tracker read is broken, and the item is unobserved until that read works again |
@@ -1122,9 +1106,9 @@ outcome that reports the bound spent.
    applies to it unchanged.
 4. **On approve, or after the last round regardless:** gather evidence and flip
    the item to **human review**. **That transition is one call: it swaps `in-progress` for
-   `to-review`.** The card moves to `In review` with it
-   ([Board status](#board-status)). **This session writes both. The worker wrote
-   neither**, because its last act was the review note. The item holds
+   `to-review`.** No card moves with it ([Board status](#board-status)). **This session
+   writes that label. The worker wrote none**, because its last act was the review
+   note. The item holds
    `in-progress` for the whole loop, because a worker owns it and a fix round is that same
    worker's work. So the label changes only here, at the one moment the loop concludes
    ([`docs/adr/0025-the-session-writes-the-review-state.md`](docs/adr/0025-the-session-writes-the-review-state.md)).
@@ -1156,9 +1140,8 @@ before you touch anything:
 
 The explicit ask **is** the confirmation. So never ask again for a merge the
 maintainer requested in the same turn. A **no** row is an advance and not a close:
-swap the label to the review state, move the card to `In review`
-([Board status](#board-status)), and stop there. On the **ask first** row, ask in one
-line and wait.
+swap the label to the review state, and stop there. **No card moves**
+([Board status](#board-status)). On the **ask first** row, ask in one line and wait.
 
 **An ask that names many items is still one ask.** A maintainer who names ten items
 authorised ten closes, so a close inside a **Merge train** carries the same authority as a
@@ -1205,12 +1188,10 @@ python3 <plugin root>/scripts/close_item.py --issue <N> --pr <PR> \
   --repo <config's repo> --worktree <the path from op 8> \
   --remove-label <the review label> \
   --tracker-cli <gh or glab> --tracker-host <host> --tracker-repo <owner>/<name> \
-  --project-number <n> --project-owner <owner> --project-id <id> \
-  --status-field-id <id> --done-option-id <the `Done` option id> \
   --teardown-command '<op 10, with the ids filled in>'
 ```
 
-Four things the seam never learns, so you pass them in:
+Three things the seam never learns, so you pass them in:
 
 - **The teardown command, as a string — and it removes the automation as well as the
   worktree.** Read both halves from
@@ -1227,12 +1208,6 @@ Four things the seam never learns, so you pass them in:
   [`docs/adr/0022-item-automation-replaces-the-blocking-watch.md`](docs/adr/0022-item-automation-replaces-the-blocking-watch.md).
   **The eight steps and their order are unchanged**, and `scripts/close_item.py` gains no
   code. The whole change is the value of one argument it already takes.
-- **The board coordinates, as arguments.** Read the five values from
-  `docs/agents/issue-tracker.md`'s
-  [`## Project board`](../docs/agents/issue-tracker.md#project-board) section. Where
-  that section is absent, omit them. The card write is then a no-op
-  ([Board status](#board-status)). **GitLab has no board of this kind**, so a project
-  there passes none of the five and step 7 writes no card.
 - **Which tracker, as three arguments.** Read `--tracker-cli`, `--tracker-host` and
   `--tracker-repo` from [`../docs/agents/issue-tracker.md`](../docs/agents/issue-tracker.md),
   the same way the tick reads its own two
@@ -1255,8 +1230,9 @@ exactly the one that must keep its observer.
 
 **Parent-close stays yours.** The seam closes one item. Where the tracker conventions
 define a parent close, apply it after the seam exits clean. That is the last child
-closed → close the parent, and the parent's card → `Done`. **Two steps run before that close,
-in this order**: [The story proof](#the-story-proof), then
+closed → close the parent. **The parent's card needs no move**, because the board's own
+built-in workflow answers a closed item ([Board status](#board-status)). **Two steps run
+before that close, in this order**: [The story proof](#the-story-proof), then
 [The layer 5 story gate](#the-layer-5-story-gate). A proof that failed stops there, and the
 parent stays open.
 
@@ -1281,17 +1257,16 @@ Its `run_recipe` is blank, so no story here ever reaches a story proof.
 
 Where the gate does hold:
 
-1. **Write `in-progress` on the parent**, and move its card to
-   `In progress` ([Board status](#board-status)). One label swap, the same as every other
-   transition.
+1. **Write `in-progress` on the parent.** One label swap, the same as every other
+   transition, and no card moves with it ([Board status](#board-status)).
 2. **Spawn the proof worker**, and start or repoint the **Item automation** — below.
 3. **The tick reports `implementation-complete` on the parent**
    ([On the wake](#on-the-wake--one-response-per-outcome)).
 4. **Read the evidence note and the spec PR.**
 5. **Run [The layer 5 story gate](#the-layer-5-story-gate)**, and triage every candidate it
    reports.
-6. **Swap `in-progress` for `to-review` on the parent, in one call**, and move the card
-   to `In review`. That is the same one swap every other transition makes
+6. **Swap `in-progress` for `to-review` on the parent, in one call.** That is the same one
+   swap every other transition makes
    ([On the wake](#on-the-wake--one-response-per-outcome)).
 7. **The maintainer reads the spec PR, then asks for the close.** No session merges that PR
    unasked ([Close a task](#close-a-task)).
@@ -1369,8 +1344,7 @@ Rationale:
 **Triage every candidate the report holds. This session does it, in prose:**
 
 - **`Strong`** becomes a work item, through `/to-tickets`, and it wears `rating:strong`.
-- **`Worth exploring`** goes to the backlog, with its card attached
-  ([Board status](#board-status)), and it wears `rating:worth-exploring`.
+- **`Worth exploring`** goes to the backlog, and it wears `rating:worth-exploring`.
 - **`Speculative`** is dropped, with a one-line reason in the report to the user.
 
 **Every candidate this gate files carries two back-references and two labels.** The references
@@ -1378,7 +1352,7 @@ are the user story the gate read, and a link to the saved report. The labels are
 the rating label in the list, and `docs/agents/issue-tracker.md` defines both families. The
 first two ratings each reach the tracker, so each one carries the pair and both labels. The
 third files nothing, so it carries none. **Neither family moves a board card**, because
-`Status` derives from the work-state labels alone ([Board status](#board-status)).
+nothing moves one ([Board status](#board-status)).
 
 The skill ends by asking which candidate to explore. This triage is the answer, so no
 grilling loop runs here.
@@ -1432,7 +1406,7 @@ you need them, and never from memory. This section restates neither one. Rationa
    report is what lets the maintainer stop a train they did not expect.
 4. **Park what the plan parked.**
    [`references/merge-train.md`](references/merge-train.md) holds the park rule, and this
-   session performs it. **Move the card with the label**, to `In review`
+   session performs it. **The label is the whole park, and no card moves with it**
    ([Board status](#board-status)). The seam writes no label and comments nowhere, so this
    session makes every tracker write a park needs.
 5. **Run one full Close transaction per item, in the printed order.** Steps 1 to 3 in
@@ -1484,8 +1458,8 @@ it. Shape output for acting on, not for completeness:
   `dead`, `stalled` or `unreadable`. Then
   the label you wrote, then what you did. `#38 implementation-complete · in-progress held.
   Reviewer spawned, gpt-5.6-terra @ high.` **Where the wake handed the item to a human,
-  name the swap you wrote.** That one call is the hand-off:
-  `#38 verdict-approve · in-progress → to-review · card In review.`
+  name the swap you wrote.** That one call is the whole hand-off:
+  `#38 verdict-approve · in-progress → to-review.`
 - **A story-proof line names the parent and the two artifacts.**
   `#57 story proof · evidence note on #57 · spec PR #64.` The parent number is
   the fact a fresh session cannot infer, because the item that woke this session was the last

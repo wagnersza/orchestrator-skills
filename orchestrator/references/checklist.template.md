@@ -17,8 +17,9 @@ This file carries no Markdown link. The orchestrator copies it into a worker's o
 worktree, where a relative path out of this directory resolves to nothing.
 
 The last box ends at the review note. The worker writes no work-state label, and it
-moves no board card. The orchestrator session writes both.
-See ../docs/adr/0025-the-session-writes-the-review-state.md.
+moves no board card. The orchestrator session writes the label, and nothing writes a card.
+See ../docs/adr/0025-the-session-writes-the-review-state.md
+and ../docs/adr/0054-the-board-is-an-input-not-a-mirror.md.
 -->
 
 # Checklist — <item>

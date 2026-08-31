@@ -58,12 +58,12 @@ The eight steps that finish a **Work item**, in one fixed order, after the human
 4. Verify the merge landed.
 5. Pull the merge into the local default branch.
 6. Verify the worktree is clean.
-7. Flip the **Work-state labels**, close the item, and write its **Board status** — as one step.
+7. Flip the **Work-state labels** and close the item, as one step.
 8. Remove the worktree.
 
 The eight split in two, by whether the step needs judgement. **Steps 1 to 3 need judgement, so they belong to prose.** No script reads two versions of a change and decides what the merged file means. Step 1 invokes the **resolving-merge-conflicts** skill. **Steps 4 to 8 need no judgement, so they belong to the seam.** They are predicates, a pull, two tracker writes and a passed-in teardown command, which makes them an ordering and nothing else. One seam owns that ordering, because ordering is what code holds perfectly and prose holds poorly. That seam is `scripts/close_item.py`. This entry names it before it exists: the term is declared here, and the file lands with the flow change that consumes it.
 
-**The actor for all eight steps is the orchestrator session**, and never a **Worker**. A worker can be idle or out of context when the human asks, and its worktree is what step 8 removes. The seam refuses rather than warns. An unmerged PR and a dirty worktree each stop the transaction with a distinct exit code. A refused transaction leaves the item at the review state, with its card at `In review`. Nothing destructive happens by default. Rationale, the rejected alternatives, and the risk accepted for the actor: `docs/adr/0015-close-is-a-deterministic-transaction.md` and `docs/adr/0016-the-orchestrator-merges-when-asked.md`.
+**The actor for all eight steps is the orchestrator session**, and never a **Worker**. A worker can be idle or out of context when the human asks, and its worktree is what step 8 removes. The seam refuses rather than warns. An unmerged PR and a dirty worktree each stop the transaction with a distinct exit code. A refused transaction leaves the item at the review state. Nothing destructive happens by default. Rationale, the rejected alternatives, and the risk accepted for the actor: `docs/adr/0015-close-is-a-deterministic-transaction.md` and `docs/adr/0016-the-orchestrator-merges-when-asked.md`.
 
 **A Merge train loops this transaction, and changes no step of it.** The eight steps and
 their order are the same whether the ask names one item or ten, teardown
@@ -348,21 +348,21 @@ a session writes it where it refuses. Where an item sits inside an owned run is 
 ([`docs/adr/0053-one-work-state-label-and-a-computed-position.md`](docs/adr/0053-one-work-state-label-and-a-computed-position.md)).
 
 **Board status**:
-The `Status` field on a work item's card, where the tracker has a project board (GitHub Projects v2: `Backlog | Ready | To do | In progress | In review | Done`). A **derived projection of the Work-state labels, not a second state machine** — labels are the source of truth, and `Status` is written wherever a label is written, plus recomputed for every open item when the **Ready queue** is read (which is where drift is repaired; there is no sync command). `Backlog` covers both never-triaged and ready-but-blocked; `Ready` is exactly the ready queue, which is why the split is only knowable at queue time. A human drag is drift, not intent — it is overwritten. The derivation table and the board coordinates live in `docs/agents/issue-tracker.md`, alongside the labels; a repo with no board omits the section and every board write becomes a no-op. Rationale: `docs/adr/0009-labels-drive-board-status.md`.
+The `Status` field on a work item's card, where the tracker has a project board (GitHub Projects v2). **The board is an input, and nothing writes it.** One question is asked of it: is this item's card in the start column. So `Status` is no projection of the **Work-state labels**, and there is no derivation table, no reconcile pass and no sync command. `Tracker.board_status` is the one reader. The two coordinates and the name of the start column live in `docs/agents/issue-tracker.md`, alongside the labels; a repo with no board omits that section, and the label alone is the whole gate. Rationale: [`docs/adr/0054-the-board-is-an-input-not-a-mirror.md`](docs/adr/0054-the-board-is-an-input-not-a-mirror.md).
 
-**One column is intent, and its direction is board to label.** `To do` is that column.
-A card the maintainer drags there means "an agent can start this now". It is the second fact
-of a **Ready queue** entry, beside the `ready-for-agent` label, and the reconcile pass writes
-no `Status` for an item whose card sits there. So the board gains one column between `Ready`
-and `In progress`, and `Ready` keeps its old derivation while it stops meaning "an agent will
-take this"
+**One column is the start column, and its direction is board to label.** `To do` is that
+column. A card the maintainer drags there means "an agent can start this now". It is the
+second fact of a **Ready queue** entry, beside the `ready-for-agent` label
 ([`docs/adr/0045-a-story-start-is-automatic-under-two-roofs.md`](docs/adr/0045-a-story-start-is-automatic-under-two-roofs.md)).
 
-**No drag ever removes a label.** The promotion is one-way, so a card dragged back out of
-`To do` changes nothing. A take-back is the maintainer removing `ready-for-agent`, or
-writing `needs-human`, plus a comment that says why. Every other column stays a derived
-projection, and the drag rule in this entry holds for all of them. **`needs-human` has no
-column**, so a paused item keeps the `Status` it already had.
+**A drag is intent in every column, because nothing overwrites a card.** No drag removes a
+label, so a card dragged back out of `To do` changes nothing. A take-back is the maintainer
+removing `ready-for-agent`, or writing `needs-human` plus a comment that says why.
+
+**A closed item reaches `Done` through the board's own built-in item closed to Done
+workflow.** The maintainer enables it in the project settings, and **no session can**,
+because that switch is not in the API. `/orchestrator-setup` reads whether it is on and
+says so.
 _Avoid_: board state, column, board label, project status (the field is `Status`; the layer is Board status).
 
 **Project recipe**:
