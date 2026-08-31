@@ -404,8 +404,10 @@ and when the user names work with no number at all. The phrases that reach it ar
    ([`docs/adr/0053-one-work-state-label-and-a-computed-position.md`](docs/adr/0053-one-work-state-label-and-a-computed-position.md)).
    Apply any parent-promotion the tracker conventions define (idempotent).
 6. **Write the checklist + deliver the prompt** — see below.
-7. **Follow-along panel** (op 7, if the tool supports it) — open the work item as
-   a tab inside the worker's worktree.
+7. **Follow-along panel** (op 7) — mandatory, where the tool records operation 7 as
+   supported: open the work item as a tab inside the worker's worktree. A tool that
+   records operation 7 as unsupported skips the step, and that absence is not an
+   error.
 8. **Create the Item automation** (op 11) — mandatory, and the last step of every
    spawn. See
    [Start the tick](#start-the-tick--one-item-automation-per-worker).
@@ -1476,6 +1478,10 @@ it. Shape output for acting on, not for completeness:
   spawn resolved: `#38 tick: wake by handle` / `wake by title` / `wake by comment`. A
   comment-only wake is then a fact the user reads at spawn, rather than a silence they find
   many runs later.
+- **Name the panel on the spawn line.** Op 7 opens the work item as a tab beside
+  the worker. Say it happened: `#38 panel: opened`.
+- **Say when the panel is unavailable.** A tool that records operation 7 as
+  unsupported opens no follow-along tab, so say so on the spawn line, once.
 - **Say when the tick is unavailable.** A tool that records operations 11 and 12 as
   unsupported gets no automation, so nothing wakes this session for that item. Say so on
   the spawn line, once, and point at the four monitor bullets
