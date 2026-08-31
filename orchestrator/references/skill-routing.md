@@ -37,6 +37,27 @@ holds the lane split and its rationale. It also records why `/wayfinder` and
 | `review`, `review the diff`, `review since X` | `/code-review` | `worker` | Needs the fixed point to diff against (`main`, a SHA, a merge base) and the originating work item, because the skill reviews two axes. Without slash commands: tell the worker to review the diff twice. One pass against this repo's documented standards, one against the item's acceptance criteria. It reports the two axes separately. |
 | `prototype`, `spike` | `/prototype` | `worker` | Needs the design question, and which branch answers it — logic or UI. Without slash commands: tell the worker to build throwaway code that answers one question. One command runs it. It has no persistence and no polish, and its name says it is a prototype. |
 
+## The type label of an item names the same skills
+
+A verb comes from a person who typed it. A queue tick has no verb. So the tick reads the
+**type label** the work item already carries, and it resolves to the same skills.
+
+| Type label on the work item | Skill | Lane |
+|-----------------------------|-------|------|
+| `bug` | `/diagnosing-bugs` | `worker` |
+| every other type label, and no type label at all | `/implement` | `worker` |
+
+- **This adds no label family.** `bug` is a label the tracker ships. A type label names the
+  kind of work, and a maintainer already uses that family. It is a separate family from the
+  **Work-state labels** in `docs/agents/issue-tracker.md`.
+- **These two rows name no skill the verb table does not.** So both reads answer with the
+  same skill, and a worker meets one contract whichever read started it.
+- **`user-story` never reaches this read.** A story is not spawned for the work itself,
+  and the queue tick descends to its children.
+- **This is the one mapping.** A skill body that resolves a type label reads this section,
+  and it writes no table of its own. The rendered worker prompt takes the answer as one
+  of its inputs.
+
 Notes:
 
 - **Every lane is `inline` or `worker`.** No third value, and no blank. A verb whose
