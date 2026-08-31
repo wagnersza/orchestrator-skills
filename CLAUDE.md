@@ -82,7 +82,7 @@ Single-context — `orchestrator/CONTEXT.md` plus ADRs under `orchestrator/docs/
 
 ### Orchestrator
 
-Runs claude workers via orca — `sonnet-5` @ `medium` by default, `opus-5` @ `high` for heavy items only; adversarial review off (on demand only). See `docs/agents/orchestrator.md`.
+Runs claude workers via orca — `sonnet-5` @ `medium` by default, `opus-5` @ `high` only where one named `heavy` signal fires; adversarial review off (on demand only). See `docs/agents/orchestrator.md`.
 
 ### Quality gates
 

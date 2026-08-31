@@ -12,7 +12,8 @@ yolo:     on              # required; the harness ref supplies the actual flag
 # --- right model for the job: one (model, effort) pair per role ---
 # Roles, the routing rule, and the cost profiles are in references/models.md.
 # This is plain `balanced`. This repo is markdown plus two small Python seams, so
-# `light` carries most items and `heavy` is the exception. See `role_default`.
+# `light` carries most items and `heavy` is the exception. A spawn takes `light`
+# unless a signal in the models note demands `heavy`. See `role_default`.
 models:
   role_default: light     # this repo inverts the skill's default; see the models note
   heavy:                  # contract/vocabulary change, new skill, a seam plus its tests
@@ -102,6 +103,12 @@ gates:
     Every other item is `light`. One reference edit, one ADR that adds a decision, a
     doc fix, a link repair, a table column, or one test file is `light`. Report the
     role on every spawn. A wrong call is then visible in one line.
+  - **`light` is the answer unless a signal above says otherwise.** A run on `opus-5`
+    costs several times the same run on `sonnet-5`, so a `heavy` call the item did not
+    need is money spent for nothing. The six conditions above are the whole list. Where
+    none of them is true, the spawn takes `light`, and a doubt is not a seventh
+    condition. Say which condition fired on every `heavy` spawn, and take `light` where
+    you can name none.
   - **Effort** tunes how much the model *thinks*: `low | medium | high | xhigh | max`.
     Both frontier models default to `high`, and `heavy` sits at that default. The rung
     above it is not gone. A re-spawn after a failed round steps up, so a genuinely hard
