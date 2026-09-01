@@ -177,6 +177,13 @@ routed to in the report ([Reporting to the user](#reporting-to-the-user)). An
 implementation work here" holds. A verb that writes source is a `worker` row, and
 that law is what puts it there.
 
+**An inline skill that files a work item appends its `## Touches` block**, beside
+the `## Blocked by` and `## Parent` edges the item already carries. `/to-spec`,
+`/to-tickets` and `/triage` run in this lane, so each one writes the block with the
+body it files. No external template is edited, and none is forked
+([ADR 0028](docs/adr/0028-drop-the-fork-and-pin-dial.md),
+[ADR 0046](docs/adr/0046-parallel-spawn-is-gated-on-a-declared-touch-set.md)).
+
 **Lane `worker` — hand the skill to the worker.** Invoke nothing here. The
 invocation goes into the spawn prompt, so the worker's first act inside its own
 worktree is to enter the skill. [Spawn a worker](#spawn-a-worker-implement-x)

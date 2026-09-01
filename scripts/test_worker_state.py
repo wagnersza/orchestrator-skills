@@ -2512,6 +2512,68 @@ class WorkerStateTestCase(unittest.TestCase):
                 f"{tool!r} is named in the seam outside a citation of its file",
             )
 
+    # --- the Touch set (ADR 0046) --------------------------------------------
+
+    def test_parse_touches_reads_the_entries_of_a_present_block(self):
+        """A block with entries answers them, in the order the body carries."""
+        body = (
+            "## Touches\n\n- scripts/worker_state.py\n- docs/agents/orchestrator.md\n"
+        )
+
+        self.assertEqual(
+            worker_state.parse_touches(body),
+            ["scripts/worker_state.py", "docs/agents/orchestrator.md"],
+        )
+
+    def test_parse_touches_answers_empty_for_a_body_with_no_block(self):
+        """No `## Touches` heading at all is silence, and silence is an empty list."""
+        body = "## Blocked by\n\n- #179\n"
+
+        self.assertEqual(worker_state.parse_touches(body), [])
+
+    def test_parse_touches_answers_empty_for_a_block_with_no_entries(self):
+        """A heading with nothing under it, before the next one, is still empty."""
+        body = "## Touches\n\n## Blocked by\n\n- #179\n"
+
+        self.assertEqual(worker_state.parse_touches(body), [])
+
+    def test_parse_touches_reads_a_glob_entry_unchanged(self):
+        """A glob is one more entry, read byte-identical and not expanded here."""
+        body = "## Touches\n\n- scripts/*.py\n"
+
+        self.assertEqual(worker_state.parse_touches(body), ["scripts/*.py"])
+
+    def test_touches_overlap_is_false_for_disjoint_lists(self):
+        """Two sets that share no path or glob are parallel-safe."""
+        self.assertFalse(
+            worker_state.touches_overlap(
+                ["scripts/worker_state.py"], ["docs/agents/orchestrator.md"]
+            )
+        )
+
+    def test_touches_overlap_is_true_for_an_exact_path_match(self):
+        """The same path on both sides is the plainest overlap there is."""
+        self.assertTrue(
+            worker_state.touches_overlap(
+                ["scripts/worker_state.py"], ["scripts/worker_state.py"]
+            )
+        )
+
+    def test_touches_overlap_is_true_for_a_glob_matching_a_path(self):
+        """Either side can carry the glob, and the match still fires."""
+        self.assertTrue(
+            worker_state.touches_overlap(["scripts/*.py"], ["scripts/worker_state.py"])
+        )
+        self.assertTrue(
+            worker_state.touches_overlap(["scripts/worker_state.py"], ["scripts/*.py"])
+        )
+
+    def test_touches_overlap_is_true_where_either_side_is_empty(self):
+        """An undeclared item reads as risk, so silence on either side is an overlap."""
+        self.assertTrue(worker_state.touches_overlap([], ["scripts/worker_state.py"]))
+        self.assertTrue(worker_state.touches_overlap(["scripts/worker_state.py"], []))
+        self.assertTrue(worker_state.touches_overlap([], []))
+
 
 if __name__ == "__main__":
     unittest.main()
