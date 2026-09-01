@@ -256,6 +256,7 @@ real stall window.
 """
 
 import argparse
+import fnmatch
 import json
 import os
 import re
@@ -524,6 +525,58 @@ def re_prompts_in(bodies):
     or a maintainer's comment that quotes the literal spends no retry.
     """
     return sum(1 for body in bodies if RE_PROMPTED.search(body or ""))
+
+
+# --- the Touch set (ADR 0046) ------------------------------------------------
+
+TOUCHES_HEADING = re.compile(r"^##\s*Touches\s*$", re.MULTILINE)
+NEXT_HEADING = re.compile(r"^##\s", re.MULTILINE)
+
+
+def parse_touches(body):
+    """Every path or glob a `## Touches` block names, in the item body's own order.
+
+    The block sits beside `## Blocked by` and `## Parent`. Each one takes the same
+    shape: a heading line, then one entry per line, until the next heading or the end
+    of the text.
+
+    A body with no block, or a block with no lines under it, answers an empty list.
+    `touches_overlap` reads an empty list as risk, so an undeclared item runs alone
+    (ADR 0046). This function reads no tracker and no file system. The caller already
+    holds the body it passes in.
+    """
+    heading = TOUCHES_HEADING.search(body)
+    if not heading:
+        return []
+    tail = body[heading.end() :]
+    next_heading = NEXT_HEADING.search(tail)
+    block = tail[: next_heading.start()] if next_heading else tail
+    entries = []
+    for line in block.splitlines():
+        entry = re.sub(r"^\s*[-*+]\s*", "", line).strip()
+        if entry:
+            entries.append(entry)
+    return entries
+
+
+def touches_overlap(one, other):
+    """Whether two Touch sets name a shared path or glob.
+
+    This function matches each entry with `fnmatch` in both directions, because
+    either side can hold the glob. `src/*.py` in one set matches `src/main.py` in the
+    other, and the reverse pairing gives the same answer.
+
+    **An empty list on either side is an overlap**, so a work item that declares
+    nothing reads as risk and not as safety (ADR 0046). This function reads no
+    tracker and no file system, so its test needs no fixture.
+    """
+    if not one or not other:
+        return True
+    return any(
+        fnmatch.fnmatch(mine, theirs) or fnmatch.fnmatch(theirs, mine)
+        for mine in one
+        for theirs in other
+    )
 
 
 # --- the Gate record (ADR 0036) ---------------------------------------------
