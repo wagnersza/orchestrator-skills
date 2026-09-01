@@ -23,8 +23,8 @@ models:
     model:  sonnet-5
     effort: medium
   review:                 # the adversarial reviewer (see `review` below)
-    model:  gpt-5.6-terra
-    effort: high
+    model:  gpt-5.6-sol   # the openai tier closest to opus-5; codex launches it
+    effort: high          # codex tops out at `high`, so no clamp applies
 
 # --- adversarial review (optional) ---
 review:
@@ -119,9 +119,20 @@ gates:
 - **yolo** is always required for a worker (nobody approves its prompts). For
   `claude` that's `--dangerously-skip-permissions`.
 - **review** is off. Run it on demand with "review #N adversarially" — that spawns
-  a `gpt-5.6-terra` reviewer (openai) against an `opus-5`/`sonnet-5` impl
-  (anthropic), so the cross-vendor assertion holds. Turning it on requires `codex`
-  to be OpenAI-authed.
+  a `gpt-5.6-sol` reviewer under `codex` (openai) against an `opus-5`/`sonnet-5`
+  impl (anthropic), so the cross-vendor assertion holds. `codex` on this machine
+  runs against the OLX GenAI proxy with an API key, and not against a ChatGPT
+  login. So **the worker terminal needs `LLM_API_KEY` in its environment**, or the
+  reviewer gets a `401` and no verdict arrives. Verified on 2026-09-01:
+  `codex -c model_reasoning_effort="high" exec --model gpt-5.6-sol` prints
+  `provider: olx-genai` and answers.
+  **`gpt-5.6-sol` is the tier that matches the `opus-5` profile**, and the earlier
+  `gpt-5.6-terra` matched `sonnet-5`. A reviewer below the implementer's profile
+  reads a hard diff and reports nothing, so the review round costs money and
+  proves nothing.
+  **The story proof takes no harness of its own.** Its spawn reads the one
+  `harness:` field above and the `heavy` role, so it cannot run under `codex`
+  today. And no story here reaches that step, because `run_recipe` is blank.
 - **Work-state labels** (`ready-for-agent`, `in-progress`, `to-review`, closed)
   come from `docs/agents/issue-tracker.md`, not this file — single source of truth.
   They don't exist in the GitHub repo yet; that file carries the `gh label create`
