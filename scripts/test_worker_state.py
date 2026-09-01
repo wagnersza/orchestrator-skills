@@ -147,6 +147,19 @@ TRANSITIONS = {
 # predecessor. An item wearing `needs-human` stops every tick.
 PREDECESSORS: tuple[list[str], ...] = ([IN_PROGRESS], [READY_FOR_AGENT], [])
 
+# The board coordinates and the two column names a start gate reads. They come from the
+# Project board section of docs/agents/issue-tracker.md, so the seam holds none of them.
+# `READY_LANE` is the column before the start column, which is the maintainer's own lane.
+BOARD_PROJECT = 6
+BOARD_OWNER = "someone"
+START_COLUMN = "To do"
+READY_LANE = "Ready"
+
+# The three answers the start gate gives, named by the seam rather than by this file.
+START = worker_state.START
+ONE_FACT = worker_state.ONE_FACT
+NO_FACT = worker_state.NO_FACT
+
 # The stall windows, in the seconds the predicate takes. The command line takes `30m` and
 # `1h`, and one case still proves that parse.
 HALF_HOUR = 30 * 60
@@ -231,7 +244,7 @@ class WorkerStateTestCase(unittest.TestCase):
 
     # --- fixture helpers ----------------------------------------------------
 
-    def write_fixture(self, comments=(), labels=(), pull_requests=None):
+    def write_fixture(self, comments=(), labels=(), pull_requests=None, board=None):
         """Stand in for the tracker reads a tick makes.
 
         One record for this item, in the one format `scripts/tracker.py` documents. The
@@ -240,9 +253,14 @@ class WorkerStateTestCase(unittest.TestCase):
 
         `pull_requests` is the second record type of that same format. A tick in human
         review reads it through the branch, so each record carries a `head` key.
+
+        `board` is the `Status` name on this item's card, which is the second fact of a
+        start gate. `None` leaves the key out, and that is a fixture with no card at all.
         """
         self.fixture = self.root / "gh.json"
         record = {"comments": list(comments), "labels": list(labels)}
+        if board is not None:
+            record["board"] = board
         self.fixture.write_text(
             json.dumps(
                 {
@@ -618,6 +636,47 @@ class WorkerStateTestCase(unittest.TestCase):
         self.assertEqual(code, expect, line)
         self.assertEqual(len(line.splitlines()), 1, line)
         return line
+
+    def gate(self, *, expect, project=BOARD_PROJECT, owner=BOARD_OWNER, column=None):
+        """Ask the start gate in process, through one adapter.
+
+        The item, the adapter, then the three board coordinates. That is the call `main`
+        makes. `column=None` means the start column, and a case that wants no board at all
+        passes `project=0, owner="", column=""`.
+        """
+        code, line = worker_state.start(
+            ITEM,
+            self.adapter(),
+            project,
+            owner,
+            START_COLUMN if column is None else column,
+        )
+        self.assertEqual(code, expect, line)
+        self.assertEqual(len(line.splitlines()), 1, line)
+        return line
+
+    def start_cli(self, *extra, expect=EXIT_NOTHING, fixture=True, board=True):
+        """Ask the start gate through the command line, for a case that proves the CLI."""
+        return self.run_seam(
+            "start",
+            "--item",
+            str(ITEM),
+            *(("--gh-fixture", str(self.fixture)) if fixture else ()),
+            *(
+                (
+                    "--board-project",
+                    str(BOARD_PROJECT),
+                    "--board-owner",
+                    BOARD_OWNER,
+                    "--start-column",
+                    START_COLUMN,
+                )
+                if board
+                else ()
+            ),
+            *extra,
+            expect=expect,
+        )
 
     def ready(self, *extra, worktree=None, pattern=PROCESS_PATTERN, expect=0):
         return self.run_seam(
@@ -2166,6 +2225,165 @@ class WorkerStateTestCase(unittest.TestCase):
         self.assertNotIn(
             EXIT_COMPLETE, (EXIT_APPLIED, EXIT_REFUSED, EXIT_NOTHING, EXIT_GONE)
         )
+
+    # --- the two-facts start gate (ADR 0045) --------------------------------
+
+    def test_both_facts_start_the_item(self):
+        """The label and the card in the start column. That is act one, and it is the one
+        answer that exits 0. The line names both facts, so a maintainer reads why."""
+        self.write_fixture(labels=[READY_FOR_AGENT], board=START_COLUMN)
+
+        line = self.gate(expect=EXIT_DUE)
+
+        self.assertTrue(line.startswith(f"{START}:"), line)
+        self.assertIn(READY_FOR_AGENT, line)
+        self.assertIn(repr(START_COLUMN), line)
+
+    def test_one_fact_is_never_an_error_and_never_a_refusal(self):
+        """Either fact on its own starts nothing. A card in the start column with no label
+        is not started. A labelled item whose card sits in the lane before it is not
+        started either. So that lane stays the maintainer's own, and neither case is an
+        error. This is how a maintainer parks a groomed item."""
+        self.write_fixture(labels=[READY_FOR_AGENT], board=READY_LANE)
+        label_only = self.gate(expect=EXIT_NOTHING)
+
+        self.write_fixture(labels=[], board=START_COLUMN)
+        card_only = self.gate(expect=EXIT_NOTHING)
+
+        for line in (label_only, card_only):
+            self.assertTrue(line.startswith(f"{ONE_FACT}:"), line)
+            self.assertIn("starts nothing", line)
+            # An error word appears in neither one, and no tracker write went out.
+            for word in ("error", "refused", "unreadable"):
+                self.assertNotIn(word, line)
+        self.assertEqual(self.writes(), [])
+
+        # The two lines differ, because the missing fact is what a maintainer repairs.
+        self.assertNotEqual(label_only, card_only)
+        self.assertIn(repr(READY_LANE), label_only)
+        self.assertIn(f"no {READY_FOR_AGENT} label", card_only)
+
+    def test_neither_fact_is_where_a_groomed_item_rests(self):
+        """No label and no card in the start column. Every open item starts here, so the
+        answer is its own quiet state rather than the one-fact state."""
+        self.write_fixture(labels=[], board=READY_LANE)
+        in_a_lane = self.gate(expect=EXIT_NOTHING)
+
+        self.write_fixture(labels=[])
+        no_card = self.gate(expect=EXIT_NOTHING)
+
+        for line in (in_a_lane, no_card):
+            self.assertTrue(line.startswith(f"{NO_FACT}:"), line)
+        self.assertIn("no card", no_card)
+
+    def test_with_no_board_configured_the_label_alone_decides(self):
+        """A tracker that names no board is a supported configuration, and its absence is
+        never an error. The label is then the whole gate, so a labelled item starts and an
+        unlabelled one does not. It makes no board read either."""
+        log = self.fake_cli("gh", issue={"labels": [{"name": READY_FOR_AGENT}]})
+
+        self.write_fixture(labels=[READY_FOR_AGENT], board=READY_LANE)
+        started = self.gate(expect=EXIT_DUE, project=0, owner="", column="")
+
+        self.write_fixture(labels=[], board=START_COLUMN)
+        stopped = self.gate(expect=EXIT_NOTHING, project=0, owner="", column="")
+
+        self.assertTrue(started.startswith(f"{START}:"), started)
+        self.assertTrue(stopped.startswith(f"{NO_FACT}:"), stopped)
+        for line in (started, stopped):
+            self.assertIn("names no board", line)
+        # The card said `Ready` and the item still started, so the board was not read.
+        self.assertFalse(log.exists(), "a board read ran with no coordinates")
+
+        # Each coordinate alone stops the board read, so a half-configured board is the
+        # same supported configuration and never a crash.
+        half_configured: tuple[dict[str, object], ...] = (
+            {"project": 0},
+            {"owner": ""},
+            {"column": ""},
+        )
+        for missing in half_configured:
+            self.write_fixture(labels=[READY_FOR_AGENT], board=READY_LANE)
+            self.assertIn("names no board", self.gate(expect=EXIT_DUE, **missing))
+
+    def test_a_failed_board_read_counts_no_card_and_is_never_an_error(self):
+        """The labels were read, so a fact is available and the cause rides the line.
+        Nothing starts on a card this gate cannot read, which is the safe direction."""
+        log = self.fake_cli("gh", issue={"labels": [{"name": READY_FOR_AGENT}]})
+
+        line = self.start_cli("--repo", "owner/name", fixture=False)
+
+        self.assertTrue(line.startswith(f"{ONE_FACT}:"), line)
+        self.assertIn("the board read failed", line)
+        self.assertIn("starts nothing", line)
+        # The board read really ran and really failed: the stub CLI has no project payload.
+        self.assertIn("project item-list", log.read_text())
+
+    def test_the_start_gate_reads_the_board_by_name_and_writes_nothing(self):
+        """One item read and one board read, and no write of any kind. The column is a
+        name and never an option id, because nothing writes a card. The stub CLI records
+        the argv, so this case asserts the recipe of docs/agents/issue-tracker.md."""
+        log = self.fake_cli(
+            "gh",
+            issue={"labels": [{"name": READY_FOR_AGENT}], "comments": []},
+            project={"items": [{"status": START_COLUMN, "content": {"number": ITEM}}]},
+        )
+        before = {path for path, _ in self.disk_state()}
+
+        line = self.start_cli("--repo", "owner/name", fixture=False, expect=EXIT_DUE)
+
+        self.assertTrue(line.startswith(f"{START}:"), line)
+        self.assertEqual(
+            log.read_text().splitlines(),
+            [
+                f"issue view {ITEM} --json comments,labels --repo owner/name",
+                f"project item-list {BOARD_PROJECT} --owner {BOARD_OWNER} "
+                f"--format json --limit 100",
+            ],
+        )
+        # The one file this run added is the stub CLI's own argv log, which is this
+        # test's instrument. The gate itself writes no file, the same as `phase`.
+        added = {path for path, _ in self.disk_state()} - before
+        self.assertEqual(added, {str(log)}, added)
+
+    def test_the_start_gate_reads_no_worker_and_takes_no_worker_flag(self):
+        """It answers whether an item may start, which is the question before there is a
+        worker to read. So the four flags that name a worker are usage errors here, and
+        `--item` plus the tracker flags are the whole surface."""
+        self.write_fixture(labels=[READY_FOR_AGENT])
+
+        for flag, value in (
+            ("--worktree", str(self.worktree)),
+            ("--process", PROCESS_PATTERN),
+            ("--rounds", "3"),
+            ("--stall-after", "30m"),
+        ):
+            self.run_seam(
+                "start",
+                "--item",
+                str(ITEM),
+                "--gh-fixture",
+                str(self.fixture),
+                flag,
+                value,
+                expect=EXIT_USAGE,
+                lines=0,
+            )
+
+        # With no board flags at all it still answers, because the label alone decides.
+        self.assertTrue(
+            self.start_cli(board=False, expect=EXIT_DUE).startswith(f"{START}:")
+        )
+
+    def test_a_failed_item_read_is_quiet_and_never_a_start(self):
+        """A read that failed cannot say the item carries the ready state, so nothing
+        starts on it. It is quiet rather than a crash, the same as every other read here."""
+        self.break_fixture()
+
+        line = self.gate(expect=EXIT_NOTHING)
+
+        self.assertTrue(line.startswith("unreadable:"), line)
+        self.assertIn("nothing starts", line)
 
     # --- what the seam refuses to do ---------------------------------------
 

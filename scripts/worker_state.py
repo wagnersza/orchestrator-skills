@@ -1,16 +1,50 @@
 #!/usr/bin/env python3
-"""Answer what the **Worker watch** asks about one worker, in three subcommands.
+"""Answer what the **Worker watch** asks about one worker, in four subcommands.
 
-Each one is the same question at a different moment. *Is a real agent at work in
+Three of them are the same question at a different moment. *Is a real agent at work in
 this worktree, and does that work need a decision now?* Readiness asks it before
 the first prompt. `phase` asks it and prints the answer. `tick` asks it and applies
 the answer. One seam answers all three, for every tool and every harness (ADR 0019).
+
+The fourth one asks the question that comes before all of them: *may this work item
+start at all?* `start` reads the two facts of a story start and prints the answer
+(ADR 0045).
 
 **`ready`** — is a live agent process running with its working directory inside
 this worktree? Exit 0 ready, non-zero not:
 
     python3 <plugin root>/scripts/worker_state.py ready --worktree /path/to/worktree \\
         --process '<the pattern the harness reference gives>'
+
+**`start`** — read the labels of one work item and its board card, and answer one
+question: *may this item start?* It writes nothing at all:
+
+    python3 <plugin root>/scripts/worker_state.py start --item 178 \\
+        --repo OWNER/NAME \\
+        --board-project '<the number the tracker file gives>' \\
+        --board-owner '<the owner the tracker file gives>' \\
+        --start-column '<the column name the tracker file gives>'
+
+| Code | Meaning |
+|---|---|
+| 0 | both facts hold, so this item may start |
+| 1 | one fact holds, or neither — the printed line names which |
+
+**A start is two facts, and both are necessary** (ADR 0045). The item carries the ready
+state, and its board card sits in the start column. A card in that column with no label
+starts nothing. A labelled item whose card sits anywhere else starts nothing either, so
+the column before the start column stays the maintainer's own lane.
+
+**Exactly one fact is neither an error nor a refusal.** It is how a maintainer parks a
+groomed item, and a forgotten drag reads the same way. So the answer is a quiet code and
+a line that names which fact is missing. A queue report names every item in that state,
+which is what keeps the disagreement visible.
+
+**With no board coordinates the label alone decides.** A tracker that names no board is a
+supported configuration, and its absence is never an error. The three coordinates are
+arguments, and the caller reads them from `docs/agents/issue-tracker.md`, so this seam
+holds no board of its own. **The board read needs `read:project` on the token and no write
+scope**, because nothing here writes a card.
 
 **`phase`** — read three facts on disk and two on the tracker, and answer one
 question: *is a transition due for this work item?* This is the plan half of the
@@ -1216,6 +1250,104 @@ def claim(item, tracker):
     return EXIT_APPLIED, f"claim: applied: {swap_line(item, removed, added)}"
 
 
+# --- the two-facts start gate (ADR 0045) ------------------------------------
+
+# The three answers the start gate gives. `START` is both facts, so the item may start.
+# `ONE_FACT` is exactly one of them, which is a parked item or a forgotten drag, and it is
+# never an error. `NO_FACT` is neither, and it is where every groomed item rests.
+START = "start"
+ONE_FACT = "one-fact"
+NO_FACT = "no-fact"
+
+
+def start_gate(item, labels, tracker, project=0, owner="", column=""):
+    """`(answer, detail)` for whether one work item may start: the two facts of act one.
+
+    Three answers and no fourth: `START`, `ONE_FACT`, `NO_FACT`. **Both facts are
+    necessary** (ADR 0045). The first is the ready state, which the caller already read
+    this tick. The second is the board card, read through the three coordinates.
+
+    - **`START`** — the item carries the ready state, and its card sits in `column`.
+    - **`ONE_FACT`** — exactly one of the two holds. A card in the start column with no
+      label starts nothing, and a labelled item whose card sits elsewhere starts nothing
+      either. So the column before the start column stays the maintainer's own lane. This
+      is **never an error and never a refusal**. It is how a maintainer parks a groomed
+      item, and a forgotten drag reads the same way. A queue report names every item here.
+    - **`NO_FACT`** — neither fact holds, which is where a groomed item rests.
+
+    **With no coordinates the label alone decides.** A tracker that names no board is a
+    supported configuration, so the board read asks nothing and its absence is never an
+    error. The label then answers `START` on its own, and one fact is the whole gate.
+
+    **A board read that fails counts no card**, and it is no error either. The labels were
+    read, so a fact is available and the cause rides the line. Nothing starts on a card
+    this seam cannot read.
+
+    The board read goes through the same **Tracker adapter** the labels came from, so the
+    two reads can never name different repositories. It needs `read:project` on the token
+    and no write scope, because nothing writes a card (ADR 0054).
+    """
+    labelled = READY_FOR_AGENT in labels
+    wearing = (
+        f"work item #{item} carries the {READY_FOR_AGENT} label"
+        if labelled
+        else f"work item #{item} carries no {READY_FOR_AGENT} label"
+    )
+    if not (project and owner and column):
+        no_board = "the tracker names no board, so the label alone is the whole gate"
+        if labelled:
+            return START, f"{wearing}, and {no_board}"
+        return NO_FACT, f"{wearing}, and {no_board}. So it starts nothing"
+
+    try:
+        status = tracker.board_status(item, project, owner)
+    except (TrackerError, OSError, json.JSONDecodeError) as exc:
+        # One line is printed, and the standard error of a failed command can hold many,
+        # so the cause collapses to one.
+        cause = " ".join(str(exc).split())
+        return (ONE_FACT if labelled else NO_FACT), (
+            f"{wearing}, and the board read failed, so no card is counted and this item "
+            f"starts nothing: {cause}"
+        )
+
+    carded = status == column
+    sits = f"its card sits in the {column!r} column of project {project}"
+    elsewhere = (
+        f"its card sits in {status!r} rather than {column!r}"
+        if status
+        else f"it has no card in the {column!r} column"
+    )
+    if labelled and carded:
+        return START, f"{wearing}, and {sits}"
+    if labelled:
+        return ONE_FACT, f"{wearing}, and {elsewhere}, so it starts nothing"
+    if carded:
+        return ONE_FACT, f"{wearing}, and {sits}, so it starts nothing"
+    return NO_FACT, f"{wearing}, and {elsewhere}"
+
+
+def start(item, tracker, project=0, owner="", column=""):
+    """The `start` answer: `(exit code, the one line to print)`.
+
+    It writes nothing at all, the same as `phase`. Exit 0 means both facts hold, and every
+    other answer is the quiet code. So a caller reads one bit, and the printed line names
+    which fact is missing.
+
+    **A failed read of the item is quiet too, and it is never a start.** A read that failed
+    cannot say the item carries the ready state, so nothing starts on it.
+    """
+    try:
+        labels, _ = tracker.item_facts(item)
+    except (TrackerError, OSError, json.JSONDecodeError) as exc:
+        cause = " ".join(str(exc).split())
+        return EXIT_NOTHING, (
+            f"unreadable: the labels on work item #{item} are unreadable, so this gate "
+            f"reads no fact and nothing starts: {cause}"
+        )
+    answer, detail = start_gate(item, labels, tracker, project, owner, column)
+    return (EXIT_DUE if answer == START else EXIT_NOTHING), f"{answer}: {detail}"
+
+
 # --- the two subcommands over that one plan ---------------------------------
 
 
@@ -1328,6 +1460,44 @@ class UsageExitParser(argparse.ArgumentParser):
         sys.exit(EXIT_USAGE if status else status)
 
 
+def add_tracker_arguments(parser):
+    """The four flags that name one tracker, added to one subcommand.
+
+    Every subcommand that reads the tracker takes all four, because `main` builds one
+    **Tracker adapter** out of them. Written once, so `start`, `phase` and `tick` can never
+    drift apart on the tracker they read (ADR 0040).
+    """
+    parser.add_argument(
+        "--repo",
+        default="",
+        help="the tracker repository the labels and the verdict comments sit on, as "
+        "OWNER/NAME",
+    )
+    parser.add_argument(
+        "--tracker-cli",
+        default=GH,
+        choices=(GH, GLAB),
+        help="which CLI reads the labels and the comments, and writes the label a "
+        "transition swaps. The caller resolves it from "
+        "docs/agents/issue-tracker.md. This seam passes the name to the tracker "
+        "adapter, which holds every command, so this seam names no tracker",
+    )
+    parser.add_argument(
+        "--tracker-host",
+        default="",
+        metavar="HOST",
+        help="the tracker host, for a server the CLI does not reach by default. Each "
+        "read carries it in the place that read needs. With no host, every read goes "
+        "to the CLI's own default server",
+    )
+    parser.add_argument(
+        "--gh-fixture",
+        help="JSON that stands in for any tracker read, so a verdict and a position "
+        "need no network and no login (used by the tests). It keeps this name "
+        "because scripts/close_item.py reads the same file in the same format",
+    )
+
+
 def add_tick_arguments(parser, worker_required=True):
     """Every flag the plan reads, added to one subcommand.
 
@@ -1367,29 +1537,7 @@ def add_tick_arguments(parser, worker_required=True):
         "(`45s`, `30m`, `4h`, or a bare number of seconds). Only `stalled` reads it, "
         "because `dead` needs no window",
     )
-    parser.add_argument(
-        "--repo",
-        default="",
-        help="the tracker repository the labels and the verdict comments sit on, as "
-        "OWNER/NAME",
-    )
-    parser.add_argument(
-        "--tracker-cli",
-        default=GH,
-        choices=(GH, GLAB),
-        help="which CLI reads the labels and the comments, and writes the label a "
-        "transition swaps. The caller resolves it from "
-        "docs/agents/issue-tracker.md. This seam passes the name to the tracker "
-        "adapter, which holds every command, so this seam names no tracker",
-    )
-    parser.add_argument(
-        "--tracker-host",
-        default="",
-        metavar="HOST",
-        help="the tracker host, for a server the CLI does not reach by default. Each "
-        "read carries it in the place that read needs. With no host, every read goes "
-        "to the CLI's own default server",
-    )
+    add_tracker_arguments(parser)
     parser.add_argument(
         "--require-gate",
         action="append",
@@ -1407,12 +1555,6 @@ def add_tick_arguments(parser, worker_required=True):
         "Review round comes first and a worker still owns the item. With no --review a "
         "finish reaches the review state, which is the policy every other flag assumes",
     )
-    parser.add_argument(
-        "--gh-fixture",
-        help="JSON that stands in for any tracker read, so a verdict and a position "
-        "need no network and no login (used by the tests). It keeps this name "
-        "because scripts/close_item.py reads the same file in the same format",
-    )
 
 
 def main(argv=None):
@@ -1425,7 +1567,10 @@ def main(argv=None):
         description=(
             "Answer what the Worker watch asks about one worker: is a live agent "
             "process at work in this worktree, and is a transition due for its "
-            "work item. The phase subcommand computes and writes nothing. The tick "
+            "work item. The start subcommand answers the question before all of those: "
+            "may this work item start at all. It reads two facts, the ready-for-agent "
+            "label and the board card, and it writes nothing. "
+            "The phase subcommand computes and writes nothing. The tick "
             "subcommand computes through the same code path and then applies the one "
             "transition it computed. A merged pull request is one of those transitions, "
             "and it closes the item. It composes no prompt, kills no process, moves no "
@@ -1452,6 +1597,52 @@ def main(argv=None):
         metavar="PATTERN",
         help="a regular expression for the agent's process name. The caller reads "
         "it from references/harnesses/<harness>.md, so this seam names no harness",
+    )
+
+    opener = subcommands.add_parser(
+        "start",
+        help="may this work item start? Exit 0 both facts, non-zero one fact or "
+        "neither. It writes nothing at all",
+        description=(
+            "The two-facts start gate. A work item may start when it carries the "
+            "ready-for-agent label and its board card sits in the start column. Exit 0 "
+            "means both facts hold, and the printed line names them. Exit 1 means one "
+            "fact holds or neither does, and the line names which one. A one-fact answer "
+            "is a parked item or a forgotten drag. A no-fact answer is where a groomed "
+            "item rests. "
+            "Exactly one fact is never an error and never a refusal, so the column "
+            "before the start column stays the maintainer's own lane. With no board "
+            "coordinates the label alone decides, and that absence is never an error. "
+            "It writes no tracker command and moves no card, so it can be run against a "
+            "live tracker. The board read needs read:project on the token and no write "
+            "scope."
+        ),
+    )
+    opener.add_argument("--item", required=True, type=int, help="the work item number")
+    add_tracker_arguments(opener)
+    opener.add_argument(
+        "--board-project",
+        default=0,
+        type=int,
+        metavar="NUMBER",
+        help="the project number of the board that holds the card. The caller reads it "
+        "from the Project board section of docs/agents/issue-tracker.md, so this seam "
+        "holds no board of its own. With this flag missing the label alone decides",
+    )
+    opener.add_argument(
+        "--board-owner",
+        default="",
+        metavar="OWNER",
+        help="the owner the board belongs to, from the same section. With this flag "
+        "missing the label alone decides",
+    )
+    opener.add_argument(
+        "--start-column",
+        default="",
+        metavar="NAME",
+        help="the name of the start column, from the same section. It is a name and "
+        "never an option id, because nothing writes a card. With this flag missing the "
+        "label alone decides",
     )
 
     predicate = subcommands.add_parser(
@@ -1534,7 +1725,28 @@ def main(argv=None):
         print(line)
         return code
 
-    # `phase` and `tick` are the other two subcommands, and they read one plan, so one
+    # This run builds one **Tracker adapter**, from the four flags that name the
+    # tracker. Every read and every write past this point goes through it. So no function
+    # past here carries a CLI name, a host, a repository or a fixture path (ADR 0040). The
+    # construction reads nothing, so an unreadable fixture is still an outcome and never a
+    # traceback. `ready` returned above, because it reads a process and no tracker.
+    tracker = Tracker(args.tracker_cli, args.tracker_host, args.repo, args.gh_fixture)
+
+    # **`start` reads no worker at all.** It answers whether an item may start, which is
+    # the question before there is any worker to read. So it takes none of the four worker
+    # flags, and it returns before the validation that requires them.
+    if args.command == "start":
+        code, line = start(
+            args.item,
+            tracker,
+            args.board_project,
+            args.board_owner,
+            args.start_column,
+        )
+        print(line)
+        return code
+
+    # `phase` and `tick` are the last two subcommands, and they read one plan, so one
     # validation serves both. **A claim reads no worker.** It names one transition and
     # applies it, so `tick --claim` is the one form that can leave the four worker flags
     # out. Every other form still needs all four, and a missing one is a usage error
@@ -1569,21 +1781,15 @@ def main(argv=None):
     # caller that names no layer requires none (ADR 0036).
     required = tuple(args.require_gate or ())
 
-    # This run builds one **Tracker adapter**, from the four flags that name the
-    # tracker. Every read and every write a tick makes goes through it. So no function
-    # past this point carries a CLI name, a host, a repository or a fixture path
-    # (ADR 0040). The construction reads nothing, so an unreadable fixture is still the
-    # `unreadable` outcome and never a traceback.
-    tracker = Tracker(args.tracker_cli, args.tracker_host, args.repo, args.gh_fixture)
-
     if claiming:
         code, line = claim(args.item, tracker)
         print(line)
         return code
 
-    # `required=True` on `--item` leaves no fourth case, so the last branch is
-    # unconditional rather than a third `if`. That is what keeps a fall-through out of
-    # the exit contract: an implicit `None` would exit 0 and read as a due transition.
+    # `ready`, `start` and a claim each returned above, so `phase` and `tick` are the two
+    # cases left. The last branch is unconditional rather than a second `if`. That is what
+    # keeps a fall-through out of the exit contract: an implicit `None` would exit 0 and
+    # read as a due transition.
     #
     # **The three close flags reach `tick` alone.** `phase` runs no close, so it takes
     # none of them and it stays the half that writes nothing at all.

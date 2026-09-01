@@ -240,12 +240,31 @@ this item's card in the start column. That is the second fact of a
 [ready queue](#what-next--pick-the-next-work) entry, beside the `ready-for-agent` label.
 The two coordinates, the name of that column and the one read live in that section of
 `docs/agents/issue-tracker.md`; read them from there, never from memory. Rationale:
-[`docs/adr/0054-the-board-is-an-input-not-a-mirror.md`](docs/adr/0054-the-board-is-an-input-not-a-mirror.md).
+[`docs/adr/0054-the-board-is-an-input-not-a-mirror.md`](docs/adr/0054-the-board-is-an-input-not-a-mirror.md)
+and
+[`docs/adr/0045-a-story-start-is-automatic-under-two-roofs.md`](docs/adr/0045-a-story-start-is-automatic-under-two-roofs.md).
+
+**A seam answers the two facts for one item**, so no session compares a column name by
+hand. It writes nothing and moves no card, and exit 0 means both facts hold:
+
+```bash
+python3 <plugin root>/scripts/worker_state.py start --item <N> \
+  --repo <owner>/<name> \
+  --tracker-cli <gh or glab> --tracker-host <host> \
+  --board-project <the project number from the tracker file> \
+  --board-owner <the owner from the tracker file> \
+  --start-column '<the column name from the tracker file>'
+```
+
+Where the tracker names no board, pass no board flag. The label then decides on its own,
+and that absence is never an error. The argument surface is
+`python3 <plugin root>/scripts/worker_state.py start --help`.
 
 Three rules:
 
-- **Write no card, anywhere.** No flow below moves one, and no seam takes a board
-  coordinate. A card write was a projection of the label, and it had seven writers that
+- **Write no card, anywhere.** No flow below moves one, and no seam builds a card write.
+  The three coordinates above reach one read and nothing else. A card write was a
+  projection of the label, and it had seven writers that
   each could forget it. **A closed item reaches `Done` through the board's own built-in
   item closed to Done workflow**, which the maintainer enables in the project settings.
 - **A drag is intent, in every column.** Nothing overwrites a card, so a card stays where
@@ -302,10 +321,18 @@ unattended loop.
 When the user asks **what next / what should I run / what's ready**: resolve the
 **ready queue** fresh (states change live, never cache).
 
-A work item is **ready** when it carries the `ready-for-agent` label (from
-`issue-tracker.md`) and every item in its `## Blocked by` list is closed (closed
-= satisfied; only still-open deps block). Skip items already `in-progress` or in
-the review state — a worker owns them.
+A work item is **ready** when it holds **two facts** and every item in its `## Blocked by`
+list is closed (closed = satisfied; only still-open deps block):
+
+1. It carries the `ready-for-agent` label (from `issue-tracker.md`).
+2. Its board card sits in the start column, whose name that same file gives.
+
+**Both facts are necessary, and one fact on its own is not ready.** A card in the start
+column with no label is not ready, and a labelled item whose card sits in `Ready` is not
+ready either. So `Ready` is the maintainer's own lane, and no agent enters it. Where the
+tracker names no board, the label alone is the whole gate
+([Board status](#board-status)). Skip items already `in-progress` or in the review state —
+a worker owns them.
 
 Read the tracker CLI from `issue-tracker.md`, list open items, and for each read
 its `## Blocked by` / `## Parent` edges (the `to-tickets` template). A child that
@@ -315,8 +342,17 @@ start in parallel), then fill to at least 5 with the soonest-unblocked blocked
 items (fewest open deps first), noting what each waits on. Offer to spawn a worker
 for whichever the user picks.
 
-**This read writes nothing to the board.** There is no reconcile pass and no sync command,
-because the board is an input ([Board status](#board-status)).
+**One board read answers the second fact for every item.** It is the one call
+[Board status](#board-status) names, and it returns every card, so this pass makes it once
+and adds no second read. **This read writes nothing to the board.** There is no reconcile
+pass and no sync command, because the board is an input.
+
+**Report every item that holds one fact and not the other, capped at 5 rows.** A forgotten
+drag otherwise reads as an empty queue, and nothing repairs the disagreement on its own.
+Name which fact is missing per item, because that is what the maintainer acts on: the
+label, or the drag. An item here is not an error and needs no comment — a parked story
+reads exactly the same way
+([`docs/adr/0045-a-story-start-is-automatic-under-two-roofs.md`](docs/adr/0045-a-story-start-is-automatic-under-two-roofs.md)).
 
 **Report every item at `to-review` beside the ready queue.** This pass already holds every
 open item's labels, so that list costs no second read. **No label records a merge ask.** The
