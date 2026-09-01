@@ -33,6 +33,12 @@ review:
                           # model+effort come from models.review; its vendor MUST
                           # differ from the impl role's
 
+# --- parallel spawn gate ---
+parallel_check: touches   # touches | off -> compare declared Touch sets before a parallel
+                          # spawn (ADR 0046). `off` compares nothing, which is today's
+                          # behaviour. An item with no `## Touches` block runs alone under
+                          # `touches`.
+
 # --- repo + tracker ---
 repo:     /Users/wagner.souza/git/wsza/orchestrator-skills   # main checkout; stays on main
 tracker:  # read from docs/agents/issue-tracker.md (GitHub / gh); do NOT redefine labels here
@@ -146,6 +152,14 @@ gates:
   `subprocess`, and in-process line coverage reads 0%. `mutation` is blank because
   layer 4 is off. Layer 5 runs in the orchestrator session, in the main checkout, at
   the close of the last child of a story.
+- **`parallel_check`** decides whether a **Touch set** gates a parallel spawn. With
+  `touches`, the queue tick compares two candidates' `## Touches` blocks with
+  `fnmatch`, and spawns them together only where the blocks are disjoint. An item
+  with no block runs alone, because silence reads as risk. With `off`, the tick
+  compares nothing and spawns every unblocked child, which is today's behaviour. A
+  Touch set is a declaration and not a constraint: no gate reads a diff against it,
+  so a wrong block costs one park and never a wrong merge
+  ([ADR 0046](../../orchestrator/docs/adr/0046-parallel-spawn-is-gated-on-a-declared-touch-set.md)).
 
 ## Why the recipe is nearly empty
 
