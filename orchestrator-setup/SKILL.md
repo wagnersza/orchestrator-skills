@@ -459,7 +459,18 @@ Take these in order; each leads with a recommendation.
    [ADR 0032](../orchestrator/docs/adr/0032-quality-gates-are-a-layered-contract.md).
    **The families are not a question here.** Step 1a detected them, and they go to
    `gates.langs`.
-8. **repo** — the absolute path to the main checkout (stays on the default
+8. **Parallel check** — `touches` or `off`. Recommend **touches**: the queue tick
+   compares two candidates' `## Touches` blocks with `fnmatch`, and spawns them
+   together only where the blocks are disjoint. **An item with no block runs alone**
+   under `touches`, because silence reads as risk and not as safety. Take `off` for a
+   repo that will not fill the blocks, where the tick then compares nothing and
+   spawns every unblocked child. The answer goes to `parallel_check` in the config
+   ([orchestrator.template.md](orchestrator.template.md)). The rule itself is
+   [ADR 0046](../orchestrator/docs/adr/0046-parallel-spawn-is-gated-on-a-declared-touch-set.md).
+   **A wrong block is never a question here.** The block is a declaration and not a
+   constraint. So no gate reads a diff against it, and this step asks only which
+   value the dial takes.
+9. **repo** — the absolute path to the main checkout (stays on the default
    branch).
 
 ## 4. Install the dependencies (zero-touch)
