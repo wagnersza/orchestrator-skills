@@ -11,17 +11,18 @@ yolo:     on              # required; the harness ref supplies the actual flag
 
 # --- right model for the job: one (model, effort) pair per role ---
 # Roles, the routing rule, and the cost profiles are in references/models.md.
-# This is plain `balanced`. This repo is markdown plus two small Python seams, so
-# `light` carries most items and `heavy` is the exception. A spawn takes `light`
-# unless a signal in the models note demands `heavy`. See `role_default`.
+# This is plain `balanced`. A spawn takes `medium` unless a named signal in the
+# models note steps it to `heavy` or `light`.
 models:
-  role_default: light     # this repo inverts the skill's default; see the models note
   heavy:                  # contract/vocabulary change, new skill, a seam plus its tests
     model:  opus-5
     effort: high
-  light:                  # single-file reference or doc edit, fully enumerated criteria
+  medium:                 # the ordinary work item; most items in this repo
     model:  sonnet-5
     effort: medium
+  light:                  # single-file reference or doc edit, fully enumerated criteria
+    model:  sonnet-5
+    effort: low
   review:                 # the adversarial reviewer (see `review` below)
     model:  gpt-5.6-sol   # the openai tier closest to opus-5; codex launches it
     effort: high          # codex tops out at `high`, so no clamp applies
@@ -98,31 +99,20 @@ gates:
   spawn.
 - **models** picks the right model for the job — one `(model, effort)` pair per
   **role**, not one global model. The orchestrator classifies each work item into
-  a role at spawn time (`heavy` / `light`). The routing rule and the effort ladder
-  live in `references/models.md`.
-  - **`role_default: light` inverts that rule for this repo.** The skill defaults to
-    `heavy` and drops to `light` on clear signals. It does this because its assumed
-    repo is application code. There, a mis-sized worker costs a whole round trip.
-    This repo is markdown skills plus two small Python seams. Here, a mis-sized
-    `light` worker loses one cheap `sonnet-5` spawn. So the default is `light`, and
-    `heavy` needs a signal. Take `heavy` only when one of these conditions is true:
-    - The item changes a **contract**. This is a `CONTEXT.md` unit, a config schema,
-      a close-transaction step, or a rule that a worker prompt depends on.
-    - The item adds a **new skill**, or a new ADR that reverses an earlier one.
-    - The item touches a **Python seam** (`scripts/*.py`) plus its test suite.
-    - The item spans **three or more files across two or more skills**.
-    - The item leaves a real decision open.
-    - The item is a **re-spawn** after a failed round.
-
-    Every other item is `light`. One reference edit, one ADR that adds a decision, a
-    doc fix, a link repair, a table column, or one test file is `light`. Report the
-    role on every spawn. A wrong call is then visible in one line.
-  - **`light` is the answer unless a signal above says otherwise.** A run on `opus-5`
-    costs several times the same run on `sonnet-5`, so a `heavy` call the item did not
-    need is money spent for nothing. The six conditions above are the whole list. Where
-    none of them is true, the spawn takes `light`, and a doubt is not a seventh
-    condition. Say which condition fired on every `heavy` spawn, and take `light` where
-    you can name none.
+  a role at spawn time (`heavy` / `medium` / `light`). The routing rule, the six
+  `heavy` signals and the three `light` conditions live in `references/models.md`;
+  this file restates none of them.
+  - **A spawn takes `medium` by default, and moves to `heavy` or `light` only on
+    a named signal.** `references/models.md` names six `heavy` signals and three
+    `light` conditions, and this file restates none of them. In this repo,
+    `heavy` most often fires on a change to a **contract**. A contract is a
+    `CONTEXT.md` unit, a config schema, a close-transaction step, or a rule a
+    worker prompt depends on. It also fires on a **new skill**, or on a change
+    to a **Python seam** (`scripts/*.py`) plus its test suite. `light` most often
+    fires on a single-file reference or doc edit with criteria fully enumerated.
+    Every other item takes `medium`: an ordinary reference edit, a fix, or a
+    docs pass whose shape the item already fixes. Report the role on every
+    spawn, so a wrong call is visible in one line.
   - **Effort** tunes how much the model *thinks*: `low | medium | high | xhigh | max`.
     Both frontier models default to `high`, and `heavy` sits at that default. The rung
     above it is not gone. A re-spawn after a failed round steps up, so a genuinely hard

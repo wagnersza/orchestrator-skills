@@ -23,7 +23,7 @@ session coordinates **worker** sessions: each worker is a
 | **Harness** | Agent CLI in the worker terminal — claude / codex / pi / copilot / cursor. Owns the yolo flag, the `--model` flag, and how effort is expressed. |
 | **Model** | Frontier model + **vendor** (anthropic / openai) + **effort**. Never hardcoded — resolved per role. |
 | **Effort** | How much the model *thinks*: `low`…`max`, default `high`. Some harnesses clamp the top (codex → `high`). |
-| **Role** | The class of job that picks the `(model, effort)` pair — **heavy** (multi-file/migration → strongest @ `xhigh`), **light** (scoped edit → cheaper @ `medium`), **review** (cross-vendor @ `high`). |
+| **Role** | The class of job that picks the `(model, effort)` pair — **heavy** (a contract, a schema, a code seam, three or more files, or an open decision → strongest @ `high`), **medium** (the ordinary work item, and the default → cheaper @ `medium`), **light** (one file, criteria fully enumerated, no open decision → cheaper @ `low`), **review** (cross-vendor @ `high`). |
 | **Cost profile** | A preset of all three role pairs — **conservative** / **balanced** (default) / **max-capability**. Setup asks this instead of interrogating role-by-role. Table + per-MTok prices in [`models.md`](orchestrator/references/models.md). |
 | **Worker** | A `(tool, harness, model)` triple on one work item. |
 | **Adversarial review** | Optional review by a second worker on a **different-vendor** model (e.g. implement opus-5, review gpt-5.6). Prompted for **coverage**, not self-filtering. |
