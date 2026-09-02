@@ -242,6 +242,33 @@ class SpawnItemTestCase(unittest.TestCase):
         replan = self.spawn(expect=EXIT_REFUSED)
         self.assertEqual(self.step(replan, 5)["status"], "blocked")
 
+    # --- the checklist is a file, not only a prompt section -------------------
+
+    def test_step_three_seeds_the_checklist_file_the_watch_reads(self):
+        """The prompt names the file, and `worker_state` reads that same path.
+
+        A worker that finds no file ticks no box. The watch then reads the item as
+        stalled however much work landed, and the close leaks the worktree.
+        """
+        self.worktree.mkdir()
+        self.child_in(self.worktree)
+
+        self.spawn(execute=True, expect=EXIT_OK)
+
+        seeded = self.worktree / ".orchestrator" / f"checklist-{ITEM}.md"
+        self.assertTrue(seeded.is_file(), f"no checklist at {seeded}")
+        self.assertEqual(seeded.read_text(), "- [ ] implement + self-test")
+
+    def test_step_three_is_done_only_where_both_files_already_match(self):
+        """A prompt on disk with no checklist beside it is not a finished step 3."""
+        self.worktree.mkdir()
+        self.child_in(self.worktree)
+        self.spawn(execute=True, expect=EXIT_OK)
+
+        (self.worktree / ".orchestrator" / f"checklist-{ITEM}.md").unlink()
+
+        self.assertEqual(self.step(self.spawn(), 3)["status"], "todo")
+
     # --- the label written before the prompt ---------------------------------
 
     def test_the_label_is_written_before_the_prompt_is_sent(self):

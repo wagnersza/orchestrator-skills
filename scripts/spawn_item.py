@@ -329,7 +329,10 @@ def build_plan(args, tracker, config, pair):
     # --- 3. the rendered prompt. A missing input refuses the whole spawn: a
     #        prompt with a field missing must never reach a worker.
     prompt_path = Path(args.prompt_file)
-    prompt_command = f"render {PROMPT_TEMPLATE.name} to {prompt_path}"
+    checklist_path = worker_state.checklist_path(args.worktree, args.item)
+    prompt_command = (
+        f"render {PROMPT_TEMPLATE.name} to {prompt_path}, and seed {checklist_path}"
+    )
     try:
         rendered = render_prompt(
             PROMPT_TEMPLATE.read_text(encoding="utf-8"),
@@ -345,15 +348,24 @@ def build_plan(args, tracker, config, pair):
         refusal = {"step": 3, "reason": reason, "exit_code": EXIT_REFUSED}
         steps.append(step(3, "prompt", prompt_command, STATUS_REFUSED, reason))
     else:
-        already = prompt_path.is_file() and prompt_path.read_text() == rendered
+        already = (
+            prompt_path.is_file()
+            and prompt_path.read_text() == rendered
+            and checklist_path.is_file()
+            and checklist_path.read_text() == args.checklist
+        )
         steps.append(
             step(
                 3,
                 "prompt",
                 prompt_command,
                 STATUS_DONE if already else STATUS_TODO,
-                "already rendered at this path" if already else "renders the prompt",
+                "already rendered at this path"
+                if already
+                else "renders the prompt, and seeds the checklist",
                 rendered=rendered,
+                checklist=args.checklist,
+                checklist_path=str(checklist_path),
             )
         )
 
@@ -550,6 +562,14 @@ def run_step(entry, tracker, prompt_path, item):
     if entry["step"] == 3:
         prompt_path.parent.mkdir(parents=True, exist_ok=True)
         prompt_path.write_text(entry["rendered"])
+        # The checklist is a second file, and not only a section of the prompt. The
+        # prompt tells the worker the file sits at the root of the worktree, and
+        # `worker_state.checklist_path` reads that same path to tell progress from a
+        # stall. A worker that finds no file ticks no box, so the watch reads it as
+        # stalled and the close leaks the worktree.
+        checklist = Path(entry["checklist_path"])
+        checklist.parent.mkdir(parents=True, exist_ok=True)
+        checklist.write_text(entry["checklist"])
         return
     if entry["step"] == 5:
         code, line = worker_state.claim(item, tracker)
