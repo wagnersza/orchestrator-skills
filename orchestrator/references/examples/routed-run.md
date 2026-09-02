@@ -9,8 +9,8 @@ The config it runs against is the peer example, fullstack-app.md.
 
 Two turns on `acme-app`, against the config in
 [`fullstack-app.md`](fullstack-app.md) — `tool: orca`, `harness: claude`,
-`models.heavy: opus-5 @ xhigh`, `models.light: sonnet-5 @ medium`, `review.enabled:
-false`, GitLab tracker. This repo has no runtime, so a trace of the flow is how the
+`models.heavy: opus-5 @ xhigh`, `models.medium: sonnet-5 @ medium`, `models.light:
+sonnet-5 @ low`, `review.enabled: false`, GitLab tracker. This repo has no runtime, so a trace of the flow is how the
 routing contract gets tested. The rules are in [`../../SKILL.md`](../../SKILL.md).
 The rows are in [`../skill-routing.md`](../skill-routing.md).
 
@@ -93,12 +93,19 @@ unreachable.
 
 ## Two variants worth tracing once
 
-- **A mixed batch.** `work on #58, max 5` finds two unblocked children: #59, a bug
-  with reproduction steps, and #60, a new endpoint. The verb resolves **per child**,
-  so #59's prompt carries `/diagnosing-bugs` and #60's carries `/implement`. The
-  report gives four fields per child: `#59 → /diagnosing-bugs · light · sonnet-5 ·
-  medium`, `#60 → /implement · heavy · opus-5 · xhigh`. One blanket skill for the
-  batch is the same defect as one blanket model.
+- **A mixed batch.** `work on #58, max 5` finds three unblocked children. #59 is a
+  bug with reproduction steps in one file. #62 is a settings toggle on an existing
+  page, with criteria already enumerated but touching two files. #60 is a new
+  endpoint that adds a page, an API route, and a migration. The verb resolves **per
+  child**, so #59's prompt carries `/diagnosing-bugs`, and #62's and #60's carry
+  `/implement`. #59 fires all three `light` conditions — one file, criteria
+  enumerated, no open decision — so it takes the `light` role. #62 touches two
+  files, so it misses the `light` file-count condition. It also fires no `heavy`
+  signal, so it takes the `medium` role instead. #60 touches three components at
+  once, a `heavy` signal, so it takes the `heavy` role. The report gives four
+  fields per child: `#59 → /diagnosing-bugs · light · sonnet-5 · low`, `#62 →
+  /implement · medium · sonnet-5 · medium`, `#60 → /implement · heavy · opus-5 ·
+  xhigh`. One blanket skill for the batch is the same defect as one blanket model.
 - **A fix round.** Review is off on this config, so this is the on-demand path:
   `review #61 adversarially` spawns a `gpt-5.6-terra` reviewer, which requests
   changes. The fix prompt goes back to the original #61 worker and re-enters

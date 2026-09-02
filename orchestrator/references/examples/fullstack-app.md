@@ -16,9 +16,12 @@ models:
   heavy:
     model:  opus-5
     effort: xhigh
-  light:
+  medium:
     model:  sonnet-5
     effort: medium
+  light:
+    model:  sonnet-5
+    effort: low
   review:
     model:  gpt-5.6-terra
     effort: high
@@ -41,6 +44,11 @@ evidence:   "real-data proof (playwright screenshot / curl JSON / DB row dump / 
 
 - A ticket that adds a page + API route + migration is **heavy** — it touches
   `apps/web`, `apps/api`, and `alembic/versions` at once.
+- A ticket that adds one field to an existing form is **medium**. Criteria are
+  already enumerated, but the ticket touches both `apps/web` and `apps/api`. It
+  fires no `heavy` signal, because it changes no schema and touches only two
+  files. It also fails one `light` condition, because it touches more than one
+  file, so it does not round down either.
 - A copy change, a single-component styling fix, or a test-only ticket with fully
   enumerated criteria is **light**.
 - Anything with a `db_gate` is heavy by definition (the rule in
