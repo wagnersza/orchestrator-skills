@@ -411,11 +411,11 @@ Take these in order; each leads with a recommendation.
    table in [`references/models.md`](../orchestrator/references/models.md) and let
    the user pick one, then show the resolved pairs:
 
-   | Profile | heavy | light | review | Relative cost |
-   |---------|-------|-------|--------|---------------|
-   | **conservative** | `opus-5` @ `medium` | `sonnet-5` @ `low` | `gpt-5.6-terra` @ `medium` | ~1× |
-   | **balanced** (recommended) | `opus-5` @ `high` | `sonnet-5` @ `medium` | `gpt-5.6-terra` @ `high` | ~2–3× |
-   | **max-capability** | `opus-5` @ `xhigh` | `opus-5` @ `high` | `gpt-5.6-sol` @ `high` | ~5–8× |
+   | Profile | heavy | medium | light | review | Relative cost |
+   |---------|-------|--------|-------|--------|---------------|
+   | **conservative** | `opus-5` @ `medium` | `sonnet-5` @ `low` | `sonnet-5` @ `low` | `gpt-5.6-terra` @ `medium` | ~1× |
+   | **balanced** (recommended) | `opus-5` @ `high` | `sonnet-5` @ `medium` | `sonnet-5` @ `low` | `gpt-5.6-terra` @ `high` | ~2–3× |
+   | **max-capability** | `opus-5` @ `xhigh` | `opus-5` @ `high` | `sonnet-5` @ `high` | `gpt-5.6-sol` @ `high` | ~5–8× |
 
    Recommend **balanced**. Say the multiplier is an ordering, not a budget figure
    — effort changes thinking tokens per item, so the spread is workload-dependent.
@@ -645,7 +645,7 @@ writing. Then:
   ```markdown
   ### Orchestrator
 
-  Runs <harness> workers via <tool> — <heavy.model>@<heavy.effort> for heavy items, <light.model>@<light.effort> for light[, cross-vendor review with <review.model>]. See `docs/agents/orchestrator.md`.
+  Runs <harness> workers via <tool> — <heavy.model>@<heavy.effort> for heavy items, <medium.model>@<medium.effort> for medium, <light.model>@<light.effort> for light[, cross-vendor review with <review.model>]. See `docs/agents/orchestrator.md`.
   ```
 
 - Ensure `.orchestrator/` is gitignored (the worker checklist files live there):

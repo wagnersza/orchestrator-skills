@@ -22,9 +22,12 @@ models:
   heavy:                  # multi-file feature, refactor, migration, open decisions
     model:  opus-5
     effort: high          # `xhigh` = max-capability profile; `medium` = conservative
+  medium:                 # the default role: every other work item, see
+    model:  sonnet-5      # references/models.md for the signal lists that route
+    effort: medium        # an item to `heavy` or `light` instead
   light:                  # single-file/scoped edit, fully enumerated criteria
     model:  sonnet-5
-    effort: medium
+    effort: low
   review:                 # the adversarial reviewer (see `review` below)
     model:  gpt-5.6-terra
     effort: high
@@ -93,8 +96,9 @@ gates:
   hardcoded in the skill body.
 - **models** picks the right model for the job — one `(model, effort)` pair per
   **role**, not one global model. The orchestrator classifies each work item into
-  a role at spawn time (`heavy` / `light`), defaulting to `heavy` and downgrading
-  only on clear signals. The routing rule and the effort ladder live in
+  a role at spawn time (`heavy` / `medium` / `light`). `medium` is the default
+  role — the orchestrator takes `heavy` or `light` only on a named signal. The
+  routing rule, the signal lists, and the effort ladder live in
   `references/models.md`.
   - **Effort** tunes how much the model *thinks*: `low | medium | high | xhigh | max`.
     Both frontier models default to `high`.
@@ -102,10 +106,11 @@ gates:
     `pi` at `xhigh`, `cursor` bakes effort into the model id. The harness
     reference holds the map, and the orchestrator reports any clamp.
   - **Cost profile.** The block above is `balanced`. `conservative` drops heavy to
-    `medium` and light to `low`; `max-capability` runs heavy at `xhigh` and light on
-    `opus-5` @ `high`. Full table + per-MTok prices in `references/models.md`.
-    Cheaper isn't always cheaper — a `light` worker that under-thinks costs a whole
-    round trip, more than the effort saved.
+    `medium` effort, and it runs both `medium` and `light` roles at `low` on
+    `sonnet-5`. `max-capability` runs heavy at `xhigh`, medium on `opus-5` @
+    `high`, and light on `sonnet-5` @ `high`. Full table + per-MTok prices in
+    `references/models.md`. Cheaper is not always cheaper — a worker that
+    under-thinks costs a whole round trip, more than the effort saved.
   - **Single-model setup?** Replace the `models:` block with a flat
     `model:`/`effort:` pair — every role then uses it (with `models.review`, or the
     legacy `review.model`, still honoured for review).
