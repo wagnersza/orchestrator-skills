@@ -422,7 +422,10 @@ launch command.
   children, and **it writes no `ready-for-agent` label on any of them**. So the rule that
   only a human writes that label survives word for word.
 - **The two roofs are `max_stories` and `max_workers` in the Config**, and the lower one
-  wins. The tick starts nothing where either one is full.
+  wins. The tick starts nothing where either one is full. The defaults are 2 live **Story
+  run**s and 4 live **Worker**s. **The two roofs must not multiply**, so the worst case is
+  4 live workers and never 2 times 4. **A Story run holds its Story slot until the parent
+  closes**, story proof included. So a story with one child left still holds a slot.
 - **An overlap delays an item and cancels nothing.** The next tick with a free slot and no
   live overlap starts it. `parallel_check: off` compares nothing.
 
@@ -445,8 +448,9 @@ This flow runs when the item carries `user-story`
 ([Resolve the item shape before you pick a flow](#resolve-the-item-shape-before-you-pick-a-flow)).
 The phrases that reach it are **work on N / work on #N / implement the unblocked tasks
 of #N / do #N, max K**: don't ask which child — spawn a worker for **every unblocked
-child at once**, capped at K (default 5). Resolve the children fresh exactly as in "What
-next?" (recurse through any `user-story` child to reach implementable leaves).
+child at once**, capped at K (default 4, which is the `max_workers` roof in the Config).
+Resolve the children fresh exactly as in "What next?" (recurse through any `user-story`
+child to reach implementable leaves).
 Ports stay per-item (`N` = work-item number), so batch-spawned siblings never
 collide. **Classify each child's role separately** — a batch usually mixes heavy,
 medium and light items, and giving them all one model is exactly the hardcoding
