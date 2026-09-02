@@ -300,6 +300,12 @@ the higher-numbered item and cancels nothing, so the next tick with a free slot 
 The comparison is on where `parallel_check` in **Config** is `touches`, and an item with no
 block is spawned alone. With `off` the tick compares nothing.
 
+**The block also answers the item's **Role**.** Three or more declared paths is the one
+`heavy` signal a machine can count, so the queue tick reads the block and fills `{role}` in
+the spawn command. Fewer than three reads **medium**, the documented default. **light** is
+never derived, because two of its three conditions are prose. So a wrong block costs one
+rung of model, and never a wrong merge.
+
 **It is a declaration, and not a constraint.** No gate reads a diff against it, and a worker
 that edits an undeclared file breaks no rule. The test-merge inside `scripts/merge_train.py`
 stays the real check, so a wrong block costs one park and never a wrong merge. That is the

@@ -842,7 +842,10 @@ the tracker rather than a worktree:
   three, and the label alone is then the whole gate.
 - **The spawn command is the whole `scripts/spawn_item.py` invocation**, with its own tool
   commands already in it. The tick fills five tokens of one work item into that string:
-  `{item}`, `{slug}`, `{title}`, `{body}` and `{skill}`. The argument surface of that seam
+  `{item}`, `{slug}`, `{title}`, `{body}`, `{skill}` and `{role}`. **Write `--role {role}`
+  into the string, and never a literal Role.** A literal makes every item the loop ever
+  starts take one Role, which is the batch-model defect the skill body already names. The
+  argument surface of that seam
   is its own `--help`, so this page restates none of it.
 - **Prove the precheck runs before the schedule exists.** Run the same command once by
   hand, from the repo root. Exit 1 is a quiet tick and it is the answer a fresh repo gives.

@@ -100,7 +100,11 @@ STATUS_SKIPPED = "skipped"
 STATUS_BLOCKED = "blocked"
 STATUS_FAILED = "failed"
 
-ROLES = ("heavy", "light", "review")
+# Every Role the vocabulary names, in the order `orchestrator/CONTEXT.md` lists them.
+# One list, read by the `--role` choices and by the config parse, so the two cannot
+# disagree. `scripts/test_spawn_item.py` reads the same names out of `CONTEXT.md` and
+# fails where this list drifts from it.
+ROLES = ("heavy", "medium", "light", "review")
 
 
 class ConfigError(RuntimeError):
@@ -120,6 +124,26 @@ class CommandError(RuntimeError):
 
 FENCE = re.compile(r"```yaml\n(.*?)```", re.DOTALL)
 ROLE_BLOCK = re.compile(r"^  (\w+):[^\n]*\n((?:    .+\n?)+)", re.MULTILINE)
+MODELS_KEY = re.compile(r"^models:[^\n]*$", re.MULTILINE)
+
+
+def models_block(body):
+    """The lines under the config's `models:` key, and nothing else.
+
+    The role scan is scoped to this block on purpose. `ROLE_BLOCK` matches any key at
+    two spaces of indent whose own keys sit at four, and `gates:` holds two of those
+    (`thresholds:` and `infra:`). So an unscoped scan cannot tell an unknown Role from
+    a key that was never a Role, and it can only stay silent about both.
+    """
+    key = MODELS_KEY.search(body)
+    if not key:
+        return ""
+    lines = []
+    for line in body[key.end() :].splitlines(keepends=True):
+        if line.strip() and not line.startswith("  "):
+            break
+        lines.append(line)
+    return "".join(lines)
 
 
 def parse_orchestrator_config(text):
@@ -140,8 +164,10 @@ def parse_orchestrator_config(text):
         return match.group(1) if match else ""
 
     roles = {}
-    for name, block in ROLE_BLOCK.findall(body):
+    unknown = []
+    for name, block in ROLE_BLOCK.findall(models_block(body)):
         if name not in ROLES:
+            unknown.append(name)
             continue
         model = re.search(r"model:\s*(\S+)", block)
         effort = re.search(r"effort:\s*(\S+)", block)
@@ -149,6 +175,11 @@ def parse_orchestrator_config(text):
             "model": model.group(1) if model else "",
             "effort": effort.group(1) if effort else "",
         }
+    if unknown:
+        raise ConfigError(
+            f"the config's models block names {', '.join(sorted(unknown))}, which "
+            f"is no Role. The Roles are {', '.join(ROLES)}"
+        )
     return {
         "tool": scalar("tool"),
         "harness": scalar("harness"),
@@ -557,7 +588,7 @@ def main(argv=None):
     parser.add_argument(
         "--role",
         required=True,
-        choices=("heavy", "light", "review"),
+        choices=ROLES,
         help="which model/effort pair to read from the config's models block",
     )
     parser.add_argument(
