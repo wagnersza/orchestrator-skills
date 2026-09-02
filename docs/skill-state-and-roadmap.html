@@ -705,7 +705,8 @@ flowchart LR
                 <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/180">#180</a>
                 the touch-set gate, and
                 <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/182">#182</a>
-                the two roofs and the bump. Add one child: the queue subcommand, and the
+                the two roofs (<code>max_stories</code> 2 and <code>max_workers</code> 4) and the
+                bump. Add one child: the queue subcommand, and the
                 repo-wide <code>orchestrator-queue</code> schedule that setup writes. The per-item
                 schedule is not setup's, because <code>spawn_item.py</code> owns it. Then close
                 <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/130">#130</a>.</td>
@@ -1079,7 +1080,9 @@ flowchart LR
       <div class="band border-rose-500 bg-white rounded-r-lg p-5 space-y-2">
         <p class="font-semibold text-sm">A schedule that starts workers</p>
         <p class="text-sm text-slate-600">This is the biggest one. A loop can spawn until the disk
-          fills. <b>The guard:</b> the two roofs, the touch-set gate, and one item per tick. All
+          fills. <b>The guard:</b> the two roofs, the touch-set gate, and one item per tick.
+          <code>max_stories</code> is 2 and <code>max_workers</code> is 4, and the lower roof wins,
+          so the worst case is 4 live workers and never 2 times 4. All
           three are already specified in story
           <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/178">#178</a>,
           which is why that story is wave 4 and not wave 1.</p>

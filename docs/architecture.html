@@ -437,6 +437,13 @@ flowchart TB
       </pre>
     </div>
 
+    <p class="text-slate-600 max-w-3xl"><b>Two roofs bound the cost, and the lower one wins.</b>
+      <code>max_stories</code> is 2, so no more than two Story runs are live at once.
+      <code>max_workers</code> is 4, so no more than four Workers are live across every run.
+      <b>The two roofs must not multiply</b>, so the worst case is 4 live workers and never 2 times
+      4. A Story run holds its slot until the parent closes, story proof included. The tick starts
+      nothing while either roof is full.</p>
+
     <div class="grid md:grid-cols-2 gap-6">
       <div class="overflow-x-auto rounded-lg border border-slate-200 bg-white">
         <table class="w-full text-sm">
