@@ -28,7 +28,7 @@ in the target repo. **Before anything else, load it.** If it's missing, run
 
 - **tool** → the concrete commands in [`references/tools/<tool>.md`](references/tools/_operations.md) (operation contract).
 - **harness + yolo** → the launch command from [`references/harnesses/<harness>.md`](references/harnesses/claude.md) (composes the yolo flag, the `--model` value, and the effort flag).
-- **models** → one `(model, effort)` pair per **role** (`heavy` / `light` / `review`). Never a hardcoded model — pick the right one for the job, see [Right model for the job](#right-model-for-the-job).
+- **models** → one `(model, effort)` pair per **role** (`heavy` / `medium` / `light` / `review`). Never a hardcoded model — pick the right one for the job, see [Right model for the job](#right-model-for-the-job).
 - **review** → whether to spawn a cross-vendor reviewer (model+effort from `models.review`; vendor asserted different — see [`references/models.md`](references/models.md)).
 - **repo** → the main checkout; all tracker/git-state ops run there, on the default branch.
 - **project recipe** → `setup_cmd`, `run_recipe` + `ports`, `db_gate`, `evidence` — the project-specific parts of the completion contract.
@@ -303,12 +303,16 @@ classify the work item, then resolve the pair. The role table, the effort ladder
 and the routing rule live in [`references/models.md`](references/models.md) —
 read it before the first spawn of a session.
 
-1. **Classify the item.** Default **`heavy`**. Choose `light` only when *all* hold:
-   one file/component touched, no schema change or `db_gate`, no new dependency,
-   and acceptance criteria fully enumerated on the work item. Ambiguous → `heavy`.
-   A fix round from adversarial review raises the effort by one rung (`heavy` at `xhigh`,
-   or `max` if `xhigh` already failed). A reviewer's verdict is the fact behind that step.
-   **A stalled worker raises nothing** — it gets one re-prompt and then a human
+1. **Classify the item.** Default **`medium`**, and step off it only on a named
+   signal. The `heavy` signal list and the `light` conditions both live in
+   [`references/models.md`](references/models.md). Read them there, and never
+   restate them here. A doubt is not a signal, so an item that fires no `heavy`
+   signal and misses one `light` condition stays `medium`.
+   **Step up one rung on a failed round.** `light` steps to `medium`, and `medium`
+   steps to `heavy`. A failed `heavy` round steps its effort up instead (`xhigh`, or
+   `max` if `xhigh` already failed), because there is no Role above it. A reviewer's
+   verdict is the fact behind that step.
+   **A stalled worker keeps its Role** — it gets one re-prompt and then a human
    ([`docs/adr/0058-one-re-prompt-then-a-human.md`](docs/adr/0058-one-re-prompt-then-a-human.md)).
 2. **Resolve** `models.<role>` → model + effort. A flat `model:`/`effort:` config
    applies to every role.
@@ -319,7 +323,7 @@ read it before the first spawn of a session.
    **yourself**: `claude` accepts a typo'd `--effort` with only a warning and then
    runs at the default, which scrolls away unseen in a TUI worker.
 4. **Report the choice** when reporting the spawn, after the routed skill:
-   `#23 → /implement · heavy · opus-5 · xhigh`. A wrong call is then visible and
+   `#23 → /implement · heavy · opus-5 · high`. A wrong call is then visible and
    correctable in one sentence. The skill field is the routed one, and it is a
    separate resolution from this one — see
    [Reporting to the user](#reporting-to-the-user).
@@ -444,9 +448,9 @@ of #N / do #N, max K**: don't ask which child — spawn a worker for **every unb
 child at once**, capped at K (default 5). Resolve the children fresh exactly as in "What
 next?" (recurse through any `user-story` child to reach implementable leaves).
 Ports stay per-item (`N` = work-item number), so batch-spawned siblings never
-collide. **Classify each child's role separately** — a batch usually mixes heavy
-and light items, and giving them all one model is exactly the hardcoding this
-avoids. **Resolve each child's verb separately too**, for the same reason: a batch
+collide. **Classify each child's role separately** — a batch usually mixes heavy,
+medium and light items, and giving them all one model is exactly the hardcoding
+this avoids. **Resolve each child's verb separately too**, for the same reason: a batch
 that mixes a bug and a feature splices `/diagnosing-bugs` into one prompt and
 `/implement` into the other. One blanket skill for the whole batch is the same defect
 as one blanket model. The verb is the one the child's own work item carries, and
@@ -822,7 +826,8 @@ worktree is a leak from a teardown that skipped op 12. Remove it by name
   code-changing follow-up appropriately for the harness. **One re-prompt, and then a
   human.** A worker that stalls again gets `needs-human`, which the tick writes
   ([On the tick](#on-the-tick--what-it-wrote-and-what-is-left-for-you)). Never diagnose why
-  it stopped. Never re-spawn it on a bigger model
+  it stopped. **A stall keeps the worker's Role** — never re-spawn it on a bigger
+  model or a stronger Role
   ([`docs/adr/0058-one-re-prompt-then-a-human.md`](docs/adr/0058-one-re-prompt-then-a-human.md)).
 
 The tick is what fires this rule without your asking
@@ -974,8 +979,9 @@ spends no retry.
   The item is then with a human, and every later tick leaves it alone. **Write no label, and
   clear none.** Offer the teardown as the pending decision, and do not run it.
 
-**Do not diagnose *why* the worker stalled.** **Never re-spawn it a rung up.** Both are
-judgement on a live terminal, and nothing here asks for either.
+**Do not diagnose *why* the worker stalled.** **Never re-spawn it a rung up — a stall
+keeps its Role.** Both are judgement on a live terminal, and nothing here asks for
+either.
 
 **No response above touches the automation.** It outlives the re-prompt, the fix round and
 this session, so there is nothing to restart. The seam still holds no state that changes an
@@ -1427,7 +1433,7 @@ it. Shape output for acting on, not for completeness:
 
 - **Lead with state, not narration.** First line is the board: what changed and
   what's running.
-  `#38 38-b5-contacts spawned · /implement · heavy · opus-5 · xhigh. 2 workers live.`
+  `#38 38-b5-contacts spawned · /implement · heavy · opus-5 · high. 2 workers live.`
   Never open with what you're about to do.
 - **Name the skill you routed to.** A verb resolved through
   [`references/skill-routing.md`](references/skill-routing.md) names its skill in the
@@ -1437,7 +1443,7 @@ it. Shape output for acting on, not for completeness:
   the skill — say that instead. The lane needs no line of its own: `ran here` and a
   spawn already read as the two lanes.
 - **A spawn line carries four fields, in this order:** the routed skill, the role,
-  the model, the effort — `#23 → /implement · heavy · opus-5 · xhigh`. The skill sits
+  the model, the effort — `#23 → /implement · heavy · opus-5 · high`. The skill sits
   first because it is what the worker does. The other three are how hard it thinks.
   A batch-spawn reports the four fields **per child**, so a mixed batch shows two
   different skills. A spawn with no routed skill drops the field and keeps the other
