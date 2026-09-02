@@ -405,16 +405,25 @@ and when the user names work with no number at all. The phrases that reach it ar
 **work on N / implement #N / implement X / start work on X**:
 
 1. **Already exists?** (op 1, worktree-exists?) — if a worktree matches the slug,
-   reuse it: get its worker handle (op 9) and just send the prompt (step 6). Only
-   continue if nothing matches.
-2. **Launch command** — classify the item's **role** and resolve its
-   `(model, effort)` pair (see [Right model for the job](#right-model-for-the-job)),
-   then compose `$CMD` from `references/harnesses/<harness>.md` using harness +
-   model + effort + yolo. Preflight any harness-specific requirement the reference
-   names; abort rather than send a dead prompt. **The routed skill is one of those
-   requirements.** Where the verb resolved to a `worker` row
+   reuse it: get its worker handle (op 9) and just send the prompt. Only continue if
+   nothing matches.
+2. **Run the seam.** `scripts/spawn_item.py` runs the rest of this flow, in seven
+   ordered steps: the worktree, the terminal, the rendered prompt, the readiness
+   gate, the `in-progress` label, the follow-along panel, and the item schedule. The
+   order, the exit codes and the argument surface are one home, the module docstring —
+   `python3 <plugin root>/scripts/spawn_item.py --help`. **Never restate that order
+   here or in a report.**
+
+   The seam reads `docs/agents/orchestrator.md` itself for the tool, the harness, the
+   yolo flag and the model pair. So this session composes no `$CMD` of its own, and it
+   resolves no launch command from a table. `--role` is the one judgement call this
+   session still makes: classify the item and resolve its role before the run (see
+   [Right model for the job](#right-model-for-the-job)).
+
+   **Preflight the routed skill before the run**, the same way this section always
+   has. Where the verb resolved to a `worker` row
    ([Resolve the verb before you act](#resolve-the-verb-before-you-act)), confirm the
-   skill is reachable by *this* harness, before you compose the prompt:
+   skill is reachable by *this* harness:
    - **claude** — the skill is a plugin skill, so confirm the plugin that ships it is
      installed. Every row in the routing table ships in `mattpocock-skills`, so the
      check is the `mattpocock-skills` line of the plugin check block in
@@ -429,43 +438,19 @@ and when the user names work with no number at all. The phrases that reach it ar
    verb fails hard. So it fails before a worktree exists, and not inside a worker that
    cannot run its first instruction.
 
-   **The plugin root is a requirement of this spawn too.** Where this session has not
+   **The plugin root is a requirement of this run too.** Where this session has not
    resolved it yet, run the preflight now
    ([Resolve the plugin root, and prove the seam runs](#resolve-the-plugin-root-and-prove-the-seam-runs)).
-   A failed check aborts the spawn as well, because step 4 gates readiness on that seam
-   and step 8 writes it into a schedule. Both would then fail, and the schedule would
-   fail silently.
-3. **worktree-create** (op 2) — branch + checkout + run `setup_cmd` via the tool's
-   setup hook, off the default branch (or stacked, if the item stacks). Capture
-   the worktree id/path.
-4. **worker-create** (op 3) — start `$CMD`; capture the **stable** handle to
-   prompt. Then **gate on readiness** before any prompt — see
-   [Gate readiness before the first prompt](#gate-readiness-before-the-first-prompt).
-5. **Claim the item first** — before prompting, so "what next?" won't hand it out twice.
-   **Run the seam's one named transition, and write no label by hand:**
+   A failed check aborts the spawn as well, because the seam's readiness gate needs
+   it and its last step writes it into a schedule.
 
-   ```bash
-   python3 <plugin root>/scripts/worker_state.py tick --claim --item <N> \
-     --repo <owner>/<name> --tracker-cli <gh or glab> --tracker-host <host>
-   ```
-
-   It swaps `ready-for-agent` → `in-progress` through the same writer every tick uses, so
-   there is one place the family is written and one place to fix it. Exit 4 is applied and
-   exit 2 is refused, and it refuses where the item wears `needs-human`. **One label swap,
-   and one family**, so nothing can stack. **It moves no card**, because the board is an
-   input ([Board status](#board-status)). Where the item sits inside the run is computed
-   from facts, so no second label is written here
-   ([`docs/adr/0053-one-work-state-label-and-a-computed-position.md`](docs/adr/0053-one-work-state-label-and-a-computed-position.md),
-   [`docs/adr/0056-the-tick-applies-the-transition-it-computed.md`](docs/adr/0056-the-tick-applies-the-transition-it-computed.md)).
-   Apply any parent-promotion the tracker conventions define (idempotent).
-6. **Write the checklist + deliver the prompt** — see below.
-7. **Follow-along panel** (op 7) — mandatory, where the tool records operation 7 as
-   supported: open the work item as a tab inside the worker's worktree. A tool that
-   records operation 7 as unsupported skips the step, and that absence is not an
-   error.
-8. **Create the Item automation** (op 11) — mandatory, and the last step of every
-   spawn. See
-   [Start the tick](#start-the-tick--one-item-automation-per-worker).
+   Read [Gate readiness before the first prompt](#gate-readiness-before-the-first-prompt)
+   for why the readiness gate is a process check and never a screen check. Read
+   [The prompt: checklist + completion contract](#the-prompt-checklist--completion-contract)
+   for how this session seeds the seam's checklist and prompt inputs. Read
+   [Start the tick](#start-the-tick--one-item-automation-per-worker) for the
+   `--schedule-command` this session passes in, and what it does after the seam
+   returns.
 
 ### Gate readiness before the first prompt
 
