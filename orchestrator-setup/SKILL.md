@@ -463,7 +463,17 @@ Take these in order; each leads with a recommendation.
    [ADR 0032](../orchestrator/docs/adr/0032-quality-gates-are-a-layered-contract.md).
    **The families are not a question here.** Step 1a detected them, and they go to
    `gates.langs`.
-8. **Parallel check** — `touches` or `off`. Recommend **touches**: the queue tick
+8. **Live story cap** — `max_stories`. Recommend **2**: it bounds how many Story runs are
+   live at once, and a run holds its Story slot until the parent closes, story proof
+   included.
+   Take **1** for a repo where one story at a time is enough. **The second roof is not a
+   question here.** `max_workers` bounds live Workers across every run, and its default is
+   4. The tick reads both roofs and the lower one wins, so it starts nothing where either
+   one is full. **The two roofs must not multiply**, so 2 stories and a cap of 4 give 4 live
+   workers and never 8. The answer goes to `max_stories` in the config
+   ([orchestrator.template.md](orchestrator.template.md)). The rule itself is
+   [ADR 0045](../orchestrator/docs/adr/0045-a-story-start-is-automatic-under-two-roofs.md).
+9. **Parallel check** — `touches` or `off`. Recommend **touches**: the queue tick
    compares two candidates' `## Touches` blocks with `fnmatch`, and spawns them
    together only where the blocks are disjoint. **An item with no block runs alone**
    under `touches`, because silence reads as risk and not as safety. Take `off` for a
@@ -474,8 +484,8 @@ Take these in order; each leads with a recommendation.
    **A wrong block is never a question here.** The block is a declaration and not a
    constraint. So no gate reads a diff against it, and this step asks only which
    value the dial takes.
-9. **repo** — the absolute path to the main checkout (stays on the default
-   branch).
+10. **repo** — the absolute path to the main checkout (stays on the default
+    branch).
 
 ## 4. Install the dependencies (zero-touch)
 
