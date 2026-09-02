@@ -382,14 +382,14 @@ schedule named `orchestrator-queue` ticks once a minute
 precheck is the whole tick, and it is the `queue` subcommand of the **Worker watch** seam:
 
 ```bash
-python3 <plugin root>/scripts/worker_state.py queue --repo <owner>/<name> --help
+python3 <plugin root>/scripts/worker_state.py queue --help
 ```
 
 **There is nothing for you to run here.** The exit codes, the order of the reads and the
 argument surface are one home, that module docstring and its `--help`. **Never restate
 them here or in a report.** Read them when you need them.
 
-One tick reads every open work item, and it applies the two facts of the ready queue above
+One tick reads every open work item, and it applies the two facts of the ready queue read
 to each one. It descends through any `user-story` parent to that parent's unblocked
 children. It counts the live **Story run**s and the live **Worker**s against the two roofs.
 Then it compares the declared **Touch set**s against every live worker, and starts **at

@@ -808,12 +808,16 @@ is the `queue` subcommand. And the schedule binds to the main checkout, because 
 the tracker rather than a worktree:
 
 ```bash
---name "orchestrator-queue" --trigger '* * * * *' \
+--name "orchestrator-queue" --trigger '* * * * *' --workspace "<the main checkout>" \
   --precheck "python3 <plugin root>/scripts/worker_state.py queue --repo <owner>/<name> --board-project <number> --board-owner <owner> --start-column '<column>' --max-stories <max_stories> --max-workers <max_workers> --parallel-check <parallel_check> --spawn-command '<the spawn_item.py invocation>'"
 ```
 
 - **The trigger is one tick a minute**, which is the cron form `'* * * * *'`. One item a
   minute is slow enough for a human to notice a wrong start and stop it.
+- **The workspace is the main checkout the `repo` field of the config names.** Pass the
+  workspace selector of that checkout, and never the flag that names a repository. A repo
+  selector cuts a new worktree per run, and this schedule reads the tracker rather than a
+  worktree. The two flag names are in operation 11 of the tool reference.
 - **`<plugin root>` is a literal path here, and never a shell variable.** The tool stores
   this string and runs it a minute later, in a shell that saw no assignment. So resolve the
   value and write it in, the same way a per-item precheck carries it
