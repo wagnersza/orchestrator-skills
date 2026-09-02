@@ -52,17 +52,41 @@ spawn time:
 
 | Role     | Job | Typical setting |
 |----------|-----|-----------------|
-| `heavy`  | Multi-file feature, refactor, migration, schema change, or any item whose spec leaves real decisions open. | strongest model, `xhigh` |
-| `light`  | Single-file/scoped edit, copy or config change, test-only work — fully enumerated acceptance criteria. | cheaper model, `medium` |
+| `heavy`  | A contract, config schema, close-transaction step or worker-prompt rule change. A new skill, a schema, a migration, a code seam, three or more files, or an open decision. | strongest model, `high` |
+| `medium` | Every other work item. Ordinary feature, fix, test or docs work whose shape the item already fixes. | cheaper model, `medium` |
+| `light`  | One file, acceptance criteria fully enumerated, no open decision. | cheaper model, `low` |
 | `review` | The cross-vendor adversarial reviewer. Review accuracy holds at lower effort. | different-vendor model, `high` |
 
-**Routing rule — default `heavy`, downgrade only on clear signals.** Pick `light`
-only when *all* hold: one file or one component touched, no schema/migration and
-no `db_gate` needed, no new dependency, and acceptance criteria fully enumerated
-in the work item. Anything ambiguous stays `heavy` — a mis-sized `light` worker
-under-thinks and burns a whole round trip, which costs more than the model
-did. State the chosen role and effort when reporting a spawn, so a wrong call is
-visible and correctable.
+**Routing rule — take `medium`, and step off it only on a named signal.**
+
+Take `heavy` where **one** of these signals fires:
+
+- The item changes a contract unit, the config schema, a close-transaction step, or a worker-prompt rule.
+- It adds a skill, or an ADR that reverses an earlier one.
+- It changes a schema, adds a migration, or needs `db_gate`.
+- It changes a code seam and its tests.
+- It touches three or more files across two or more components.
+- It leaves a decision open.
+- It is a re-spawn after a failed round.
+
+Take `light` where **all three** of these conditions hold:
+
+- One file.
+- Acceptance criteria fully enumerated in the work item.
+- No open decision.
+
+Everything else takes `medium`. A doubt is not a signal. An item that fires no
+`heavy` signal and misses one `light` condition takes `medium`, and it does not
+round up. Name the Role, the model, the effort and the signal in the spawn report.
+A wrong call is then visible and correctable in one sentence.
+
+**Step up one rung on a failed round.** `light` steps to `medium`, and `medium`
+steps to `heavy`. A failed `heavy` round steps its effort up instead, because there
+is no Role above it.
+
+This default reverses the default-`heavy` rule of ADR 0005. The rationale and the
+rejected options are in
+[`docs/adr/0059-medium-is-the-default-role.md`](../docs/adr/0059-medium-is-the-default-role.md).
 
 **Flat-config fallback.** A config with a single `model:` / `effort:` and no
 `models:` block uses that pair for every role (and `review.model` for review, as
@@ -74,11 +98,16 @@ Three preset `models:` blocks, cheapest to most capable. `/orchestrator-setup`
 offers these instead of asking role-by-role; every one is still per-role routing,
 so a `light` item never pays the `heavy` rate.
 
-| Profile | heavy | light | review | Relative cost |
-|---------|-------|-------|--------|---------------|
-| **conservative** | `opus-5` @ `medium` | `sonnet-5` @ `low` | `gpt-5.6-terra` @ `medium` | ~1× |
-| **balanced** (default) | `opus-5` @ `high` | `sonnet-5` @ `medium` | `gpt-5.6-terra` @ `high` | ~2–3× |
-| **max-capability** | `opus-5` @ `xhigh` | `opus-5` @ `high` | `gpt-5.6-sol` @ `high` | ~5–8× |
+| Profile | heavy | medium | light | review | Relative cost |
+|---------|-------|--------|-------|--------|---------------|
+| **conservative** | `opus-5` @ `medium` | `sonnet-5` @ `low` | `sonnet-5` @ `low` | `gpt-5.6-terra` @ `medium` | ~1× |
+| **balanced** (default) | `opus-5` @ `high` | `sonnet-5` @ `medium` | `sonnet-5` @ `low` | `gpt-5.6-terra` @ `high` | ~2–3× |
+| **max-capability** | `opus-5` @ `xhigh` | `opus-5` @ `high` | `sonnet-5` @ `high` | `gpt-5.6-sol` @ `high` | ~5–8× |
+
+`conservative` gives `medium` and `light` the same pair. `low` is the bottom of the
+effort ladder and `sonnet-5` is the cheapest model in the registry, so the two rungs
+have nowhere separate to go. That collision is a property of the ladder, not an
+error in the profile.
 
 **Read the multiplier as a range, not a number.** Effort changes how many tokens
 the model *thinks*, and that varies per item — the same `xhigh` spawn costs far
@@ -96,22 +125,24 @@ Per-MTok list prices (input / output), for reasoning about the table above:
 ### Choosing a profile
 
 - **conservative** — high-volume or well-specced work, or a personal-budget
-  project. `opus-5` at `medium` still holds quality on most items; `sonnet-5` at
-  `low` is for genuinely trivial ones. Expect a higher re-spawn rate: a `light`
-  worker at `low` that under-thinks costs a whole round trip, which can exceed
-  what the cheaper effort saved.
+  project. `opus-5` at `medium` still holds quality on the items that fire a
+  `heavy` signal. Expect a higher re-spawn rate, because every `medium` item runs
+  at `low` here. A worker that under-thinks costs a whole round trip, which can
+  exceed what the cheaper effort saved.
 - **balanced** — the default, and the right answer unless you know otherwise.
-  Both models at their own default effort.
+  `heavy` gets the strongest model at its own default effort, and the two cheaper
+  Roles sit one rung apart on `sonnet-5`.
 - **max-capability** — migrations, security-sensitive work, anything where a
-  missed bug costs more than the tokens. Note `light` runs `opus-5` here, so the
-  cheap tier isn't cheap: pick this when correctness dominates, not as a default.
+  missed bug costs more than the tokens. Note `medium` runs `opus-5` here and
+  `light` runs at `high`, so no rung is cheap. Pick this when correctness
+  dominates, not as a default.
 
 **Cheaper is not always cheaper.** The dominant cost in this system is a failed
 round trip — a worker that under-thinks, gets caught in review, and re-spawns a
-rung up pays for two spawns plus a review cycle. That's why the routing rule
-defaults to `heavy` and why an ambiguous item should not be dropped to `light`
-to save tokens. A fix round already steps effort up one rung, so a
-`conservative` config that mis-routes converges on `balanced` pricing anyway —
+rung up pays for two spawns plus a review cycle. That is why an item that fires a
+`heavy` signal takes `heavy` whatever the budget says, and why `light` needs all
+three of its conditions rather than two. A fix round already steps up one rung, so
+a `conservative` config that mis-routes converges on `balanced` pricing anyway,
 with the extra latency.
 
 **Effort is the lever, not the model.** Within a profile, moving `heavy` one rung
