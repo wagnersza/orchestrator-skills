@@ -40,7 +40,7 @@ In a TUI worker that warning scrolls away and the item quietly runs at `high`. S
 claude --model opus --effort xhigh --dangerously-skip-permissions
 ```
 
-A `light`-role worker, `model: sonnet-5`, `effort: medium` →
+A `medium`-role worker, `model: sonnet-5`, `effort: medium` →
 
 ```
 claude --model sonnet --effort medium --dangerously-skip-permissions
