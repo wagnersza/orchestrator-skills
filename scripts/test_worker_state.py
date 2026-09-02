@@ -46,6 +46,7 @@ import itertools
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -160,6 +161,27 @@ START = worker_state.START
 ONE_FACT = worker_state.ONE_FACT
 NO_FACT = worker_state.NO_FACT
 
+# The queue a tick reads. One story with two leaves, and a nested leaf under the first
+# one. Then a second story with a leaf of its own, and one standalone item. The numbers
+# order the candidates, so `LEAF_ONE` is the item a tick reaches first.
+STORY = 300
+LEAF_ONE = 301
+LEAF_TWO = 302
+NESTED_LEAF = 310
+STANDALONE = 400
+SECOND_STORY = 500
+SECOND_LEAF = 501
+
+# The label that makes a work item a spec rather than a leaf, and the two values
+# `parallel_check` takes. All three are named by the seam rather than by this file.
+USER_STORY = worker_state.USER_STORY
+TOUCHES = worker_state.TOUCHES
+OFF = worker_state.OFF
+
+# What the spawn command touches, one file per item it ran for. A queue case reads the
+# disk for that, so it proves the spawn ran rather than that a line said so.
+SPAWN_MARKER = "spawned-"
+
 # The stall windows, in the seconds the predicate takes. The command line takes `30m` and
 # `1h`, and one case still proves that parse.
 HALF_HOUR = 30 * 60
@@ -190,6 +212,54 @@ TICKED = UNTICKED.replace("- [ ]", "- [x]")
 # The proof box the checklist template ships where `run_recipe` is not blank. It is one
 # more box and nothing else, which is the whole point of it.
 PROOF_BOX = "- [ ] prove the feature works through the browser surface\n"
+
+
+def body(parent=0, blocked=(), touches=()):
+    """One work item body, holding the three `##` blocks a queue tick reads.
+
+    Each block takes the shape the `to-tickets` template writes, so a case names the edges
+    it wants rather than the Markdown behind them.
+    """
+    text = ""
+    if parent:
+        text += f"## Parent\n\n#{parent}\n\n"
+    if blocked:
+        text += "## Blocked by\n\n" + "".join(f"- #{one}\n" for one in blocked) + "\n"
+    if touches:
+        text += "## Touches\n\n" + "".join(f"- {one}\n" for one in touches) + "\n"
+    return text
+
+
+def story_queue():
+    """A queue holding one started story, its two leaves, and one standalone item.
+
+    The story holds both facts, so the tick can descend into it. Its two leaves declare
+    disjoint Touch sets, and the standalone item holds both facts of its own and belongs to
+    no story run. Each case takes this and edits the records it is about.
+    """
+    return {
+        str(STORY): {
+            "labels": [USER_STORY, READY_FOR_AGENT],
+            "board": START_COLUMN,
+            "title": "the story",
+        },
+        str(LEAF_ONE): {
+            "labels": [],
+            "title": "the first leaf",
+            "body": body(parent=STORY, touches=["scripts/one.py"]),
+        },
+        str(LEAF_TWO): {
+            "labels": [],
+            "title": "the second leaf",
+            "body": body(parent=STORY, touches=["scripts/two.py"]),
+        },
+        str(STANDALONE): {
+            "labels": [READY_FOR_AGENT],
+            "board": START_COLUMN,
+            "title": "a standalone item",
+            "body": body(touches=["docs/one.md"]),
+        },
+    }
 
 
 def git(cwd, *args):
@@ -2573,6 +2643,467 @@ class WorkerStateTestCase(unittest.TestCase):
         self.assertTrue(worker_state.touches_overlap([], ["scripts/worker_state.py"]))
         self.assertTrue(worker_state.touches_overlap(["scripts/worker_state.py"], []))
         self.assertTrue(worker_state.touches_overlap([], []))
+
+    # --- the queue tick (ADR 0045, ADR 0046) --------------------------------
+
+    def write_queue(self, items):
+        """Write a fixture holding a whole queue, and reset the write log beside it.
+
+        `write_fixture` holds one item, because every other case here reads one item. A
+        queue case reads them all, so it passes the records itself. Each value is the
+        record `scripts/tracker.py` documents, and a record with no `state` reads as open.
+        """
+        self.fixture = self.root / "gh.json"
+        self.fixture.write_text(json.dumps({"items": items}))
+        (self.root / "gh.json.writes").unlink(missing_ok=True)
+
+    def spawn_command(self):
+        """A spawn command that touches one file per item, and starts no agent at all."""
+        return f"touch {self.root / SPAWN_MARKER}{{item}}"
+
+    def spawned(self):
+        """Every work item the spawn command ran for, lowest number first."""
+        return sorted(
+            int(path.name[len(SPAWN_MARKER) :])
+            for path in self.root.glob(f"{SPAWN_MARKER}*")
+        )
+
+    def clear_spawned(self):
+        """Forget the earlier ticks, so the next assertion reads one tick's own spawns."""
+        for path in self.root.glob(f"{SPAWN_MARKER}*"):
+            path.unlink()
+
+    def queue_cli(
+        self,
+        *extra,
+        expect=EXIT_APPLIED,
+        stories=2,
+        workers=4,
+        check=TOUCHES,
+        spawn=None,
+        board=True,
+        fixture=True,
+        lines=1,
+    ):
+        """Run the whole body of a queue tick through the command line."""
+        return self.run_seam(
+            "queue",
+            *(("--gh-fixture", str(self.fixture)) if fixture else ()),
+            "--max-stories",
+            str(stories),
+            "--max-workers",
+            str(workers),
+            "--parallel-check",
+            check,
+            "--spawn-command",
+            self.spawn_command() if spawn is None else spawn,
+            *(
+                (
+                    "--board-project",
+                    str(BOARD_PROJECT),
+                    "--board-owner",
+                    BOARD_OWNER,
+                    "--start-column",
+                    START_COLUMN,
+                )
+                if board
+                else ()
+            ),
+            *extra,
+            expect=expect,
+            lines=lines,
+        )
+
+    def test_an_empty_queue_starts_nothing(self):
+        """No open work item is no error. The tick is quiet, so the run records as
+        skipped and the schedule's own prompt and provider never load."""
+        self.write_queue({})
+
+        line = self.queue_cli(expect=EXIT_NOTHING)
+
+        self.assertTrue(line.startswith("nothing:"), line)
+        self.assertEqual(self.spawned(), [])
+        self.assertEqual(self.writes(), [])
+
+    def test_one_startable_item_starts_and_the_tick_writes_no_label(self):
+        """The item that holds both facts starts. **The tick writes no work-state label of
+        its own**: the spawn seam writes the one label at its own step, before the prompt
+        reaches the worker. So a grep for a label write finds no path here."""
+        items = story_queue()
+        for gone in (STORY, LEAF_ONE, LEAF_TWO):
+            items.pop(str(gone))
+        self.write_queue(items)
+
+        line = self.queue_cli()
+
+        self.assertTrue(line.startswith(f"{START}:"), line)
+        self.assertIn(f"#{STANDALONE}", line)
+        self.assertIn("applied: the spawn ran:", line)
+        self.assertEqual(self.spawned(), [STANDALONE])
+        self.assertEqual(self.writes(), [])
+
+    def test_one_item_per_tick_whatever_the_queue_holds(self):
+        """A queue holding three startable items starts one. A tick that starts three is
+        a tick that fills a disk while nobody watches, and no flag raises the rule."""
+        self.write_queue(story_queue())
+
+        self.queue_cli()
+
+        self.assertEqual(self.spawned(), [LEAF_ONE])
+
+    def test_a_started_parent_is_never_spawned_for_the_work_itself(self):
+        """A `user-story` parent that holds both facts is a spec. The tick descends to its
+        unblocked children and starts one of those, and it writes no `ready-for-agent`
+        label on any child. So the rule that only a human writes that label survives."""
+        self.write_queue(story_queue())
+
+        line = self.queue_cli()
+
+        self.assertIn(f"work item #{LEAF_ONE} is the one item", line)
+        self.assertEqual(self.spawned(), [LEAF_ONE])
+        self.assertEqual(self.writes(), [])
+
+        # A child of a live story run needs neither fact of its own. The parent's card can
+        # go back to the maintainer's lane and the run still owns its children.
+        items = story_queue()
+        items[str(LEAF_ONE)]["labels"] = [IN_PROGRESS]
+        items[str(STORY)]["board"] = READY_LANE
+        items[str(STORY)]["labels"] = [USER_STORY]
+        items.pop(str(STANDALONE))
+        self.write_queue(items)
+        self.clear_spawned()
+
+        self.queue_cli()
+
+        self.assertEqual(self.spawned(), [LEAF_TWO])
+
+    def test_a_nested_user_story_child_is_descended_through(self):
+        """A child that carries the label is a nested spec, so the descent continues to
+        the implementable leaves."""
+        items = story_queue()
+        items.pop(str(LEAF_TWO))
+        items.pop(str(STANDALONE))
+        items[str(LEAF_ONE)]["labels"] = [USER_STORY]
+        items[str(NESTED_LEAF)] = {
+            "labels": [],
+            "title": "the nested leaf",
+            "body": body(parent=LEAF_ONE, touches=["scripts/three.py"]),
+        }
+        self.write_queue(items)
+
+        line = self.queue_cli()
+
+        self.assertIn(f"work item #{NESTED_LEAF} is the one item", line)
+        self.assertEqual(self.spawned(), [NESTED_LEAF])
+
+    def test_a_child_with_an_open_blocker_stays_unstarted(self):
+        """The descent reads the open-blocker predicate the Ready queue already reads. A
+        blocker absent from the open items is closed, and only a still-open edge blocks."""
+        items = story_queue()
+        items.pop(str(STANDALONE))
+        items[str(LEAF_ONE)]["body"] = body(
+            parent=STORY, blocked=[LEAF_TWO], touches=["scripts/one.py"]
+        )
+        self.write_queue(items)
+
+        self.queue_cli()
+
+        self.assertEqual(self.spawned(), [LEAF_TWO])
+
+        # The blocker is closed once it is absent from the open items, so the same edge
+        # blocks nothing on the next tick.
+        items.pop(str(LEAF_TWO))
+        self.write_queue(items)
+        self.clear_spawned()
+
+        self.queue_cli()
+
+        self.assertEqual(self.spawned(), [LEAF_ONE])
+
+    def test_an_overlapping_touch_set_delays_the_item_and_cancels_nothing(self):
+        """Two startable items whose Touch sets overlap run one after the other. The
+        second tick reads the first as a live worker and waits. **The delay cancels
+        nothing**: the item starts on the next tick with no live overlap."""
+        items = story_queue()
+        items.pop(str(STANDALONE))
+        items[str(LEAF_TWO)]["body"] = body(parent=STORY, touches=["scripts/one.py"])
+        self.write_queue(items)
+
+        self.queue_cli()
+
+        self.assertEqual(self.spawned(), [LEAF_ONE])
+
+        items[str(LEAF_ONE)]["labels"] = [IN_PROGRESS]
+        self.write_queue(items)
+        self.clear_spawned()
+
+        delayed = self.queue_cli(expect=EXIT_NOTHING)
+
+        self.assertIn("every candidate waits", delayed)
+        self.assertIn(f"#{LEAF_TWO} overlaps live worker #{LEAF_ONE}", delayed)
+        self.assertEqual(self.spawned(), [])
+        self.assertEqual(self.writes(), [])
+
+        items.pop(str(LEAF_ONE))
+        self.write_queue(items)
+
+        self.queue_cli()
+
+        self.assertEqual(self.spawned(), [LEAF_TWO])
+
+    def test_two_disjoint_touch_sets_run_in_parallel(self):
+        """Nothing delays the second item where the two blocks name no shared path. One
+        tick still starts one item, so the two start a minute apart."""
+        items = story_queue()
+        items.pop(str(STANDALONE))
+        self.write_queue(items)
+
+        self.queue_cli()
+
+        items[str(LEAF_ONE)]["labels"] = [IN_PROGRESS]
+        self.write_queue(items)
+
+        self.queue_cli()
+
+        self.assertEqual(self.spawned(), [LEAF_ONE, LEAF_TWO])
+
+    def test_with_parallel_check_off_no_comparison_runs(self):
+        """`off` compares nothing, and the behaviour before ADR 0046 stands. So the
+        overlap that delays under `touches` starts here."""
+        items = story_queue()
+        items.pop(str(STANDALONE))
+        items[str(LEAF_TWO)]["body"] = body(parent=STORY, touches=["scripts/one.py"])
+        items[str(LEAF_ONE)]["labels"] = [IN_PROGRESS]
+        self.write_queue(items)
+
+        self.queue_cli(expect=EXIT_NOTHING, check=TOUCHES)
+
+        self.assertEqual(self.spawned(), [])
+
+        self.queue_cli(check=OFF)
+
+        self.assertEqual(self.spawned(), [LEAF_TWO])
+
+    def test_either_roof_full_on_its_own_starts_nothing(self):
+        """`max_stories` bounds live story runs, and the worker cap bounds live workers
+        across every run. Either one full starts nothing, so the lower roof wins. Both
+        delay and neither cancels."""
+        items = story_queue()
+        items.pop(str(LEAF_TWO))
+        items.pop(str(STANDALONE))
+        items[str(LEAF_ONE)]["labels"] = [IN_PROGRESS]
+        items[str(SECOND_STORY)] = {
+            "labels": [USER_STORY, READY_FOR_AGENT],
+            "board": START_COLUMN,
+            "title": "the second story",
+        }
+        items[str(SECOND_LEAF)] = {
+            "labels": [],
+            "title": "the leaf of the second story",
+            "body": body(parent=SECOND_STORY, touches=["scripts/four.py"]),
+        }
+        self.write_queue(items)
+
+        capped = self.queue_cli(expect=EXIT_NOTHING, workers=1)
+
+        self.assertIn("against a worker cap of 1", capped)
+        self.assertEqual(self.spawned(), [])
+
+        roofed = self.queue_cli(expect=EXIT_NOTHING, stories=1)
+
+        self.assertIn(f"#{SECOND_LEAF} opens a story run past the roof of 1", roofed)
+        self.assertEqual(self.spawned(), [])
+        self.assertEqual(self.writes(), [])
+
+        # With room for the second run it starts, so each roof delayed and cancelled
+        # nothing.
+        self.queue_cli(stories=2, workers=4)
+
+        self.assertEqual(self.spawned(), [SECOND_LEAF])
+
+    def test_a_standalone_item_holds_no_story_slot(self):
+        """The roof bounds story runs. An item with no `user-story` ancestor is no story
+        run, so a full story roof leaves it startable."""
+        items = story_queue()
+        items.pop(str(LEAF_TWO))
+        items[str(LEAF_ONE)]["labels"] = [IN_PROGRESS]
+        self.write_queue(items)
+
+        line = self.queue_cli(stories=1)
+
+        self.assertIn(f"work item #{STANDALONE} is the one item", line)
+        self.assertEqual(self.spawned(), [STANDALONE])
+
+    def test_the_queue_report_names_every_item_that_holds_one_fact(self):
+        """A forgotten drag otherwise reads as an empty queue, and nothing repairs the
+        disagreement on its own. So the parked items ride the line of a quiet tick, and
+        that is never an error, never a refusal and never a comment."""
+        items = story_queue()
+        items[str(STORY)]["board"] = READY_LANE
+        items[str(STANDALONE)]["board"] = READY_LANE
+        self.write_queue(items)
+
+        line = self.queue_cli(expect=EXIT_NOTHING)
+
+        self.assertIn("hold one fact and not the other", line)
+        self.assertIn(f"#{STORY}", line)
+        self.assertIn(f"#{STANDALONE}", line)
+        for word in ("error", "refused"):
+            self.assertNotIn(word, line)
+        self.assertEqual(self.spawned(), [])
+        self.assertEqual(self.writes(), [])
+
+    def test_a_failed_spawn_refuses_with_needs_human_and_one_comment(self):
+        """A spawn that exited non-zero is a refusal. The item takes `needs-human` plus one
+        comment that says what this tick ran, so the maintainer repairs the one thing that
+        stopped it. **Exactly one work-state label lands.**"""
+        items = story_queue()
+        for gone in (STORY, LEAF_ONE, LEAF_TWO):
+            items.pop(str(gone))
+        self.write_queue(items)
+
+        line = self.queue_cli(expect=EXIT_REFUSED, spawn="exit 9")
+
+        self.assertIn(NEEDS_HUMAN, line)
+        self.assertIn("exited 9", line)
+        self.assertEqual(self.work_states_after([READY_FOR_AGENT]), [NEEDS_HUMAN])
+        self.assertEqual(len(self.swaps()), 1)
+        self.assertEqual(len([one for one in self.writes() if "comment" in one]), 1)
+
+        # And the item it wrote is no candidate on the next tick.
+        items[str(STANDALONE)]["labels"] = [NEEDS_HUMAN]
+        self.write_queue(items)
+
+        self.queue_cli(expect=EXIT_NOTHING)
+
+        self.assertEqual(self.spawned(), [])
+
+    def test_the_skill_comes_from_the_type_label_of_the_item(self):
+        """A queue tick has no verb, so it reads the type label the item already carries.
+        The one mapping is orchestrator/references/skill-routing.md: a `bug` reaches the
+        diagnosis skill, and every other type label reaches the implementation one."""
+        items = story_queue()
+        for gone in (STORY, LEAF_ONE, LEAF_TWO):
+            items.pop(str(gone))
+        self.write_queue(items)
+
+        routed = self.queue_cli(spawn="echo {skill} > " + str(self.root / "skill"))
+        implement = (self.root / "skill").read_text().strip()
+
+        items[str(STANDALONE)]["labels"] = [READY_FOR_AGENT, "bug"]
+        self.write_queue(items)
+        self.queue_cli(spawn="echo {skill} > " + str(self.root / "skill"))
+        diagnose = (self.root / "skill").read_text().strip()
+
+        self.assertEqual(implement, "/implement")
+        self.assertEqual(diagnose, "/diagnosing-bugs")
+        self.assertNotIn("/implement", routed.split("the spawn ran:")[0])
+
+    def test_the_worktree_name_carries_the_item_number_first(self):
+        """`{slug}` is the number and then the first words of the title, so a worktree
+        name says which item it holds and two items with one title still get two names."""
+        self.assertEqual(
+            worker_state.slug_of(
+                212, "The queue subcommand, and the schedule at setup"
+            ),
+            "212-the-queue-subcommand-and-the-schedule",
+        )
+        self.assertEqual(worker_state.slug_of(212, "!!!"), "212")
+
+    def test_the_title_and_the_body_reach_the_spawn_command_shell_quoted(self):
+        """An item body holds quotes, newlines and backticks, and the command runs through
+        a shell. So the two arrive quoted and no body can break the command apart."""
+        item = {
+            "number": 7,
+            "title": "it's a $HOME `title`",
+            "labels": [],
+            "body": "## Touches\n\n- a.py\n",
+        }
+
+        filled = worker_state.fill_spawn("run --title {title} --body {body}", item)
+
+        self.assertEqual(
+            shlex.split(filled),
+            ["run", "--title", item["title"], "--body", item["body"]],
+        )
+
+    def test_one_board_read_answers_the_card_of_every_open_item(self):
+        """The read answers every card at once, so a tick makes one board query whatever
+        the queue holds. One query per item is one Projects query per item every minute
+        (ADR 0045)."""
+        listed = [
+            {
+                "number": number,
+                "title": "an item",
+                "labels": [{"name": READY_FOR_AGENT}],
+                "body": body(touches=[f"scripts/{number}.py"]),
+            }
+            for number in (STANDALONE, SECOND_LEAF)
+        ]
+        log = self.fake_cli(
+            "gh",
+            issue=listed,
+            project={
+                "items": [
+                    {"status": START_COLUMN, "content": {"number": number}}
+                    for number in (STANDALONE, SECOND_LEAF)
+                ]
+            },
+        )
+
+        line = self.queue_cli("--repo", "owner/name", fixture=False)
+
+        self.assertIn(f"work item #{STANDALONE} is the one item", line)
+        ran = log.read_text().splitlines()
+        self.assertEqual(
+            [one for one in ran if one.startswith("project")],
+            [
+                f"project item-list {BOARD_PROJECT} --owner {BOARD_OWNER} "
+                f"--format json --limit 100"
+            ],
+        )
+        self.assertEqual(
+            [one for one in ran if one.startswith("issue")],
+            [
+                "issue list --state open --limit 200 --json number,title,labels,body "
+                "--repo owner/name"
+            ],
+        )
+
+    def test_a_queue_read_that_failed_starts_nothing(self):
+        """A read that failed cannot name a startable item, so nothing starts on it. It is
+        a refusal rather than a quiet tick, because a broken read for 21 ticks must not
+        read as 21 quiet minutes."""
+        self.write_queue(story_queue())
+        self.break_fixture()
+
+        line = self.queue_cli(expect=EXIT_REFUSED)
+
+        self.assertTrue(line.startswith("unreadable:"), line)
+        self.assertIn("starts nothing", line)
+        self.assertEqual(self.spawned(), [])
+
+    def test_the_queue_tick_reads_no_worker_and_a_bad_roof_is_a_usage_error(self):
+        """It answers which item starts next, which is the question before there is a
+        worker to read. So the four flags that name a worker are usage errors here. A roof
+        under 1 starts nothing at all, so it is a usage error too, and never a quiet tick
+        that nobody sees."""
+        self.write_queue(story_queue())
+
+        for flag, value in (
+            ("--worktree", str(self.worktree)),
+            ("--process", PROCESS_PATTERN),
+            ("--rounds", "3"),
+            ("--stall-after", "30m"),
+        ):
+            self.queue_cli(flag, value, expect=EXIT_USAGE, lines=0)
+
+        for roof in ({"stories": 0}, {"workers": 0}, {"stories": -1}):
+            self.queue_cli(expect=EXIT_USAGE, lines=0, **roof)
+
+        # No path exits 0, because exit 0 is what loads a schedule's own provider.
+        for code in (EXIT_NOTHING, EXIT_REFUSED, EXIT_APPLIED, EXIT_USAGE):
+            self.assertNotEqual(code, EXIT_COMPLETE)
 
 
 if __name__ == "__main__":
