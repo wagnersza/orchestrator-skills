@@ -184,6 +184,21 @@ body it files. No external template is edited, and none is forked
 ([ADR 0028](docs/adr/0028-drop-the-fork-and-pin-dial.md),
 [ADR 0046](docs/adr/0046-parallel-spawn-is-gated-on-a-declared-touch-set.md)).
 
+**One dispatch row per item-writing phrase family.** Each row is a pointer to the
+skill that answers it, and it restates none of that skill's rules. Read
+[`references/skill-routing.md`](references/skill-routing.md) for the full alias list.
+
+| Phrase family | Skill |
+|---|---|
+| "create a ticket", "file a ticket", "open an issue" | `/to-tickets` |
+| "create a spec", "write a spec" | `/to-spec` |
+| a request to sort or label existing items | `/triage` |
+
+**An item-writing flow writes the work item, its `## Touches` block and its type
+label, and starts nothing.** Act one — the `ready-for-agent` label and the board
+drag into the start column — stays the maintainer's own
+([Board status](#board-status)).
+
 **Lane `worker` — hand the skill to the worker.** Invoke nothing here. The
 invocation goes into the spawn prompt, so the worker's first act inside its own
 worktree is to enter the skill. [Spawn a worker](#spawn-a-worker-implement-x)
