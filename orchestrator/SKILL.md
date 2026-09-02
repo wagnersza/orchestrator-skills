@@ -374,6 +374,52 @@ and `herdr` create no schedule, so no tick fires and no transition lands
 ([Start the tick](#start-the-tick--one-item-automation-per-worker)). A maintainer who asks
 what next still sees the list, and can still ask for the train.
 
+### The queue tick — how work starts, and it is not you
+
+**A schedule starts the work, and no session starts an item by hand.** One repo-wide
+schedule named `orchestrator-queue` ticks once a minute
+([`orchestrator-setup`](../orchestrator-setup/SKILL.md) writes it at setup time). Its
+precheck is the whole tick, and it is the `queue` subcommand of the **Worker watch** seam:
+
+```bash
+python3 <plugin root>/scripts/worker_state.py queue --help
+```
+
+**There is nothing for you to run here.** The exit codes, the order of the reads and the
+argument surface are one home, that module docstring and its `--help`. **Never restate
+them here or in a report.** Read them when you need them.
+
+One tick reads every open work item, and it applies the two facts of the ready queue read
+to each one. It descends through any `user-story` parent to that parent's unblocked
+children. It counts the live **Story run**s and the live **Worker**s against the two roofs.
+Then it compares the declared **Touch set**s against every live worker, and starts **at
+most one** item. The spawn goes through `scripts/spawn_item.py`, so the tick composes no
+launch command.
+
+- **One item per tick, always.** A queue holding ten startable items starts one. That is a
+  hard rule and never a dial, because a tick that starts three fills a disk while nobody
+  watches.
+- **A `user-story` parent is never spawned for the work itself.** The tick descends to its
+  children, and **it writes no `ready-for-agent` label on any of them**. So the rule that
+  only a human writes that label survives word for word.
+- **The two roofs are `max_stories` and `max_workers` in the Config**, and the lower one
+  wins. The tick starts nothing where either one is full.
+- **An overlap delays an item and cancels nothing.** The next tick with a free slot and no
+  live overlap starts it. `parallel_check: off` compares nothing.
+
+**`work on N` stays the maintainer's own override, and it is a convenience rather than the
+mechanism** (["Work a #N"](#work-a-n--batch-spawn-its-unblocked-children),
+[Spawn a worker](#spawn-a-worker-implement-x)). It writes the label and spawns at once,
+because a person typed the number. **Offer it, and never take it on your own.** A session
+that spawns an item nobody asked for is the thing this schedule replaces. Rationale:
+[`docs/adr/0045-a-story-start-is-automatic-under-two-roofs.md`](docs/adr/0045-a-story-start-is-automatic-under-two-roofs.md)
+and
+[`docs/adr/0046-parallel-spawn-is-gated-on-a-declared-touch-set.md`](docs/adr/0046-parallel-spawn-is-gated-on-a-declared-touch-set.md).
+
+**Removing the schedule is the rollback.** With no `orchestrator-queue` schedule the loop
+falls back to `work on N`, and nothing else changes. A tool with no automation surface is
+already in that state.
+
 ## "Work a #N" — batch-spawn its unblocked children
 
 This flow runs when the item carries `user-story`

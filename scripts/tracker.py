@@ -21,6 +21,8 @@ item and reads its position with no network and no login. It holds one record pe
 item and one per pull request:
 
     {"items": {"54": {"state": "OPEN",
+                      "title": "The queue subcommand",
+                      "body": "## Parent\n\n#178\n",
                       "labels": ["in-progress"],
                       "comments": ["Verdict: approve", "an earlier note"],
                       "board": "To do"}},
@@ -31,8 +33,11 @@ item and one per pull request:
 `board` is the `Status` option name on that item's card. It is the one fact the board
 answers, and no caller writes it back (ADR 0054). `head` is the branch that pull
 request was opened from, and it is what a caller matches to find the pull request for
-a branch. Every key is optional. An item that is absent from a key reads as an item
-with none of that fact, and a key that is absent reads the same way.
+a branch. `title` and `body` are what a queue read asks for, and the body is where the
+`## Parent`, `## Blocked by` and `## Touches` edges live. Every key is optional. An
+item that is absent from a key reads as an item with none of that fact, and a key that
+is absent reads the same way. **A record with no `state` reads as open**, because a
+fixture that lists one item is a fixture about a live queue.
 
 In fixture mode a write runs nothing. It appends its command to
 `<fixture path>.writes`, one per line. That file is what a test reads to see which
@@ -54,6 +59,16 @@ GLAB = "glab"
 # How many cards one board read asks for. The number is part of the recipe in
 # `docs/agents/issue-tracker.md`, so it is no bound this module chose.
 BOARD_LIMIT = 100
+
+# How many open work items one queue read asks for. Both numbers are part of the recipe
+# in `orchestrator/references/tracker-reads.md`, so neither one is a bound this module
+# chose. One tracker pages with a limit and the other with a page size.
+ITEM_LIMIT = 200
+PAGE_SIZE = 100
+
+# The two spellings of an open work item. One tracker answers `OPEN` and the other
+# answers `opened`, so no caller compares either string itself.
+OPEN_STATES = ("OPEN", "OPENED")
 
 
 class TrackerError(RuntimeError):
@@ -98,6 +113,21 @@ def label_names(labels):
     ]
 
 
+def item_record(number, title, labels, body):
+    """One work item in the shape a queue read answers, whatever tracker it came from.
+
+    Four facts, and a queue tick reads no fifth: the number, the title a worktree name
+    is built from, the labels the start gate reads, and the body that carries the
+    `## Parent`, `## Blocked by` and `## Touches` edges.
+    """
+    return {
+        "number": int(number or 0),
+        "title": str(title or ""),
+        "labels": label_names(labels),
+        "body": str(body or ""),
+    }
+
+
 class Tracker:
     """The tracker one seam talks to: a CLI, a host, a repository and a fixture.
 
@@ -114,6 +144,9 @@ class Tracker:
         # adapter before it makes a read. A constructor that reads a file turns a failed
         # read into a traceback out of that construction.
         self._fixture: Any = None
+        # The cards of one board, held after the first read of them. `_board` explains
+        # why they are held.
+        self._cards: Any = None
 
     @property
     def fixture(self):
@@ -238,6 +271,96 @@ class Tracker:
         data = read_json([*argv, *self._repo_flag()])
         return {"state": data.get("state"), "labels": label_names(data.get("labels"))}
 
+    def open_items(self):
+        """Every open work item, lowest number first, in the `item_record` shape.
+
+        **The one list read, and a queue tick makes it once a minute.** The body comes
+        with it, because the `## Parent`, `## Blocked by` and `## Touches` edges live
+        there and a second read per item costs one command per item.
+
+        The order is by number, so a caller that starts one item per tick starts the
+        oldest candidate first. That is what makes an overlap a delay rather than a
+        cancellation (ADR 0046).
+
+        **A fixture record with no `state` reads as open.** A fixture that lists a work
+        item is a fixture about a live queue, so the common case needs no key.
+        """
+        if self.fixture is not None:
+            found = [
+                item_record(
+                    number,
+                    record.get("title"),
+                    record.get("labels"),
+                    record.get("body"),
+                )
+                for number, record in (self.fixture.get("items") or {}).items()
+                if str(record.get("state") or OPEN_STATES[0]).upper() in OPEN_STATES
+            ]
+        elif self.cli == GLAB:
+            found = self._glab_open_items()
+        else:
+            found = self._gh_open_items()
+        return sorted(found, key=lambda item: item["number"])
+
+    def _gh_open_items(self):
+        """The open items from `gh`, which answers all four fields in one command."""
+        return [
+            item_record(
+                entry.get("number"),
+                entry.get("title"),
+                entry.get("labels"),
+                entry.get("body"),
+            )
+            for entry in read_json(
+                [
+                    GH,
+                    "issue",
+                    "list",
+                    "--state",
+                    "open",
+                    "--limit",
+                    str(ITEM_LIMIT),
+                    "--json",
+                    "number,title,labels,body",
+                    *self._repo_flag(),
+                ],
+                "[]",
+            )
+            or []
+        ]
+
+    def _glab_open_items(self):
+        """The open items from `glab`, through its API rather than its issue list.
+
+        `glab issue list` is the flag trap `orchestrator/references/tracker-reads.md`
+        records: its JSON flag has another spelling, and it takes no `--state` at all.
+        So this read goes through `glab api`, and the project path is part of the URL.
+        That path is why the repository is required here, the same as it is for the two
+        other `glab api` reads above. The body arrives under its own name there.
+        """
+        if not self.repo:
+            raise TrackerError(
+                "a glab read of the open work items needs --repo as OWNER/NAME, "
+                "because the project path is part of the command"
+            )
+        argv = [
+            GLAB,
+            "api",
+            f"projects/{self.repo.replace('/', '%2F')}/issues"
+            f"?state=opened&per_page={PAGE_SIZE}",
+        ]
+        if self.host:
+            argv += ["--hostname", self.host]
+        return [
+            item_record(
+                entry.get("iid"),
+                entry.get("title"),
+                entry.get("labels"),
+                entry.get("description"),
+            )
+            for entry in read_json(argv, "[]") or []
+        ]
+
     def pull_request(self, number):
         """The pull request's state, and the commit its merge landed as.
 
@@ -309,11 +432,25 @@ class Tracker:
         """
         if self.fixture is not None:
             return str(self._item(item).get("board") or "")
-        data = read_json(self._board_list_argv(project, owner))
-        for entry in data.get("items") or []:
+        for entry in self._board(project, owner):
             if (entry.get("content") or {}).get("number") == item:
                 return str(entry.get("status") or "")
         return ""
+
+    def _board(self, project, owner):
+        """Every card on one board, read once per adapter.
+
+        **The read answers every card, so it is made once and held.** A queue tick asks
+        for the card of every open work item, and one call per item is one Projects query
+        per item every minute. So this adapter makes one query per tick whatever
+        the queue holds (ADR 0045). A caller that asks about a second board reads again,
+        because the held answer names the board it came from.
+        """
+        key = (project, owner)
+        if self._cards is None or self._cards[0] != key:
+            data = read_json(self._board_list_argv(project, owner))
+            self._cards = (key, list(data.get("items") or []))
+        return self._cards[1]
 
     # --- the argv a seam runs or prints
 

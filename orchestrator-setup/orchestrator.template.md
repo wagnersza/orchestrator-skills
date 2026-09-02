@@ -36,6 +36,19 @@ review:
                           # model+effort come from models.review; its vendor MUST
                           # differ from the impl role's
 
+# --- the two roofs on live work (ADR 0045) ---
+# The queue tick reads both, and the lower one wins. It starts nothing where either roof
+# is full.
+max_stories: 2            # live Story runs at once. A run holds its slot until the parent
+                          # closes, story proof included
+max_workers: 4            # live Workers across every run. The worst case is 4 workers, and
+                          # never 2 times 4
+
+# --- parallel spawn gate (ADR 0046) ---
+parallel_check: touches   # touches | off -> compare declared Touch sets before a parallel
+                          # spawn. `off` compares nothing. An item with no `## Touches`
+                          # block runs alone under `touches`
+
 # --- repo + tracker ---
 repo:     /abs/path/to/this/repo   # the main checkout; stays on the default branch
 tracker:  # read from docs/agents/issue-tracker.md; do NOT redefine labels or

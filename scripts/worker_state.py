@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""Answer what the **Worker watch** asks about one worker, in four subcommands.
+"""Answer what the **Worker watch** asks about one worker, in five subcommands.
 
 Three of them are the same question at a different moment. *Is a real agent at work in
 this worktree, and does that work need a decision now?* Readiness asks it before
 the first prompt. `phase` asks it and prints the answer. `tick` asks it and applies
 the answer. One seam answers all three, for every tool and every harness (ADR 0019).
 
-The fourth one asks the question that comes before all of them: *may this work item
-start at all?* `start` reads the two facts of a story start and prints the answer
-(ADR 0045).
+The other two ask the question that comes before all of them: *may this work item start
+at all?* `start` reads the two facts of a story start for one item and prints the answer.
+`queue` reads them for every open item, and starts one (ADR 0045).
 
 **`ready`** — is a live agent process running with its working directory inside
 this worktree? Exit 0 ready, non-zero not:
@@ -45,6 +45,66 @@ supported configuration, and its absence is never an error. The three coordinate
 arguments, and the caller reads them from `docs/agents/issue-tracker.md`, so this seam
 holds no board of its own. **The board read needs `read:project` on the token and no write
 scope**, because nothing here writes a card.
+
+**`queue`** — read the whole queue and start at most one work item. This is the whole
+body of a **Repo automation** tick, and it is the one subcommand that spawns:
+
+    python3 <plugin root>/scripts/worker_state.py queue --repo OWNER/NAME \\
+        --board-project '<the number the tracker file gives>' \\
+        --board-owner '<the owner the tracker file gives>' \\
+        --start-column '<the column name the tracker file gives>' \\
+        --max-stories 2 --max-workers 4 --parallel-check touches \\
+        --spawn-command '<the scripts/spawn_item.py invocation, with its tokens>'
+
+| Code | Meaning |
+|---|---|
+| 1 | nothing is due — the printed line names why each candidate waits |
+| 2 | refused — the spawn failed, so the item wears `needs-human` with one comment |
+| 4 | a worker was started — the line names the item and the command that ran |
+| 64 | a flag has a typo, or a roof under 1 |
+
+**No path exits 0 here either**, for the same reason `tick` has none. A schedule starts
+its agent on exit 0 alone, so every run records as skipped and no model loads on a tick.
+
+The tick reads in one order, and the order is the contract:
+
+| Step | What it reads, and what it decides |
+|---|---|
+| 1 | one list read answers every open work item, its labels and its body |
+| 2 | the worker cap answers first, because it bounds every run at once |
+| 3 | the start gate answers each item, over one board read |
+| 4 | the candidates are the authorised leaves that nobody owns and nothing blocks |
+| 5 | `max_stories` delays a candidate that opens a new **Story run** |
+| 6 | the **Touch set** compare delays a candidate that overlaps a live **Worker** |
+
+**One item per tick, always.** A queue that holds ten startable items starts one. A tick
+that starts three is a tick that fills a disk while nobody watches. One item a minute is
+slow enough for a human to notice and stop it. That is a hard rule and never a tuning
+value, so no flag raises it.
+
+**A `user-story` parent is never spawned for the work itself.** It is a spec, so the tick
+descends to its unblocked children and spawns one of those. A child that carries the same
+label is a nested spec, and the descent continues to the implementable leaves. **The tick
+writes no `ready-for-agent` label on any child**, so the rule that only a human writes
+that label survives word for word. A child of a live **Story run** needs neither fact.
+
+**The descent reads the same open-blocker predicate the Ready queue reads.** A blocker
+absent from the open items is closed, and only a still-open edge blocks. No second
+definition of unblocked is written.
+
+**A live Worker is an item wearing the in-progress label, and no process is read.**
+`scripts/spawn_item.py` writes that label before the prompt reaches the worker, and a
+**Close transaction** takes it off. A live **Story run** is a `user-story` parent that is
+owned itself, or one of whose descendants is. So one list read counts both roofs, and the
+lower roof wins.
+
+**A delay is never a cancellation.** A full roof and a **Touch set** overlap both leave
+the item ready. The next tick with a free slot and no live overlap starts it. So no item is
+quietly dropped from the queue (ADR 0046).
+
+**This subcommand writes no work-state label of its own.** The spawn is
+`--spawn-command`, and the seam behind it writes the one label at its own step, before
+the prompt reaches the worker. So a second tick cannot hand the same item out twice.
 
 **`phase`** — read three facts on disk and two on the tracker, and answer one
 question: *is a transition due for this work item?* This is the plan half of the
@@ -238,10 +298,14 @@ and posts one comment saying what the seam saw. A label with no reason leaves th
 maintainer to reconstruct one. Only the maintainer removes the label. A close that could not
 run writes it, and so does a stall that already spent its one retry.
 
-**What this seam refuses to do.** It composes no prompt, kills no process, moves no card,
-merges nothing and spawns nothing. **The merge stays the maintainer's own act**, and this
-seam only reads its result. It holds no state that changes an answer, and it writes no file
-anywhere, so a restart after each re-prompt is free.
+**What this seam refuses to do.** It composes no prompt, kills no process, moves no card
+and merges nothing. **The merge stays the maintainer's own act**, and this seam only reads
+its result. It holds no state that changes an answer, and it writes no file anywhere, so a
+restart after each re-prompt is free.
+
+**One subcommand spawns, and it composes no launch command to do it.** `queue` runs the
+`--spawn-command` its caller passed, and it fills the five tokens of one work item into
+that string. Every other subcommand spawns nothing.
 
 **It writes one work-state label per run, or one comment, or it runs one close.** The close is the one
 destructive act that left a session. It removes the worktree and the schedule of an item
@@ -260,6 +324,7 @@ import fnmatch
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 import time
@@ -533,26 +598,35 @@ TOUCHES_HEADING = re.compile(r"^##\s*Touches\s*$", re.MULTILINE)
 NEXT_HEADING = re.compile(r"^##\s", re.MULTILINE)
 
 
+def heading_block(body, heading):
+    """The text under one `##` heading of a work item body, or an empty string.
+
+    Every block a **Work item** carries takes one shape: a heading line, then one entry
+    per line, until the next heading or the end of the text. `## Touches`, `## Parent`
+    and `## Blocked by` are the three, so one reader serves all of them and no second
+    parse of that shape is written.
+    """
+    match = heading.search(body)
+    if not match:
+        return ""
+    tail = body[match.end() :]
+    next_heading = NEXT_HEADING.search(tail)
+    return tail[: next_heading.start()] if next_heading else tail
+
+
 def parse_touches(body):
     """Every path or glob a `## Touches` block names, in the item body's own order.
 
-    The block sits beside `## Blocked by` and `## Parent`. Each one takes the same
-    shape: a heading line, then one entry per line, until the next heading or the end
-    of the text.
+    The block sits beside `## Blocked by` and `## Parent`, and `heading_block` reads all
+    three.
 
     A body with no block, or a block with no lines under it, answers an empty list.
     `touches_overlap` reads an empty list as risk, so an undeclared item runs alone
     (ADR 0046). This function reads no tracker and no file system. The caller already
     holds the body it passes in.
     """
-    heading = TOUCHES_HEADING.search(body)
-    if not heading:
-        return []
-    tail = body[heading.end() :]
-    next_heading = NEXT_HEADING.search(tail)
-    block = tail[: next_heading.start()] if next_heading else tail
     entries = []
-    for line in block.splitlines():
+    for line in heading_block(body, TOUCHES_HEADING).splitlines():
         entry = re.sub(r"^\s*[-*+]\s*", "", line).strip()
         if entry:
             entries.append(entry)
@@ -1401,6 +1475,408 @@ def start(item, tracker, project=0, owner="", column=""):
     return (EXIT_DUE if answer == START else EXIT_NOTHING), f"{answer}: {detail}"
 
 
+# --- the queue tick (ADR 0045, ADR 0046) ------------------------------------
+
+# The label that makes a work item a spec rather than a leaf. A story is never spawned
+# for the work itself: the tick descends to its children. A child that carries the same
+# label is a nested spec, and the descent continues through it.
+USER_STORY = "user-story"
+
+# The **Work-state label**s that say somebody already owns the item — a **Worker**, a
+# reviewer, or the maintainer. An item wearing one of them is never a queue candidate.
+OWNED = (IN_PROGRESS, TO_REVIEW, NEEDS_HUMAN)
+
+# The two values `parallel_check` in the **Config** takes. `TOUCHES` compares the
+# declared **Touch set**s before a second item starts, and `OFF` compares nothing, which
+# is the behaviour before ADR 0046.
+TOUCHES = "touches"
+OFF = "off"
+
+# The two other `##` blocks a **Work item** body carries. Each one takes the shape
+# `heading_block` reads, so this seam writes no second parse of it.
+PARENT_HEADING = re.compile(r"^##\s*Parent\s*$", re.MULTILINE)
+BLOCKED_HEADING = re.compile(r"^##\s*Blocked by\s*$", re.MULTILINE)
+
+# A work-item reference inside one of those blocks. A number the prose of the block
+# mentions reads as an edge too, which is the rule
+# `orchestrator/references/tracker-reads.md` already records for the blockers.
+EDGE = re.compile(r"#(\d+)")
+
+# How many parked items one queue report names. The cap is the one every other report in
+# `orchestrator/SKILL.md` takes.
+REPORT_CAP = 5
+
+# How a worktree name is built from a title: the number, then the first words of the
+# title in lower case. The number leads, so the name says which item the worktree holds.
+SLUG_WORDS = 6
+NOT_SLUG = re.compile(r"[^a-z0-9]+")
+
+# The two skills a type label routes to. The one mapping is
+# `orchestrator/references/skill-routing.md`, and this adds no label family: `bug` is a
+# label every tracker ships.
+BUG = "bug"
+DIAGNOSE_SKILL = "/diagnosing-bugs"
+IMPLEMENT_SKILL = "/implement"
+
+# How much of a failed spawn's own output rides the comment a refusal posts. A command
+# can print a whole traceback, and a comment carries the first cause rather than all of
+# it.
+CAUSE_LIMIT = 400
+
+
+def parse_edges(body, heading):
+    """Every work-item number one `##` block of a body names, in the body's own order.
+
+    `## Parent` and `## Blocked by` both carry `#<n>` references, so one reader answers
+    both and no second definition of an edge is written. A body with no such block
+    answers an empty list.
+    """
+    return [int(number) for number in EDGE.findall(heading_block(body, heading))]
+
+
+def parent_of(body):
+    """The `## Parent` work item of one body, or 0 where the body names none.
+
+    The edge is the `## Parent` line of the child, per the `to-tickets` template. A body
+    that names more than one takes the first, because one child has one parent.
+    """
+    edges = parse_edges(body, PARENT_HEADING)
+    return edges[0] if edges else 0
+
+
+def open_blockers(item, open_numbers):
+    """Every `## Blocked by` edge of one work item that is still open.
+
+    **This is the predicate the Ready queue already reads, and no second definition of
+    unblocked is written.** A blocker that is absent from the open items is closed, and
+    only a still-open edge blocks.
+    """
+    return [
+        number
+        for number in parse_edges(item.get("body", ""), BLOCKED_HEADING)
+        if number in open_numbers
+    ]
+
+
+def slug_of(number, title):
+    """The worktree name of one work item: the number, then the first words of its title.
+
+    The number leads, so a worktree name says which item it holds and two items with the
+    same title still get two names. A title with no word characters answers the number
+    alone.
+    """
+    words = [word for word in NOT_SLUG.split(title.lower()) if word][:SLUG_WORDS]
+    return "-".join([str(number), *words])
+
+
+def skill_for(labels):
+    """The skill one work item's type label routes to.
+
+    A verb comes from a person who typed it, and a queue tick has no verb. So the tick
+    reads the type label the item already carries, and it resolves to the same skills the
+    verb table names. The mapping has one home,
+    `orchestrator/references/skill-routing.md`, and this seam restates no other row of
+    it.
+    """
+    return DIAGNOSE_SKILL if BUG in labels else IMPLEMENT_SKILL
+
+
+def children_of(items):
+    """Every open work item's children, keyed by the parent's number.
+
+    One list read answers the whole tree, so the descent makes no read per item.
+    """
+    found: dict[int, list[int]] = {}
+    for item in items:
+        parent = parent_of(item["body"])
+        if parent:
+            found.setdefault(parent, []).append(item["number"])
+    return found
+
+
+def descendants(number, children, seen=None):
+    """Every open work item under `number`, at any depth, lowest number first.
+
+    **A nested `user-story` child is descended through too**, down to the implementable
+    leaves, which is the rule the `work on N` flow already holds. `seen` guards a body
+    that names an ancestor of its own, so a cycle in the edges cannot become a cycle
+    here.
+    """
+    seen = set() if seen is None else seen
+    found = []
+    for child in children.get(number, ()):
+        if child in seen:
+            continue
+        seen.add(child)
+        found.append(child)
+        found += descendants(child, children, seen)
+    return sorted(found)
+
+
+def story_above(number, by_number):
+    """The nearest open `user-story` ancestor of one work item, or 0.
+
+    The walk follows `## Parent` upward and stops at the first item that carries the
+    label. A leaf with no such ancestor belongs to no **Story run**, so it holds no
+    **Story slot**.
+    """
+    seen = {number}
+    at = parent_of((by_number.get(number) or {}).get("body", ""))
+    while at and at not in seen:
+        seen.add(at)
+        item = by_number.get(at) or {}
+        if USER_STORY in item.get("labels", ()):
+            return at
+        at = parent_of(item.get("body", ""))
+    return 0
+
+
+def live_workers(items):
+    """Every open work item a **Worker** is at work on: the in-progress ones.
+
+    **The label is the fact, and no process is read.** `scripts/spawn_item.py` writes
+    that label at its step 5, before the prompt reaches the worker, and a **Close
+    transaction** takes it off. So one list read counts every live worker across every
+    run, and the tick holds no worktree of its own.
+    """
+    return [item for item in items if IN_PROGRESS in item["labels"]]
+
+
+def story_is_live(number, by_number, children):
+    """Whether the **Story run** of one `user-story` parent is live.
+
+    A run begins when its first child starts, and it holds its **Story slot** until the
+    parent closes, story proof included. The observable fact is a **Work-state label**:
+    the run is live where the parent itself is owned, which is the story proof, or where
+    one of its descendants is. ADR 0045 names the roof and leaves this count to the seam.
+
+    **A story whose every child has closed reads as no longer live, until the proof
+    claims the parent.** That window is a tick or two, and it can free a slot early. A
+    slot freed early costs one extra live story, and the worker cap still holds.
+    """
+    return any(
+        name in OWNED
+        for one in [number, *descendants(number, children)]
+        for name in (by_number.get(one) or {}).get("labels", ())
+    )
+
+
+def startable(number, by_number, open_numbers):
+    """Whether one open work item is a leaf this tick can start now.
+
+    Three facts: it is no `user-story` spec, nobody owns it yet, and every
+    `## Blocked by` edge of it is closed.
+    """
+    item = by_number.get(number) or {}
+    labels = item.get("labels", ())
+    if USER_STORY in labels or any(name in OWNED for name in labels):
+        return False
+    return not open_blockers(item, open_numbers)
+
+
+def overlapping_worker(item, live, parallel_check):
+    """The first live **Worker** whose **Touch set** overlaps `item`, or 0.
+
+    **With `parallel_check` set to `off` no comparison runs at all**, and the behaviour
+    before ADR 0046 stands. Under `touches` the compare reads the `## Touches` block of
+    each side, and an empty list on either side is an overlap: an item that declares
+    nothing runs alone, because silence reads as risk and not as safety.
+    """
+    if parallel_check != TOUCHES:
+        return 0
+    mine = parse_touches(item["body"])
+    for worker in live:
+        if touches_overlap(mine, parse_touches(worker["body"])):
+            return worker["number"]
+    return 0
+
+
+def queue_report(gates):
+    """The parked items a queue read names, as one clause of the line a tick prints.
+
+    An item that holds one fact and not the other is a parked story, or a forgotten drag.
+    A forgotten drag otherwise reads as an empty queue, and nothing repairs the
+    disagreement on its own. So the count and the first numbers ride the line. **It is
+    never an error and never a comment**, and the cap is the one every other report takes
+    (ADR 0045).
+    """
+    parked = sorted(
+        number for number, (answer, _) in gates.items() if answer == ONE_FACT
+    )
+    if not parked:
+        return ""
+    named = ", ".join(f"#{number}" for number in parked[:REPORT_CAP])
+    return f". {len(parked)} item(s) hold one fact and not the other: {named}"
+
+
+def queue_candidates(items, gates, by_number, children):
+    """Every work item this tick can start, lowest number first, and the live stories.
+
+    Returns `(the candidate numbers, the live Story run numbers)`.
+
+    Two roads reach a candidate, and both end at a leaf:
+
+    - **A leaf that holds both facts of a start gate is a candidate on its own.**
+    - **A `user-story` parent that holds both facts is never spawned for the work
+      itself.** The tick descends to its unblocked children instead, and it writes no
+      `ready-for-agent` label on any of them. So the rule that only a human writes that
+      label survives word for word.
+
+    **A child of a live Story run needs neither fact**, because act one already happened
+    for that story.
+    """
+    live_stories = {
+        item["number"]
+        for item in items
+        if USER_STORY in item["labels"]
+        and story_is_live(item["number"], by_number, children)
+    }
+    authorised = {
+        item["number"]
+        for item in items
+        if USER_STORY in item["labels"]
+        and (gates[item["number"]][0] == START or item["number"] in live_stories)
+    }
+    from_stories = {
+        leaf for story in authorised for leaf in descendants(story, children)
+    }
+    open_numbers = set(by_number)
+    candidates = [
+        number
+        for number in sorted(open_numbers)
+        if (number in from_stories or gates[number][0] == START)
+        and startable(number, by_number, open_numbers)
+    ]
+    return candidates, live_stories
+
+
+def queue_plan(tracker, board, roofs, parallel_check=TOUCHES):
+    """The one work item this tick starts, or None, plus the line that says why.
+
+    **One item per tick, always.** A queue that holds ten startable items starts one. A
+    tick that starts three is a tick that fills a disk while nobody watches. One item a
+    minute is slow enough for a human to notice and stop it. That is a hard rule and never
+    a tuning value, so no flag raises it.
+
+    The order of the reads is the contract:
+
+    1. One list read answers every open work item, its labels and its body.
+    2. The worker cap answers first, because it bounds every run at once.
+    3. The start gate answers each item, over one board read.
+    4. The candidates are the authorised leaves that nobody owns and nothing blocks.
+    5. `max_stories` delays a candidate that opens a new **Story run**.
+    6. The **Touch set** compare delays a candidate that overlaps a live **Worker**.
+
+    **A delay at step 5 or step 6 cancels nothing.** The next tick with a free slot and
+    no live overlap starts that item, so no item is quietly dropped from the queue
+    (ADR 0046).
+    """
+    max_stories, max_workers = roofs
+    items = tracker.open_items()
+    by_number = {item["number"]: item for item in items}
+    children = children_of(items)
+    live = live_workers(items)
+    if len(live) >= max_workers:
+        return None, (
+            f"nothing: {len(live)} live worker(s) against a worker cap of "
+            f"{max_workers}, so this tick starts nothing"
+        )
+    gates = {
+        item["number"]: start_gate(item["number"], item["labels"], tracker, *board)
+        for item in items
+    }
+    candidates, live_stories = queue_candidates(items, gates, by_number, children)
+    report = queue_report(gates)
+    if not candidates:
+        return None, (
+            f"nothing: none of the {len(items)} open work item(s) is startable on this "
+            f"tick{report}"
+        )
+    waiting = []
+    for number in candidates:
+        story = story_above(number, by_number)
+        if story and story not in live_stories and len(live_stories) >= max_stories:
+            waiting.append(
+                f"#{number} opens a story run past the roof of {max_stories}"
+            )
+            continue
+        clash = overlapping_worker(by_number[number], live, parallel_check)
+        if clash:
+            waiting.append(f"#{number} overlaps live worker #{clash}")
+            continue
+        return by_number[number], (
+            f"{START}: work item #{number} is the one item this tick starts, with "
+            f"{len(live)} of {max_workers} worker(s) and {len(live_stories)} of "
+            f"{max_stories} story run(s) live"
+        )
+    delayed = ". ".join(waiting[:REPORT_CAP])
+    return None, f"nothing: every candidate waits — {delayed}{report}"
+
+
+def fill_spawn(template, item):
+    """`--spawn-command` with every token of one work item filled in.
+
+    Five tokens, and each one is a value only this tick holds: `{item}`, `{slug}`,
+    `{title}`, `{body}` and `{skill}`. **The title and the body arrive shell-quoted**,
+    because an item body holds quotes, newlines and backticks and the command runs
+    through a shell. A token the template does not use is never replaced.
+
+    **This composes no launch command.** The whole invocation is the caller's own string,
+    the way `scripts/close_item.py` takes its teardown command. So this seam holds no
+    path to `scripts/spawn_item.py` and no flag of it, and a spawn that grows a flag
+    stays a Markdown change.
+    """
+    values = {
+        "item": str(item["number"]),
+        "slug": slug_of(item["number"], item["title"]),
+        "title": shlex.quote(item["title"]),
+        "body": shlex.quote(item["body"]),
+        "skill": skill_for(item["labels"]),
+    }
+    filled = template
+    for token, value in values.items():
+        filled = filled.replace("{" + token + "}", value)
+    return filled
+
+
+def queue(tracker, board, roofs, spawn_command, parallel_check=TOUCHES):
+    """The `queue` answer: `(exit code, the one line to print)`.
+
+    **This subcommand starts a worker, and it writes no work-state label of its own.**
+    The spawn is `--spawn-command`, and `scripts/spawn_item.py` runs the seven ordered
+    steps behind it. That seam writes the one label, at its step 5 and before the prompt
+    reaches the worker. So a second tick cannot hand the same item out twice, and a grep
+    for a label write finds no path here.
+
+    **A spawn that failed is a refusal.** The item takes `needs-human` with one comment
+    that carries what this tick ran, so the maintainer repairs the one thing that stopped
+    it rather than reconstructing a reason.
+    """
+    try:
+        item, line = queue_plan(tracker, board, roofs, parallel_check)
+    except (TrackerError, OSError, json.JSONDecodeError) as exc:
+        cause = " ".join(str(exc).split())
+        return EXIT_REFUSED, (
+            f"unreadable: the open work items are unreadable, so this tick reads no "
+            f"queue and starts nothing: {cause}"
+        )
+    if item is None:
+        return EXIT_NOTHING, line
+    command = fill_spawn(spawn_command, item)
+    proc = subprocess.run(command, shell=True, capture_output=True, text=True)
+    if proc.returncode != 0:
+        cause = " ".join((proc.stderr or proc.stdout).split())[:CAUSE_LIMIT]
+        _, refusal = needs_human(
+            tracker,
+            item["number"],
+            item["labels"],
+            f"the spawn of work item #{item['number']} exited {proc.returncode}: "
+            f"{cause}",
+        )
+        return EXIT_REFUSED, f"{line} — {refusal}"
+    return EXIT_APPLIED, f"{line} — applied: the spawn ran: {command}"
+
+
 # --- the two subcommands over that one plan ---------------------------------
 
 
@@ -1551,6 +2027,40 @@ def add_tracker_arguments(parser):
     )
 
 
+def add_board_arguments(parser):
+    """The three coordinates that name one board, added to one subcommand.
+
+    `start` reads one card and `queue` reads one per open item, so both take all three.
+    Written once, so the two can never drift apart on the board they read. With any one of
+    them missing the label alone decides, which is a supported configuration and never an
+    error (ADR 0045).
+    """
+    parser.add_argument(
+        "--board-project",
+        default=0,
+        type=int,
+        metavar="NUMBER",
+        help="the project number of the board that holds the card. The caller reads it "
+        "from the Project board section of docs/agents/issue-tracker.md, so this seam "
+        "holds no board of its own. With this flag missing the label alone decides",
+    )
+    parser.add_argument(
+        "--board-owner",
+        default="",
+        metavar="OWNER",
+        help="the owner the board belongs to, from the same section. With this flag "
+        "missing the label alone decides",
+    )
+    parser.add_argument(
+        "--start-column",
+        default="",
+        metavar="NAME",
+        help="the name of the start column, from the same section. It is a name and "
+        "never an option id, because nothing writes a card. With this flag missing the "
+        "label alone decides",
+    )
+
+
 def add_tick_arguments(parser, worker_required=True):
     """Every flag the plan reads, added to one subcommand.
 
@@ -1622,12 +2132,14 @@ def main(argv=None):
             "process at work in this worktree, and is a transition due for its "
             "work item. The start subcommand answers the question before all of those: "
             "may this work item start at all. It reads two facts, the ready-for-agent "
-            "label and the board card, and it writes nothing. "
+            "label and the board card, and it writes nothing. The queue subcommand reads "
+            "those same two facts for every open item, and starts at most one of them. "
             "The phase subcommand computes and writes nothing. The tick "
             "subcommand computes through the same code path and then applies the one "
             "transition it computed. A merged pull request is one of those transitions, "
             "and it closes the item. It composes no prompt, kills no process, moves no "
-            "card, merges nothing and spawns nothing."
+            "card and merges nothing. One subcommand spawns, and it runs the spawn "
+            "command its caller passed rather than a command of its own."
         ),
     )
     subcommands = parser.add_subparsers(dest="command", required=True)
@@ -1673,29 +2185,66 @@ def main(argv=None):
     )
     opener.add_argument("--item", required=True, type=int, help="the work item number")
     add_tracker_arguments(opener)
-    opener.add_argument(
-        "--board-project",
-        default=0,
+    add_board_arguments(opener)
+
+    queuer = subcommands.add_parser(
+        "queue",
+        help="read the whole queue and start at most one work item. No path exits 0",
+        description=(
+            "The whole body of a queue tick. It reads every open work item and applies "
+            "the two-facts start gate. It descends through any user-story parent to its "
+            "unblocked children. It counts the live story runs and the live workers "
+            "against the two roofs. It compares the declared Touch sets against every "
+            "live worker. Then it runs --spawn-command for at most one item. "
+            "One item per tick is a hard rule and never a tuning value, so no flag "
+            "raises it. Exit 4 means a worker was started, and the line names the item "
+            "and the command that ran. Exit 1 means nothing is due, and the line names "
+            "why each candidate waits. Exit 2 means refused: the spawn failed, so the "
+            "item wears needs-human with one comment. Exit 64 is a flag with a typo. No "
+            "path exits 0, so every run records as skipped and the schedule's own prompt "
+            "and provider never load. "
+            "It writes no work-state label of its own: the spawn seam writes the one "
+            "label, before the prompt reaches the worker. It moves no card and it "
+            "descends into no story it was not handed."
+        ),
+    )
+    add_tracker_arguments(queuer)
+    add_board_arguments(queuer)
+    queuer.add_argument(
+        "--max-stories",
+        required=True,
         type=int,
-        metavar="NUMBER",
-        help="the project number of the board that holds the card. The caller reads it "
-        "from the Project board section of docs/agents/issue-tracker.md, so this seam "
-        "holds no board of its own. With this flag missing the label alone decides",
+        metavar="N",
+        help="the roof on live story runs, which the caller resolves from `max_stories` "
+        "in the Config. There is no default, so the roof is never hardcoded here",
     )
-    opener.add_argument(
-        "--board-owner",
-        default="",
-        metavar="OWNER",
-        help="the owner the board belongs to, from the same section. With this flag "
-        "missing the label alone decides",
+    queuer.add_argument(
+        "--max-workers",
+        required=True,
+        type=int,
+        metavar="N",
+        help="the roof on live workers across every story run, which the caller resolves "
+        "from the worker cap in the Config. The lower of the two roofs wins. There is no "
+        "default, so the roof is never hardcoded here either",
     )
-    opener.add_argument(
-        "--start-column",
-        default="",
-        metavar="NAME",
-        help="the name of the start column, from the same section. It is a name and "
-        "never an option id, because nothing writes a card. With this flag missing the "
-        "label alone decides",
+    queuer.add_argument(
+        "--parallel-check",
+        default=TOUCHES,
+        choices=(TOUCHES, OFF),
+        help=f"whether a declared Touch set gates a second spawn, which the caller "
+        f"resolves from `parallel_check` in the Config. With {TOUCHES} the tick compares "
+        f"the ## Touches block of the candidate against every live worker, and an item "
+        f"with no block runs alone. With {OFF} nothing is compared "
+        f"(default: {TOUCHES})",
+    )
+    queuer.add_argument(
+        "--spawn-command",
+        required=True,
+        help="the command that turns one work item into a live worker, which the caller "
+        "reads from scripts/spawn_item.py. It takes {item}, {slug}, {title}, {body} and "
+        "{skill}. This tick fills all five, and the title and the body arrive "
+        "shell-quoted. So this seam holds no spawn flag of its own and composes no launch "
+        "command",
     )
 
     predicate = subcommands.add_parser(
@@ -1795,6 +2344,27 @@ def main(argv=None):
             args.board_project,
             args.board_owner,
             args.start_column,
+        )
+        print(line)
+        return code
+
+    # **`queue` reads no worker either.** It answers which item starts next, so it takes
+    # none of the four worker flags and it returns before the validation that requires
+    # them. The two roofs are its own bounds, and a roof under 1 starts nothing at all.
+    # So a bad value is a usage error rather than a silent tick.
+    if args.command == "queue":
+        for flag, value in (
+            ("--max-stories", args.max_stories),
+            ("--max-workers", args.max_workers),
+        ):
+            if value < 1:
+                parser.error(f"{flag} must be a roof of 1 or more, not {value}")
+        code, line = queue(
+            tracker,
+            (args.board_project, args.board_owner, args.start_column),
+            (args.max_stories, args.max_workers),
+            args.spawn_command,
+            parallel_check=args.parallel_check,
         )
         print(line)
         return code

@@ -217,6 +217,10 @@ For option 1, skip the interview entirely. Do this instead:
    **Then run step 5c**, the gate smoke run. A plane that just went live denies a push
    against a gate command that does not exist. So an existing user learns that here,
    before the next push.
+   **Then run step 5d**, the repo-wide queue schedule. A repo configured before that
+   schedule existed has none, so nothing starts work by itself there. Read the schedule
+   list back first: where `orchestrator-queue` already exists, report it and create no
+   second one.
 4. **Apply only what the user approves**, one edit at a time. An update must never
    drop a hand-edited recipe field or flip a review policy on its own.
 5. **Report** as a short table: what updated, what the config needs, what's fine.
@@ -788,6 +792,57 @@ make full;  echo "full exit: $?"
   do, and the report says which layer is red. Change no code here.
 - **Report one row per gate**: the field, the command, and the exit code. Then say in one
   line that a red row holds every push until it is green.
+
+### 5d. Write the repo-wide queue schedule
+
+**Why this step exists: without it no work starts by itself.** A maintainer labels a story
+and drags its card, and then nothing reads that. One repo-wide schedule named
+`orchestrator-queue` turns those two facts into a running worker, so no session sits in the
+middle of the loop
+([ADR 0045](../orchestrator/docs/adr/0045-a-story-start-is-automatic-under-two-roofs.md)).
+
+Create it with operation 11 of the tool reference
+([`../orchestrator/references/tools/_operations.md`](../orchestrator/references/tools/_operations.md)),
+with three changes from the per-item form. The name is `orchestrator-queue`. The precheck
+is the `queue` subcommand. And the schedule binds to the main checkout, because it watches
+the tracker rather than a worktree:
+
+```bash
+--name "orchestrator-queue" --trigger '* * * * *' --workspace "<the main checkout>" \
+  --precheck "python3 <plugin root>/scripts/worker_state.py queue --repo <owner>/<name> --board-project <number> --board-owner <owner> --start-column '<column>' --max-stories <max_stories> --max-workers <max_workers> --parallel-check <parallel_check> --spawn-command '<the spawn_item.py invocation>'"
+```
+
+- **The trigger is one tick a minute**, which is the cron form `'* * * * *'`. One item a
+  minute is slow enough for a human to notice a wrong start and stop it.
+- **The workspace is the main checkout the `repo` field of the config names.** Pass the
+  workspace selector of that checkout, and never the flag that names a repository. A repo
+  selector cuts a new worktree per run, and this schedule reads the tracker rather than a
+  worktree. The two flag names are in operation 11 of the tool reference.
+- **`<plugin root>` is a literal path here, and never a shell variable.** The tool stores
+  this string and runs it a minute later, in a shell that saw no assignment. So resolve the
+  value and write it in, the same way a per-item precheck carries it
+  ([`../orchestrator/SKILL.md`](../orchestrator/SKILL.md#resolve-the-plugin-root-and-prove-the-seam-runs)).
+- **Read every other value from the config this setup wrote**, and never from this page.
+  The two roofs are `max_stories` and `max_workers`, the gate mode is `parallel_check`, and
+  the three board coordinates come from the `## Project board` section of
+  `docs/agents/issue-tracker.md`. A repo whose tracker names no board passes none of the
+  three, and the label alone is then the whole gate.
+- **The spawn command is the whole `scripts/spawn_item.py` invocation**, with its own tool
+  commands already in it. The tick fills five tokens of one work item into that string:
+  `{item}`, `{slug}`, `{title}`, `{body}` and `{skill}`. The argument surface of that seam
+  is its own `--help`, so this page restates none of it.
+- **Prove the precheck runs before the schedule exists.** Run the same command once by
+  hand, from the repo root. Exit 1 is a quiet tick and it is the answer a fresh repo gives.
+  Exit 64 is a flag with a typo, and it means the schedule fails every minute.
+
+**This step writes no per-item schedule**, because `scripts/spawn_item.py` writes that one
+at its last step.
+
+**A tool with no automation surface records this operation as unsupported.** `cmux` and
+`herdr` declare none, so skip the step and change nothing else about the setup. **Then say
+in the report that the queue tick is unavailable on this tool.** The maintainer then knows
+that a start stays a manual `work on N`
+([`../orchestrator/SKILL.md`](../orchestrator/SKILL.md#what-next--pick-the-next-work)).
 
 ## 6. Done
 
