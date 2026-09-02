@@ -1,0 +1,720 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Architecture review — orchestrator-skills — story #178</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script type="module">
+      import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+      mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "loose" });
+    </script>
+    <style>
+      .seam { stroke-dasharray: 4 4; }
+      .deep { background: linear-gradient(135deg, #0f172a, #1e293b); }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+      .card { break-inside: avoid; }
+    </style>
+  </head>
+  <body class="bg-stone-50 text-slate-900 font-sans">
+    <main class="max-w-6xl mx-auto px-6 py-12 space-y-12">
+
+      <header class="space-y-4">
+        <p class="text-xs uppercase tracking-widest text-slate-500">Layer 5 story gate</p>
+        <h1 class="text-4xl font-bold tracking-tight">orchestrator-skills — the Python seam layer</h1>
+        <p class="text-slate-700 max-w-3xl">
+          Read at commit <span class="mono font-semibold">00564be</span>, on 2026-09-02, after the last
+          child of user story
+          <a class="text-blue-700 underline" href="https://github.com/wagnersza/orchestrator-skills/issues/178">#178</a>
+          closed. The story added <span class="mono">scripts/spawn_item.py</span>, the
+          <span class="mono">queue</span> subcommand, the two-facts start gate, the Touch set gate,
+          the two roofs and <span class="mono">orchestrator/references/prompt.template.md</span>.
+        </p>
+
+        <div class="grid grid-cols-2 md:grid-cols-5 gap-3 pt-2">
+          <div class="rounded-lg bg-white ring-1 ring-slate-200 p-4">
+            <p class="text-3xl font-bold">2447</p>
+            <p class="text-xs text-slate-500 mono">worker_state.py lines</p>
+          </div>
+          <div class="rounded-lg bg-white ring-1 ring-slate-200 p-4">
+            <p class="text-3xl font-bold">11<span class="text-slate-400 text-lg">/60</span></p>
+            <p class="text-xs text-slate-500">its functions a test reaches in process</p>
+          </div>
+          <div class="rounded-lg bg-white ring-1 ring-slate-200 p-4">
+            <p class="text-3xl font-bold">5</p>
+            <p class="text-xs text-slate-500">writers of the one fixture format</p>
+          </div>
+          <div class="rounded-lg bg-white ring-1 ring-slate-200 p-4">
+            <p class="text-3xl font-bold">3</p>
+            <p class="text-xs text-slate-500">exit-code conventions across four seams</p>
+          </div>
+          <div class="rounded-lg bg-white ring-1 ring-slate-200 p-4">
+            <p class="text-3xl font-bold">8</p>
+            <p class="text-xs text-slate-500">candidates below</p>
+          </div>
+        </div>
+
+        <div class="flex flex-wrap gap-x-6 gap-y-2 text-xs text-slate-600 pt-2">
+          <span>solid box = module</span>
+          <span>dashed line = seam</span>
+          <span class="text-red-600">red arrow = leakage</span>
+          <span>dark box = deep module</span>
+          <span class="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 font-semibold">Strong</span>
+          <span class="px-2 py-0.5 rounded bg-amber-100 text-amber-800 font-semibold">Worth exploring</span>
+          <span class="px-2 py-0.5 rounded bg-slate-200 text-slate-700 font-semibold">Speculative</span>
+        </div>
+      </header>
+
+      <section class="rounded-lg bg-white ring-1 ring-slate-200 p-6 space-y-3">
+        <h2 class="text-lg font-semibold">Already filed, so this report does not file it again</h2>
+        <p class="text-sm text-slate-700">
+          The walk found these, and each one is an open work item from an earlier gate. They are
+          real, and they are somebody's work already.
+        </p>
+        <ul class="text-sm text-slate-700 space-y-1 list-disc pl-5">
+          <li><span class="mono">#248</span> — the <span class="mono">git</span> helper that
+            <span class="mono">close_item.py</span> and <span class="mono">merge_train.py</span> each rebuilt.</li>
+          <li><span class="mono">#250</span> — the CLI plane inside <span class="mono">worker_state.py</span>.</li>
+          <li><span class="mono">#225</span> — the <strong>Gate record</strong> read, in two places that disagree.</li>
+          <li><span class="mono">#227</span> — the throwaway git repo every seam test builds.</li>
+          <li><span class="mono">#234</span>, <span class="mono">#187</span> — the <strong>Tracker adapter</strong> shape and its test double.</li>
+          <li><span class="mono">#249</span> — two ADR files that share the number 0056.</li>
+        </ul>
+      </section>
+
+      <section id="candidates" class="space-y-10">
+
+        <!-- C1 -->
+        <article class="card rounded-xl bg-white ring-1 ring-slate-200 p-6 space-y-5">
+          <div class="flex flex-wrap items-start justify-between gap-3">
+            <h2 class="text-2xl font-bold">1. The Role vocabulary has two homes, and the seam rejects the default one</h2>
+            <div class="flex gap-2 shrink-0">
+              <span class="px-2 py-1 rounded bg-emerald-100 text-emerald-800 text-xs font-semibold">Strong</span>
+              <span class="px-2 py-1 rounded bg-slate-100 text-slate-700 text-xs font-semibold">in-process</span>
+            </div>
+          </div>
+
+          <div class="rounded-lg bg-red-50 ring-1 ring-red-200 p-4 text-sm text-red-900">
+            <strong>This one is a live defect, not only a shape.</strong>
+            <span class="mono">python3 scripts/spawn_item.py --role medium</span> exits 64 with
+            <span class="mono">invalid choice: 'medium'</span>. The vocabulary says
+            <span class="mono">medium</span> is what a spawn takes by default.
+          </div>
+
+          <p class="mono text-sm text-slate-600">
+            scripts/spawn_item.py:103, 144-145, 559-562 · scripts/worker_state.py:1816-1839 ·
+            orchestrator/CONTEXT.md:24 · docs/agents/orchestrator.md:20-22, 105
+          </p>
+
+          <div class="grid md:grid-cols-2 gap-6">
+            <div class="space-y-2">
+              <p class="text-xs uppercase tracking-widest text-slate-500">Before</p>
+              <div class="rounded-lg ring-1 ring-slate-200 p-4 space-y-3">
+                <div class="rounded bg-violet-50 ring-1 ring-violet-200 p-3">
+                  <p class="text-xs font-semibold text-violet-800">The vocabulary — four Roles</p>
+                  <p class="mono text-xs">heavy · <span class="bg-yellow-200 px-1">medium</span> · light · review</p>
+                  <p class="text-[11px] text-slate-600">CONTEXT.md · docs/agents/orchestrator.md · ADR 0059</p>
+                </div>
+                <p class="text-center text-2xl text-red-600">✕</p>
+                <div class="rounded bg-slate-100 ring-1 ring-slate-300 p-3">
+                  <p class="text-xs font-semibold">The seam — three Roles</p>
+                  <p class="mono text-xs">heavy · light · review</p>
+                  <p class="text-[11px] text-slate-600">spawn_item.py:103 and again at 559-562</p>
+                </div>
+                <p class="text-xs text-red-700">
+                  A <span class="mono">medium:</span> block in the config is dropped without a word
+                  (<span class="mono">spawn_item.py:144-145</span>). The test fixture ships only
+                  <span class="mono">heavy:</span> and <span class="mono">light:</span>, so no test sees it.
+                </p>
+              </div>
+            </div>
+            <div class="space-y-2">
+              <p class="text-xs uppercase tracking-widest text-slate-500">After</p>
+              <div class="rounded-lg ring-1 ring-slate-200 p-4 space-y-3">
+                <div class="deep rounded p-3 text-white">
+                  <p class="text-xs font-semibold">One Role module</p>
+                  <p class="mono text-xs">ROLES · resolve_role(config, role)</p>
+                  <p class="text-[11px] text-slate-300">the one list, read by the parser and by the config reader</p>
+                </div>
+                <p class="text-center text-slate-400">↑ ↑</p>
+                <div class="grid grid-cols-2 gap-2 text-xs">
+                  <div class="rounded ring-1 ring-slate-300 p-2 mono">--role choices</div>
+                  <div class="rounded ring-1 ring-slate-300 p-2 mono">config parse</div>
+                </div>
+                <p class="text-xs text-slate-700">
+                  One test walks <span class="mono">CONTEXT.md</span> and asserts the seam accepts
+                  every Role the vocabulary names. The drift then fails a gate.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div class="grid md:grid-cols-3 gap-4 text-sm">
+            <div>
+              <p class="font-semibold">Problem</p>
+              <p class="text-slate-700">The Role list lives in three files, and the Python copy is the
+                one that is wrong.</p>
+            </div>
+            <div>
+              <p class="font-semibold">Solution</p>
+              <p class="text-slate-700">One list, read by both the parser and the config reader, with a
+                test that compares it to the vocabulary.</p>
+            </div>
+            <div>
+              <p class="font-semibold">Wins</p>
+              <ul class="list-disc pl-4 text-slate-700">
+                <li>The default Role can spawn</li>
+                <li>Drift fails a test</li>
+                <li>No silent config drop</li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="rounded-lg bg-amber-50 ring-1 ring-amber-200 p-4 text-sm">
+            <p class="font-semibold text-amber-900">A second half, and it is the architectural one</p>
+            <p class="text-amber-900">
+              <span class="mono">fill_spawn</span> holds five tokens:
+              <span class="mono">{item} {slug} {title} {body} {skill}</span>
+              (<span class="mono">worker_state.py:1829-1835</span>). There is no
+              <span class="mono">{role}</span>. So the queue tick cannot classify one item as
+              <span class="mono">heavy</span> and the next as <span class="mono">light</span>. Every
+              item the loop starts takes the one Role the operator wrote into
+              <span class="mono">--spawn-command</span>. The skill body calls one model for a whole
+              batch a defect, and the automatic loop has exactly that defect.
+            </p>
+          </div>
+        </article>
+
+        <!-- C2 -->
+        <article class="card rounded-xl bg-white ring-1 ring-slate-200 p-6 space-y-5">
+          <div class="flex flex-wrap items-start justify-between gap-3">
+            <h2 class="text-2xl font-bold">2. The prompt renderer exists twice, and the tested copy is the one nothing ships</h2>
+            <div class="flex gap-2 shrink-0">
+              <span class="px-2 py-1 rounded bg-emerald-100 text-emerald-800 text-xs font-semibold">Strong</span>
+              <span class="px-2 py-1 rounded bg-slate-100 text-slate-700 text-xs font-semibold">local-substitutable</span>
+            </div>
+          </div>
+
+          <p class="mono text-sm text-slate-600">
+            scripts/spawn_item.py:185-215, 312-315 · scripts/test_prompt_template.py:40-44, 91-118 ·
+            orchestrator/references/prompt.template.md:3-4
+          </p>
+
+          <div class="grid md:grid-cols-2 gap-6">
+            <div class="space-y-2">
+              <p class="text-xs uppercase tracking-widest text-slate-500">Before</p>
+              <div class="mermaid rounded-lg ring-1 ring-slate-200 p-4">
+graph TD
+  T["prompt.template.md"]
+  P["spawn_item.render_prompt<br/>lines 189-215"]
+  Q["test_prompt_template.render<br/>lines 100-118"]
+  X["7 test cases"]
+  T --> P
+  T --> Q
+  Q --> X
+  P -.->|no test| N["nothing"]
+  style P fill:#fee2e2,stroke:#dc2626
+  style Q fill:#dcfce7,stroke:#16a34a
+  style N fill:#f1f5f9,stroke:#94a3b8
+              </div>
+              <p class="text-xs text-slate-700">
+                9 of the 10 body lines are byte-identical. The regexes are copied. Both files declare
+                a class named <span class="mono">MissingInput</span>, and they are two unrelated types.
+              </p>
+            </div>
+            <div class="space-y-2">
+              <p class="text-xs uppercase tracking-widest text-slate-500">After</p>
+              <div class="mermaid rounded-lg ring-1 ring-slate-200 p-4">
+graph TD
+  T["prompt.template.md"]
+  P["render_prompt<br/>the one renderer"]
+  X["7 test cases<br/>+ the file on disk"]
+  T --> P
+  P --> X
+  style P fill:#0f172a,color:#ffffff,stroke:#0f172a
+              </div>
+              <p class="text-xs text-slate-700">
+                The test imports the renderer it ships. The two rules — a missing input refuses, a
+                blank value drops its line — are then proved once, on the code that runs.
+              </p>
+            </div>
+          </div>
+
+          <div class="grid md:grid-cols-3 gap-4 text-sm">
+            <div>
+              <p class="font-semibold">Problem</p>
+              <p class="text-slate-700">The render test proves a copy. The renderer a spawn runs has
+                no test at all.</p>
+            </div>
+            <div>
+              <p class="font-semibold">Solution</p>
+              <p class="text-slate-700">Delete the copy. Import
+                <span class="mono">spawn_item.render_prompt</span> in the test.</p>
+            </div>
+            <div>
+              <p class="font-semibold">Wins</p>
+              <ul class="list-disc pl-4 text-slate-700">
+                <li>The shipped renderer is tested</li>
+                <li>One <span class="mono">MissingInput</span></li>
+                <li>Two stale comments go</li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="rounded-lg bg-amber-50 ring-1 ring-amber-200 p-4 text-sm text-amber-900">
+            Two comments are stale, and each one explains the copy.
+            <span class="mono">test_prompt_template.py:19-24</span> says the caller
+            <em>"does not exist yet"</em>. It exists, at 694 lines.
+            <span class="mono">prompt.template.md:3-4</span> says <em>"nothing calls it yet"</em>.
+            It landed in the same story.
+          </div>
+        </article>
+
+        <!-- C3 -->
+        <article class="card rounded-xl bg-white ring-1 ring-slate-200 p-6 space-y-5">
+          <div class="flex flex-wrap items-start justify-between gap-3">
+            <h2 class="text-2xl font-bold">3. Two seams each rebuilt the plan, the step and the execute loop</h2>
+            <div class="flex gap-2 shrink-0">
+              <span class="px-2 py-1 rounded bg-emerald-100 text-emerald-800 text-xs font-semibold">Strong</span>
+              <span class="px-2 py-1 rounded bg-slate-100 text-slate-700 text-xs font-semibold">in-process</span>
+            </div>
+          </div>
+
+          <p class="mono text-sm text-slate-600">
+            scripts/close_item.py:85-90, 142-155, 421-462, 627 ·
+            scripts/spawn_item.py:96-101, 221-234, 446-502, 689
+          </p>
+
+          <div class="grid md:grid-cols-2 gap-6">
+            <div class="space-y-2">
+              <p class="text-xs uppercase tracking-widest text-slate-500">Before — the same body, twice</p>
+              <div class="rounded-lg ring-1 ring-slate-200 p-4 space-y-2 text-xs">
+                <div class="grid grid-cols-2 gap-2">
+                  <div class="rounded bg-red-50 ring-1 ring-red-200 p-2">
+                    <p class="font-semibold mono">close_item.py</p>
+                    <p class="mono">STATUS_* ×6</p>
+                    <p class="mono">step()</p>
+                    <p class="mono">not_reached()</p>
+                    <p class="mono">build() envelope</p>
+                    <p class="mono">execute() loop</p>
+                    <p class="mono">--indent + json.dumps</p>
+                  </div>
+                  <div class="rounded bg-red-50 ring-1 ring-red-200 p-2">
+                    <p class="font-semibold mono">spawn_item.py</p>
+                    <p class="mono">STATUS_* ×6</p>
+                    <p class="mono">step()</p>
+                    <p class="mono">not_reached()</p>
+                    <p class="mono">build() envelope</p>
+                    <p class="mono">execute() loop</p>
+                    <p class="mono">--indent + json.dumps</p>
+                  </div>
+                </div>
+                <p class="text-slate-700">
+                  <span class="mono">step()</span> and <span class="mono">not_reached()</span> are
+                  byte-identical, docstring included. The envelope holds the same seven keys in the
+                  same order. The execute loop has the same skeleton.
+                </p>
+              </div>
+            </div>
+            <div class="space-y-2">
+              <p class="text-xs uppercase tracking-widest text-slate-500">After — one Plan module</p>
+              <div class="rounded-lg ring-1 ring-slate-200 p-4 space-y-2">
+                <div class="deep rounded p-3 text-white text-xs">
+                  <p class="font-semibold">scripts/plan.py</p>
+                  <p class="mono">STATUS_* · step · not_reached · envelope · run · print</p>
+                </div>
+                <p class="text-center text-slate-400 text-xs">↑ ↑ ↑</p>
+                <div class="grid grid-cols-3 gap-2 text-xs">
+                  <div class="rounded ring-1 ring-slate-300 p-2 mono">close_item</div>
+                  <div class="rounded ring-1 ring-slate-300 p-2 mono">spawn_item</div>
+                  <div class="rounded ring-1 ring-slate-300 p-2 mono">merge_train?</div>
+                </div>
+                <p class="text-xs text-slate-700">
+                  Each seam keeps its own steps. Only the shape moves. One test then proves the
+                  envelope, and the three refusal-print rules become one rule.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div class="grid md:grid-cols-3 gap-4 text-sm">
+            <div>
+              <p class="font-semibold">Problem</p>
+              <p class="text-slate-700">A change to the plan shape needs two edits, and they can
+                disagree. They already do: one seam prints the plan on a refusal and one prints
+                only a reason.</p>
+            </div>
+            <div>
+              <p class="font-semibold">Solution</p>
+              <p class="text-slate-700">Lift the plan envelope, the step record and the execute loop
+                into one module.</p>
+            </div>
+            <div>
+              <p class="font-semibold">Wins</p>
+              <ul class="list-disc pl-4 text-slate-700">
+                <li>One plan shape, one test</li>
+                <li>Delete two copies</li>
+                <li>A third seam is cheap</li>
+              </ul>
+            </div>
+          </div>
+          <p class="text-xs text-slate-600">
+            The deletion test says <em>concentrates</em>. The shape is the contract every plan reader
+            depends on, so one home for it removes a whole class of disagreement.
+          </p>
+        </article>
+
+        <!-- C4 -->
+        <article class="card rounded-xl bg-white ring-1 ring-slate-200 p-6 space-y-5">
+          <div class="flex flex-wrap items-start justify-between gap-3">
+            <h2 class="text-2xl font-bold">4. Exit code 2 means both "a flag has a typo" and "the pull request is not merged"</h2>
+            <div class="flex gap-2 shrink-0">
+              <span class="px-2 py-1 rounded bg-emerald-100 text-emerald-800 text-xs font-semibold">Strong</span>
+              <span class="px-2 py-1 rounded bg-slate-100 text-slate-700 text-xs font-semibold">in-process</span>
+            </div>
+          </div>
+
+          <p class="mono text-sm text-slate-600">
+            scripts/close_item.py:80-83, 504 · scripts/merge_train.py:77-85 ·
+            scripts/spawn_item.py:536-542 · scripts/worker_state.py:1979-1989
+          </p>
+
+          <div class="rounded-lg ring-1 ring-slate-200 overflow-hidden">
+            <table class="w-full text-sm">
+              <thead class="bg-slate-100 text-left">
+                <tr><th class="p-3">Seam</th><th class="p-3">A flag typo exits</th><th class="p-3">Its first refusal exits</th><th class="p-3">Guard</th></tr>
+              </thead>
+              <tbody class="divide-y divide-slate-200">
+                <tr class="bg-red-50">
+                  <td class="p-3 mono">close_item.py</td><td class="p-3 mono font-bold">2</td>
+                  <td class="p-3 mono font-bold">2 — PR not merged</td>
+                  <td class="p-3 text-red-700">none, and no test</td>
+                </tr>
+                <tr><td class="p-3 mono">merge_train.py</td><td class="p-3 mono">2</td><td class="p-3 mono">3</td><td class="p-3">refusals start at 3, on purpose</td></tr>
+                <tr><td class="p-3 mono">spawn_item.py</td><td class="p-3 mono">64</td><td class="p-3 mono">2</td><td class="p-3 mono">UsageExitParser</td></tr>
+                <tr><td class="p-3 mono">worker_state.py</td><td class="p-3 mono">64</td><td class="p-3 mono">1</td><td class="p-3 mono">UsageExitParser</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="grid md:grid-cols-3 gap-4 text-sm">
+            <div>
+              <p class="font-semibold">Problem</p>
+              <p class="text-slate-700">A caller of <span class="mono">close_item.py</span> cannot
+                tell a typo from an unmerged pull request. A tick that mistypes a flag reads as
+                "nothing to close".</p>
+            </div>
+            <div>
+              <p class="font-semibold">Solution</p>
+              <p class="text-slate-700">One <span class="mono">UsageExitParser</span> in a shared
+                module, used by all four seams, with a test per seam.</p>
+            </div>
+            <div>
+              <p class="font-semibold">Wins</p>
+              <ul class="list-disc pl-4 text-slate-700">
+                <li>A typo cannot read as a refusal</li>
+                <li>One exit-code convention</li>
+                <li>Delete a duplicated class</li>
+              </ul>
+            </div>
+          </div>
+
+          <p class="text-xs text-slate-700">
+            This is the repo's own named failure family: a failure mode that reports success. Two
+            seams solved it and wrote down why. Two did not.
+          </p>
+        </article>
+
+        <!-- C5 -->
+        <article class="card rounded-xl bg-white ring-1 ring-slate-200 p-6 space-y-5">
+          <div class="flex flex-wrap items-start justify-between gap-3">
+            <h2 class="text-2xl font-bold">5. The new spawn seam reaches past two interfaces, and re-derives an answer it already has</h2>
+            <div class="flex gap-2 shrink-0">
+              <span class="px-2 py-1 rounded bg-amber-100 text-amber-800 text-xs font-semibold">Worth exploring</span>
+              <span class="px-2 py-1 rounded bg-slate-100 text-slate-700 text-xs font-semibold">ports &amp; adapters</span>
+            </div>
+          </div>
+
+          <p class="mono text-sm text-slate-600">
+            scripts/spawn_item.py:77, 275, 342-345, 364, 376-397, 524-527 ·
+            scripts/worker_state.py:1353-1377
+          </p>
+
+          <div class="grid md:grid-cols-2 gap-6">
+            <div class="space-y-2">
+              <p class="text-xs uppercase tracking-widest text-slate-500">Before</p>
+              <div class="mermaid rounded-lg ring-1 ring-slate-200 p-4">
+graph LR
+  S["spawn_item.py"]
+  W["worker_state.py"]
+  T["Tracker"]
+  S -->|claim| W
+  S -->|"live_process, EXIT_COMPLETE, EXIT_GONE"| W
+  S -->|"item_facts, again"| T
+  W -->|"item_facts, inside claim"| T
+  style S fill:#fff7ed,stroke:#ea580c
+              </div>
+              <p class="text-xs text-slate-700">
+                <span class="mono">spawn_item.py:376-397</span> re-implements the
+                <span class="mono">needs-human</span> refusal and the "already in progress" check.
+                <span class="mono">worker_state.claim</span> makes the same read and the same refusal
+                at <span class="mono">1364-1375</span>. On an <span class="mono">--execute</span> run
+                the item's facts are read twice.
+              </p>
+            </div>
+            <div class="space-y-2">
+              <p class="text-xs uppercase tracking-widest text-slate-500">After</p>
+              <div class="mermaid rounded-lg ring-1 ring-slate-200 p-4">
+graph LR
+  S["spawn_item.py"]
+  W["worker_state.py<br/>ready + claim"]
+  T["Tracker"]
+  S -->|"ready(), claim()"| W
+  W --> T
+  style W fill:#0f172a,color:#ffffff,stroke:#0f172a
+              </div>
+              <p class="text-xs text-slate-700">
+                Two questions, two calls, one owner each. The exit-code constants of the
+                <span class="mono">ready</span> subcommand stop being a second seam's vocabulary.
+              </p>
+            </div>
+          </div>
+
+          <div class="rounded-lg bg-slate-100 ring-1 ring-slate-300 p-4 text-sm">
+            <p class="font-semibold">A third leak, and it is the sharpest</p>
+            <p class="text-slate-800">
+              <span class="mono">spawn_item.py:364</span> joins two commands into one display string
+              with <span class="mono">&amp;&amp;</span>. Then
+              <span class="mono">spawn_item.py:527</span> splits it back apart at run time with
+              <span class="mono">partition(" &amp;&amp; ")</span>. The plan's display field is the
+              execute path's data channel. A command that itself holds
+              <span class="mono">&amp;&amp;</span> splits in the wrong place.
+            </p>
+          </div>
+
+          <div class="grid md:grid-cols-3 gap-4 text-sm">
+            <div>
+              <p class="font-semibold">Problem</p>
+              <p class="text-slate-700">One tracker read happens twice, one refusal exists twice, and
+                a display string carries data.</p>
+            </div>
+            <div>
+              <p class="font-semibold">Solution</p>
+              <p class="text-slate-700">Call <span class="mono">claim</span> for the claim. Keep the
+                two commands as two fields.</p>
+            </div>
+            <div>
+              <p class="font-semibold">Wins</p>
+              <ul class="list-disc pl-4 text-slate-700">
+                <li>One <span class="mono">needs-human</span> predicate</li>
+                <li>One tracker read</li>
+                <li>No string re-parse</li>
+              </ul>
+            </div>
+          </div>
+        </article>
+
+        <!-- C6 -->
+        <article class="card rounded-xl bg-white ring-1 ring-slate-200 p-6 space-y-5">
+          <div class="flex flex-wrap items-start justify-between gap-3">
+            <h2 class="text-2xl font-bold">6. <span class="mono">--repo</span> means the tracker project in two seams and the checkout in the third</h2>
+            <div class="flex gap-2 shrink-0">
+              <span class="px-2 py-1 rounded bg-amber-100 text-amber-800 text-xs font-semibold">Worth exploring</span>
+              <span class="px-2 py-1 rounded bg-slate-100 text-slate-700 text-xs font-semibold">in-process</span>
+            </div>
+          </div>
+
+          <p class="mono text-sm text-slate-600">
+            scripts/worker_state.py:1992-2027, 1304, 1311, 2301 ·
+            scripts/close_item.py:518, 527, 580 · scripts/spawn_item.py:556, 629, 634-651
+          </p>
+
+          <div class="rounded-lg ring-1 ring-slate-200 overflow-hidden">
+            <table class="w-full text-sm">
+              <thead class="bg-slate-100 text-left">
+                <tr><th class="p-3">The concept</th><th class="p-3 mono">worker_state.py</th><th class="p-3 mono">close_item.py</th><th class="p-3 mono">spawn_item.py</th></tr>
+              </thead>
+              <tbody class="divide-y divide-slate-200">
+                <tr class="bg-red-50"><td class="p-3">the tracker project</td><td class="p-3 mono">--repo</td><td class="p-3 mono">--tracker-repo</td><td class="p-3 mono">--repo</td></tr>
+                <tr class="bg-red-50"><td class="p-3">the checkout on disk</td><td class="p-3 mono">--checkout</td><td class="p-3 mono font-bold">--repo</td><td class="p-3 text-slate-400">—</td></tr>
+                <tr><td class="p-3">the work item number</td><td class="p-3 mono">--item</td><td class="p-3 mono">--issue</td><td class="p-3 mono">--item</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <p class="text-sm text-slate-700">
+            The two seams call each other in process, so the translation is code:
+            <span class="mono">worker_state.py:1304</span> maps <span class="mono">issue=item</span>
+            and <span class="mono">worker_state.py:1311</span> maps
+            <span class="mono">repo=checkout</span>. A reader of one seam holds the wrong meaning of
+            <span class="mono">--repo</span> when they open the other.
+          </p>
+
+          <div class="grid md:grid-cols-3 gap-4 text-sm">
+            <div>
+              <p class="font-semibold">Problem</p>
+              <p class="text-slate-700">One flag name carries two meanings across a seam that is
+                crossed in process.</p>
+            </div>
+            <div>
+              <p class="font-semibold">Solution</p>
+              <p class="text-slate-700">One shared argument group per concept, so the name is written
+                once. <span class="mono">worker_state.add_tracker_arguments</span> is the pattern
+                already there.</p>
+            </div>
+            <div>
+              <p class="font-semibold">Wins</p>
+              <ul class="list-disc pl-4 text-slate-700">
+                <li>One name, one meaning</li>
+                <li>Delete two flag blocks</li>
+                <li>The precheck string stops surprising</li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="rounded-lg bg-amber-50 ring-1 ring-amber-200 p-4 text-xs text-amber-900">
+            A smaller relative: all three seams declare a flag named
+            <span class="mono">--gh-fixture</span>, while
+            <span class="mono">scripts/tracker.py:15-17</span> exists so that no seam names a tracker
+            CLI. Both tests that guard the rule compare AST constants for equality, so a flag
+            <em>containing</em> <span class="mono">gh</span> passes.
+          </div>
+        </article>
+
+        <!-- C7 -->
+        <article class="card rounded-xl bg-white ring-1 ring-slate-200 p-6 space-y-5">
+          <div class="flex flex-wrap items-start justify-between gap-3">
+            <h2 class="text-2xl font-bold">7. The <span class="mono">queue</span> subcommand is 400 lines, and 2 of its 13 functions have a direct test</h2>
+            <div class="flex gap-2 shrink-0">
+              <span class="px-2 py-1 rounded bg-amber-100 text-amber-800 text-xs font-semibold">Worth exploring</span>
+              <span class="px-2 py-1 rounded bg-slate-100 text-slate-700 text-xs font-semibold">local-substitutable</span>
+            </div>
+          </div>
+
+          <p class="mono text-sm text-slate-600">
+            scripts/worker_state.py:1478-1877, 1597-1661, 1753-1813 ·
+            scripts/test_worker_state.py:2676-2715, 2887-2935
+          </p>
+
+          <div class="grid md:grid-cols-2 gap-6">
+            <div class="space-y-2">
+              <p class="text-xs uppercase tracking-widest text-slate-500">Before — one door, 28 knocks</p>
+              <div class="mermaid rounded-lg ring-1 ring-slate-200 p-4">
+graph TD
+  X["28 queue_cli subprocess calls"] --> C["main(argv)"]
+  C --> Q["queue"]
+  Q --> P["queue_plan"]
+  P --> R1["live_workers"]
+  P --> R2["story_is_live"]
+  P --> R3["queue_candidates"]
+  P --> R4["overlapping_worker"]
+  P --> R5["startable"]
+  style X fill:#fef3c7,stroke:#d97706
+              </div>
+              <p class="text-xs text-slate-700">
+                The two roofs — the whole cost bound of the automatic loop — are counted by four
+                functions, and none of the four has a direct test.
+                <span class="mono">queue_plan</span> has none either.
+              </p>
+            </div>
+            <div class="space-y-2">
+              <p class="text-xs uppercase tracking-widest text-slate-500">After — the plan is the seam</p>
+              <div class="mermaid rounded-lg ring-1 ring-slate-200 p-4">
+graph TD
+  A["unit tests"] --> P["queue_plan(items, roofs) -> plan"]
+  B["a few CLI tests"] --> C["main(argv)"]
+  C --> P
+  style P fill:#0f172a,color:#ffffff,stroke:#0f172a
+              </div>
+              <p class="text-xs text-slate-700">
+                <span class="mono">queue_plan</span> already returns a value. Testing it directly
+                needs no subprocess and no fixture file, the way
+                <span class="mono">position_of</span> and <span class="mono">touches_overlap</span>
+                are tested now.
+              </p>
+            </div>
+          </div>
+
+          <div class="grid md:grid-cols-3 gap-4 text-sm">
+            <div>
+              <p class="font-semibold">Problem</p>
+              <p class="text-slate-700">The guards that bound how much money the loop spends are
+                proved only through a subprocess.</p>
+            </div>
+            <div>
+              <p class="font-semibold">Solution</p>
+              <p class="text-slate-700">Test the plan function directly. Keep a few CLI cases for the
+                exit codes.</p>
+            </div>
+            <div>
+              <p class="font-semibold">Wins</p>
+              <ul class="list-disc pl-4 text-slate-700">
+                <li>The roofs get a unit test</li>
+                <li>A faster suite</li>
+                <li>A failure names one function</li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="rounded-lg bg-amber-50 ring-1 ring-amber-200 p-4 text-xs text-amber-900">
+            This sits next to <span class="mono">#250</span>, and it is not the same thing.
+            <span class="mono">#250</span> moves the CLI plane out. This one gives the roof count a
+            test where it lives today. Do <span class="mono">#250</span> first if both run.
+          </div>
+        </article>
+
+        <!-- C8 -->
+        <article class="card rounded-xl bg-white ring-1 ring-slate-200 p-6 space-y-5">
+          <div class="flex flex-wrap items-start justify-between gap-3">
+            <h2 class="text-2xl font-bold">8. Nothing executable proves the one seam invocation form the repo mandates</h2>
+            <div class="flex gap-2 shrink-0">
+              <span class="px-2 py-1 rounded bg-slate-200 text-slate-700 text-xs font-semibold">Speculative</span>
+              <span class="px-2 py-1 rounded bg-slate-100 text-slate-700 text-xs font-semibold">mock</span>
+            </div>
+          </div>
+
+          <p class="mono text-sm text-slate-600">
+            scripts/test_seam_invocations.py:36-38, 65-70 ·
+            scripts/test_worker_state.py:574, 869, 1831 · scripts/test_close_item.py:175, 636 ·
+            scripts/test_spawn_item.py:126, 315 · scripts/test_merge_train.py:141
+          </p>
+
+          <p class="text-sm text-slate-700">
+            ADR 0034 bans the module form and mandates the resolved path form. Every test runs the
+            banned form, at 8 sites in 4 files, and records the exemption.
+            <span class="mono">test_seam_invocations.py</span> walks Markdown files only, so the ban
+            is proved by a regex over prose. It is dropped as
+            <strong>Speculative</strong> for one reason: the exemption is deliberate and written
+            down, a test cannot run the installed plugin path from inside the repo, and the failure
+            it would catch is caught today by the precheck the skill body already runs.
+          </p>
+        </article>
+
+      </section>
+
+      <section id="top-recommendation" class="rounded-xl deep text-white p-8 space-y-4">
+        <p class="text-xs uppercase tracking-widest text-slate-400">Top recommendation</p>
+        <h2 class="text-3xl font-bold">Fix the Role vocabulary first. It is broken now.</h2>
+        <p class="text-slate-200 max-w-3xl">
+          Candidate 1 is the only one that stops work today. The vocabulary says a spawn takes
+          <span class="mono">medium</span>, and <span class="mono">scripts/spawn_item.py</span> exits
+          64 on that word. The repo adopted the four-Role vocabulary in a documentation pass that
+          landed after both seams, so the Python never heard about it. The queue tick is the caller
+          that will meet this first, and it has no human in the turn.
+        </p>
+        <p class="text-slate-200 max-w-3xl">
+          Candidate 2 is the natural second. It is a deletion, not a build: remove the copied
+          renderer and import the real one. The story shipped a template with a guard, and the guard
+          watches the wrong file.
+        </p>
+      </section>
+
+      <footer class="text-xs text-slate-500 pt-4">
+        Layer 5 is advisory. It holds no exit code, and it stops no merge
+        (ADR 0033). Read at <span class="mono">00564be</span>. The code moves, so a card here can go
+        stale. The work item carries the current facts.
+      </footer>
+
+    </main>
+  </body>
+</html>
