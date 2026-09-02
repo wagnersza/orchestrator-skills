@@ -33,6 +33,14 @@ review:
                           # model+effort come from models.review; its vendor MUST
                           # differ from the impl role's
 
+# --- the two roofs on live work (ADR 0045) ---
+# The queue tick reads both, and the lower one wins. It starts nothing where either roof
+# is full.
+max_stories: 2            # live Story runs at once. A run holds its slot until the parent
+                          # closes, story proof included
+max_workers: 4            # live Workers across every run. The worst case is 4 workers, and
+                          # never 2 times 4
+
 # --- parallel spawn gate ---
 parallel_check: touches   # touches | off -> compare declared Touch sets before a parallel
                           # spawn (ADR 0046). `off` compares nothing, which is today's
@@ -152,6 +160,17 @@ gates:
   `subprocess`, and in-process line coverage reads 0%. `mutation` is blank because
   layer 4 is off. Layer 5 runs in the orchestrator session, in the main checkout, at
   the close of the last child of a story.
+- **`max_stories` and `max_workers` are the two roofs the queue tick reads.** The first
+  bounds live **Story run**s, and the second bounds live **Worker**s across every run. The
+  tick starts nothing where either one is full, so the lower roof wins. Two roofs exist
+  because one of them alone fails. `max_stories` on its own multiplies into 2 runs times
+  the worker cap, and the worker cap on its own lets one wide story starve every other. A
+  run holds its **Story slot** until the parent closes, story proof included, so a story
+  with one child left still occupies one
+  ([ADR 0045](../../orchestrator/docs/adr/0045-a-story-start-is-automatic-under-two-roofs.md)).
+  The tick counts both from one tracker read. A live worker is an open item that wears
+  `in-progress`, and a live story run is a `user-story` parent that wears a work-state
+  label itself or has a descendant that does.
 - **`parallel_check`** decides whether a **Touch set** gates a parallel spawn. With
   `touches`, the queue tick compares two candidates' `## Touches` blocks with
   `fnmatch`, and spawns them together only where the blocks are disjoint. An item
