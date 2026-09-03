@@ -2309,42 +2309,42 @@ class WorkerStateTestCase(unittest.TestCase):
         self.assertIn(READY_FOR_AGENT, line)
         self.assertIn(repr(START_COLUMN), line)
 
-    def test_one_fact_is_never_an_error_and_never_a_refusal(self):
-        """Either fact on its own starts nothing. A card in the start column with no label
-        is not started. A labelled item whose card sits in the lane before it is not
-        started either. So that lane stays the maintainer's own, and neither case is an
-        error. This is how a maintainer parks a groomed item."""
+    def test_one_fact_is_the_card_in_the_start_column_with_no_label(self):
+        """The card is read first, so the one-fact state is a card in the start column
+        that carries no label. That is a forgotten label, and it is the one disagreement a
+        maintainer repairs. It is never an error and never a refusal (ADR 0061)."""
+        self.write_fixture(labels=[], board=START_COLUMN)
+
+        card_only = self.gate(expect=EXIT_NOTHING)
+
+        self.assertTrue(card_only.startswith(f"{ONE_FACT}:"), card_only)
+        self.assertIn("starts nothing", card_only)
+        self.assertIn(f"no {READY_FOR_AGENT} label", card_only)
+        self.assertIn(repr(START_COLUMN), card_only)
+        # An error word appears nowhere, and no tracker write went out.
+        for word in ("error", "refused", "unreadable"):
+            self.assertNotIn(word, card_only)
+        self.assertEqual(self.writes(), [])
+
+    def test_a_card_outside_the_start_column_rests_whatever_its_label_says(self):
+        """The board is the narrower fact, so a card outside the start column is the quiet
+        state. A labelled item parked in the lane before it reads the same way as an
+        unlabelled one, because the board already says where each sits. This is the case
+        ADR 0061 moved off the one-fact state, and nothing about what starts moved."""
         self.write_fixture(labels=[READY_FOR_AGENT], board=READY_LANE)
         label_only = self.gate(expect=EXIT_NOTHING)
 
-        self.write_fixture(labels=[], board=START_COLUMN)
-        card_only = self.gate(expect=EXIT_NOTHING)
-
-        for line in (label_only, card_only):
-            self.assertTrue(line.startswith(f"{ONE_FACT}:"), line)
-            self.assertIn("starts nothing", line)
-            # An error word appears in neither one, and no tracker write went out.
-            for word in ("error", "refused", "unreadable"):
-                self.assertNotIn(word, line)
-        self.assertEqual(self.writes(), [])
-
-        # The two lines differ, because the missing fact is what a maintainer repairs.
-        self.assertNotEqual(label_only, card_only)
-        self.assertIn(repr(READY_LANE), label_only)
-        self.assertIn(f"no {READY_FOR_AGENT} label", card_only)
-
-    def test_neither_fact_is_where_a_groomed_item_rests(self):
-        """No label and no card in the start column. Every open item starts here, so the
-        answer is its own quiet state rather than the one-fact state."""
         self.write_fixture(labels=[], board=READY_LANE)
         in_a_lane = self.gate(expect=EXIT_NOTHING)
 
         self.write_fixture(labels=[])
         no_card = self.gate(expect=EXIT_NOTHING)
 
-        for line in (in_a_lane, no_card):
+        for line in (label_only, in_a_lane, no_card):
             self.assertTrue(line.startswith(f"{NO_FACT}:"), line)
+        self.assertIn(repr(READY_LANE), label_only)
         self.assertIn("no card", no_card)
+        self.assertEqual(self.writes(), [])
 
     def test_with_no_board_configured_the_label_alone_decides(self):
         """A tracker that names no board is a supported configuration, and its absence is
@@ -2377,13 +2377,14 @@ class WorkerStateTestCase(unittest.TestCase):
             self.assertIn("names no board", self.gate(expect=EXIT_DUE, **missing))
 
     def test_a_failed_board_read_counts_no_card_and_is_never_an_error(self):
-        """The labels were read, so a fact is available and the cause rides the line.
-        Nothing starts on a card this gate cannot read, which is the safe direction."""
+        """Nothing starts on a card this gate cannot read, which is the safe direction. The
+        card is read first, so no card counted is the quiet state whatever the label says,
+        and the cause still rides the line (ADR 0061)."""
         log = self.fake_cli("gh", issue={"labels": [{"name": READY_FOR_AGENT}]})
 
         line = self.start_cli("--repo", "owner/name", fixture=False)
 
-        self.assertTrue(line.startswith(f"{ONE_FACT}:"), line)
+        self.assertTrue(line.startswith(f"{NO_FACT}:"), line)
         self.assertIn("the board read failed", line)
         self.assertIn("starts nothing", line)
         # The board read really ran and really failed: the stub CLI has no project payload.
@@ -2934,10 +2935,31 @@ class WorkerStateTestCase(unittest.TestCase):
         self.assertIn(f"work item #{STANDALONE} is the one item", line)
         self.assertEqual(self.spawned(), [STANDALONE])
 
-    def test_the_queue_report_names_every_item_that_holds_one_fact(self):
-        """A forgotten drag otherwise reads as an empty queue, and nothing repairs the
-        disagreement on its own. So the parked items ride the line of a quiet tick, and
-        that is never an error, never a refusal and never a comment."""
+    def test_the_queue_report_names_every_card_in_the_start_column_with_no_label(self):
+        """A forgotten label otherwise reads as an empty queue, and nothing repairs the
+        disagreement on its own. So those items ride the line of a quiet tick, and that is
+        never an error, never a refusal and never a comment."""
+        items = story_queue()
+        for number in (STORY, STANDALONE):
+            items[str(number)]["board"] = START_COLUMN
+            items[str(number)]["labels"] = []
+        self.write_queue(items)
+
+        line = self.queue_cli(expect=EXIT_NOTHING)
+
+        self.assertIn("sit in the start column with no label", line)
+        self.assertIn(f"#{STORY}", line)
+        self.assertIn(f"#{STANDALONE}", line)
+        for word in ("error", "refused"):
+            self.assertNotIn(word, line)
+        self.assertEqual(self.spawned(), [])
+        self.assertEqual(self.writes(), [])
+
+    def test_a_card_parked_outside_the_start_column_is_not_named(self):
+        """The board is the narrower fact, so a labelled item whose card sits in the lane
+        before the start column is the resting state of a groomed backlog. Naming it made
+        every tick recite the backlog instead of the one item a maintainer acts on, so ADR
+        0061 took it off the line. Nothing about what starts moved."""
         items = story_queue()
         items[str(STORY)]["board"] = READY_LANE
         items[str(STANDALONE)]["board"] = READY_LANE
@@ -2945,11 +2967,9 @@ class WorkerStateTestCase(unittest.TestCase):
 
         line = self.queue_cli(expect=EXIT_NOTHING)
 
-        self.assertIn("hold one fact and not the other", line)
-        self.assertIn(f"#{STORY}", line)
-        self.assertIn(f"#{STANDALONE}", line)
-        for word in ("error", "refused"):
-            self.assertNotIn(word, line)
+        self.assertNotIn("no label", line)
+        self.assertNotIn(f"#{STORY}", line)
+        self.assertNotIn(f"#{STANDALONE}", line)
         self.assertEqual(self.spawned(), [])
         self.assertEqual(self.writes(), [])
 

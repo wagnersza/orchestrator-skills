@@ -1380,11 +1380,17 @@ def claim(item, tracker):
 # --- the two-facts start gate (ADR 0045) ------------------------------------
 
 # The three answers the start gate gives. `START` is both facts, so the item may start.
-# `ONE_FACT` is exactly one of them, which is a parked item or a forgotten drag, and it is
-# never an error. `NO_FACT` is neither, and it is where every groomed item rests.
+# `ONE_FACT` is a card in the start column with no label, which is a forgotten label, and
+# it is never an error. `NO_FACT` is every item whose card sits outside that column. A
+# groomed item rests there, and a parked one rests there too (ADR 0061).
 START = "start"
 ONE_FACT = "one-fact"
 NO_FACT = "no-fact"
+
+# The phrase a failed board read puts in its detail line. A failed read counts no card, so
+# the gate answers `NO_FACT` and starts nothing. That answer is quiet by design, so the
+# queue report reads this phrase back to say the board went unread (ADR 0061).
+BOARD_UNREAD = "the board read failed"
 
 
 def start_gate(item, labels, tracker, project=0, owner="", column=""):
@@ -1394,21 +1400,27 @@ def start_gate(item, labels, tracker, project=0, owner="", column=""):
     necessary** (ADR 0045). The first is the ready state, which the caller already read
     this tick. The second is the board card, read through the three coordinates.
 
+    **The card is read first, and the label answers only for a card in `column`** (ADR
+    0061). Both facts are still necessary, so the set of items that start does not move.
+    What moves is which item a queue report names. The board is the narrower fact of the
+    two, and a label outside `column` is the ordinary resting state of a groomed backlog.
+
     - **`START`** — the item carries the ready state, and its card sits in `column`.
-    - **`ONE_FACT`** — exactly one of the two holds. A card in the start column with no
-      label starts nothing, and a labelled item whose card sits elsewhere starts nothing
-      either. So the column before the start column stays the maintainer's own lane. This
-      is **never an error and never a refusal**. It is how a maintainer parks a groomed
-      item, and a forgotten drag reads the same way. A queue report names every item here.
-    - **`NO_FACT`** — neither fact holds, which is where a groomed item rests.
+    - **`ONE_FACT`** — its card sits in `column` and it carries no label. That is a
+      forgotten label, and it is the one disagreement a maintainer repairs. This is
+      **never an error and never a refusal**. A queue report names every item here.
+    - **`NO_FACT`** — its card sits outside `column`, whatever the label says. A groomed
+      item rests here, and so does one a maintainer parked with the label on. Neither
+      needs reporting, because the board already says where each one sits.
 
     **With no coordinates the label alone decides.** A tracker that names no board is a
     supported configuration, so the board read asks nothing and its absence is never an
     error. The label then answers `START` on its own, and one fact is the whole gate.
 
-    **A board read that fails counts no card**, and it is no error either. The labels were
-    read, so a fact is available and the cause rides the line. Nothing starts on a card
-    this seam cannot read.
+    **A board read that fails counts no card**, and it is no error either. Nothing starts
+    on a card this seam cannot read, whatever the label says, so the answer is `NO_FACT`
+    and the cause rides the detail line. A queue report reads `BOARD_UNREAD` back out of
+    that line, so one failed read still names itself on a quiet tick (ADR 0061).
 
     The board read goes through the same **Tracker adapter** the labels came from, so the
     two reads can never name different repositories. It needs `read:project` on the token
@@ -1432,8 +1444,8 @@ def start_gate(item, labels, tracker, project=0, owner="", column=""):
         # One line is printed, and the standard error of a failed command can hold many,
         # so the cause collapses to one.
         cause = " ".join(str(exc).split())
-        return (ONE_FACT if labelled else NO_FACT), (
-            f"{wearing}, and the board read failed, so no card is counted and this item "
+        return NO_FACT, (
+            f"{wearing}, and {BOARD_UNREAD}, so no card is counted and this item "
             f"starts nothing: {cause}"
         )
 
@@ -1444,13 +1456,11 @@ def start_gate(item, labels, tracker, project=0, owner="", column=""):
         if status
         else f"it has no card in the {column!r} column"
     )
-    if labelled and carded:
-        return START, f"{wearing}, and {sits}"
+    if not carded:
+        return NO_FACT, f"{wearing}, and {elsewhere}"
     if labelled:
-        return ONE_FACT, f"{wearing}, and {elsewhere}, so it starts nothing"
-    if carded:
-        return ONE_FACT, f"{wearing}, and {sits}, so it starts nothing"
-    return NO_FACT, f"{wearing}, and {elsewhere}"
+        return START, f"{wearing}, and {sits}"
+    return ONE_FACT, f"{wearing}, and {sits}, so it starts nothing"
 
 
 def start(item, tracker, project=0, owner="", column=""):
@@ -1701,19 +1711,28 @@ def overlapping_worker(item, live, parallel_check):
 def queue_report(gates):
     """The parked items a queue read names, as one clause of the line a tick prints.
 
-    An item that holds one fact and not the other is a parked story, or a forgotten drag.
-    A forgotten drag otherwise reads as an empty queue, and nothing repairs the
-    disagreement on its own. So the count and the first numbers ride the line. **It is
-    never an error and never a comment**, and the cap is the one every other report takes
-    (ADR 0045).
+    An item whose card sits in the start column with no label is a forgotten label. It
+    otherwise reads as an empty queue, and nothing repairs the disagreement on its own. So
+    the count and the first numbers ride the line. **It is never an error and never a
+    comment**, and the cap is the one every other report takes (ADR 0045).
+
+    **A card outside the start column is not named here, whatever its label says** (ADR
+    0061). That is the resting state of a groomed backlog, so naming it made every tick
+    recite the backlog instead of the one item a maintainer acts on.
+
+    A failed board read answers `NO_FACT` for every item, so it names itself instead. One
+    clause says so, because a tick that cannot see the board otherwise prints the same
+    quiet line as a tick with nothing to do.
     """
+    if any(BOARD_UNREAD in detail for _, detail in gates.values()):
+        return f". {BOARD_UNREAD}, so no card was counted on this tick"
     parked = sorted(
         number for number, (answer, _) in gates.items() if answer == ONE_FACT
     )
     if not parked:
         return ""
     named = ", ".join(f"#{number}" for number in parked[:REPORT_CAP])
-    return f". {len(parked)} item(s) hold one fact and not the other: {named}"
+    return f". {len(parked)} item(s) sit in the start column with no label: {named}"
 
 
 def queue_candidates(items, gates, by_number, children):
