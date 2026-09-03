@@ -373,12 +373,16 @@ for whichever the user picks.
 and adds no second read. **This read writes nothing to the board.** There is no reconcile
 pass and no sync command, because the board is an input.
 
-**Report every item that holds one fact and not the other, capped at 5 rows.** A forgotten
-drag otherwise reads as an empty queue, and nothing repairs the disagreement on its own.
-Name which fact is missing per item, because that is what the maintainer acts on: the
-label, or the drag. An item here is not an error and needs no comment — a parked story
-reads exactly the same way
-([`docs/adr/0045-a-story-start-is-automatic-under-two-roofs.md`](docs/adr/0045-a-story-start-is-automatic-under-two-roofs.md)).
+**Report every item whose card sits in the start column with no label, capped at 5 rows.**
+A forgotten label otherwise reads as an empty queue, and nothing repairs the disagreement
+on its own. An item here is not an error and needs no comment.
+
+**Report no item whose card sits outside the start column, whatever its label says.** The
+card is the narrow fact and the label is the wide one. So a groomed backlog carries the
+label on most of its open items. Naming those made every read recite the backlog instead of
+the one item the maintainer acts on. A labelled item parked before the start column is at
+rest, and the board already says so
+([`docs/adr/0061-the-board-is-read-before-the-label.md`](docs/adr/0061-the-board-is-read-before-the-label.md)).
 
 **Report every item at `to-review` beside the ready queue.** This pass already holds every
 open item's labels, so that list costs no second read. **No label records a merge ask.** The

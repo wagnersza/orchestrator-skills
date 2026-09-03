@@ -226,9 +226,16 @@ necessary. So a card in `To do` with no label never starts, and a labelled item 
 sits in `Ready` never starts either. That second case is the point: `Ready` is the
 maintainer's own lane, and no agent enters it. **Where `docs/agents/issue-tracker.md` names
 no board, the label alone is the whole gate**, which is the fallback a **Merge queue**
-already takes. A queue read reports every item that holds one fact and not the other, because
-a forgotten drag otherwise reads as an empty queue
+already takes
 ([`docs/adr/0045-a-story-start-is-automatic-under-two-roofs.md`](docs/adr/0045-a-story-start-is-automatic-under-two-roofs.md)).
+
+**The card is read first, and a queue read reports only a card in `To do` with no label.**
+That is a forgotten label, and it is the one disagreement a maintainer repairs. A card
+outside `To do` is not reported, whatever its label says. The label is the wide fact: a
+groomed backlog carries it on most open items. So naming those items made every tick recite
+the backlog. **Reading the card first changes no start decision**, because the gate is still
+an `and` of the same two facts
+([`docs/adr/0061-the-board-is-read-before-the-label.md`](docs/adr/0061-the-board-is-read-before-the-label.md)).
 
 **Story run**:
 One user story the automation owns end to end: the `user-story` parent, plus every **Worker**
