@@ -1,5 +1,10 @@
 # A story start is automatic, under two roofs
 
+> The one-fact report of this ADR is narrowed by
+> [ADR 0061](0061-the-board-is-read-before-the-label.md). The card is read first there, so
+> only a card in the start column with no label is reported. The two-facts gate itself and
+> both roofs stand as written here.
+
 [ADR 0029](0029-a-work-item-number-is-a-complete-instruction.md) made a work-item number a
 complete instruction, and the maintainer supplies that number. The `work on N` flow then
 batch-spawns every unblocked child of a **user-story** parent, once, when the maintainer
@@ -71,7 +76,10 @@ board's `To do` column. The automation then owns every child of that story.**
   comment, because a quiet gate is the point: this is how the maintainer parks a groomed
   story. The cost is that a forgotten drag reads as a stalled queue. The queue report names
   every item that holds one fact and not the other, so the disagreement is visible on
-  request.
+  request. **[ADR 0061](0061-the-board-is-read-before-the-label.md) narrows that report to a
+  card in the start column with no label**, so a forgotten drag is no longer named. The
+  label is the wide fact. Naming every labelled item outside the column made each tick
+  recite the backlog.
 - **`work on N` still works, and stays a manual override.** It writes the label and spawns
   at once, which is what it does today.
 - **This ADR records the decision and wires nothing.** The `To do` coordinates, the
