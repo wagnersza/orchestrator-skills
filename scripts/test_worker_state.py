@@ -2999,6 +2999,43 @@ class WorkerStateTestCase(unittest.TestCase):
         self.assertEqual(diagnose, "/diagnosing-bugs")
         self.assertNotIn("/implement", routed.split("the spawn ran:")[0])
 
+    def test_the_role_comes_from_the_declared_touch_set_of_the_item(self):
+        """One schedule starts items of different classes, so `{role}` is a token.
+
+        `orchestrator/CONTEXT.md` says a spawn takes `medium`, and takes `heavy` where one
+        signal fires. Three or more files is the one countable signal, and the item already
+        declares its files. So the tick counts the `## Touches` block and fills the token.
+        """
+        items = story_queue()
+        for gone in (STORY, LEAF_ONE, LEAF_TWO):
+            items.pop(str(gone))
+        self.write_queue(items)
+
+        self.queue_cli(spawn="echo {role} > " + str(self.root / "role"))
+        one_file = (self.root / "role").read_text().strip()
+
+        items[str(STANDALONE)]["body"] = body(
+            touches=["docs/one.md", "docs/two.md", "docs/three.md"]
+        )
+        self.write_queue(items)
+        self.queue_cli(spawn="echo {role} > " + str(self.root / "role"))
+        three_files = (self.root / "role").read_text().strip()
+
+        self.assertEqual(one_file, "medium")
+        self.assertEqual(three_files, "heavy")
+
+    def test_an_item_with_no_touch_block_takes_the_default_role(self):
+        """A `light` spawn is never derived: two of its three conditions are prose."""
+        items = story_queue()
+        for gone in (STORY, LEAF_ONE, LEAF_TWO):
+            items.pop(str(gone))
+        items[str(STANDALONE)]["body"] = "no block here"
+        self.write_queue(items)
+
+        self.queue_cli(spawn="echo {role} > " + str(self.root / "role"))
+
+        self.assertEqual((self.root / "role").read_text().strip(), "medium")
+
     def test_the_worktree_name_carries_the_item_number_first(self):
         """`{slug}` is the number and then the first words of the title, so a worktree
         name says which item it holds and two items with one title still get two names."""

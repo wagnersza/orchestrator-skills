@@ -1492,6 +1492,13 @@ OWNED = (IN_PROGRESS, TO_REVIEW, NEEDS_HUMAN)
 TOUCHES = "touches"
 OFF = "off"
 
+# The two Roles a tick can derive, and the one countable `heavy` signal.
+# `orchestrator/CONTEXT.md` names four Roles; `role_for` says why the other two are never
+# derived. `scripts/spawn_item.py` owns the full list, because it owns the `--role` flag.
+HEAVY = "heavy"
+MEDIUM = "medium"
+HEAVY_TOUCHES = 3
+
 # The two other `##` blocks a **Work item** body carries. Each one takes the shape
 # `heading_block` reads, so this seam writes no second parse of it.
 PARENT_HEADING = re.compile(r"^##\s*Parent\s*$", re.MULTILINE)
@@ -1813,13 +1820,40 @@ def queue_plan(tracker, board, roofs, parallel_check=TOUCHES):
     return None, f"nothing: every candidate waits — {delayed}{report}"
 
 
+def role_for(body):
+    """The Role one work item's own facts name.
+
+    `orchestrator/CONTEXT.md` names four Roles and says a spawn takes **medium**. It
+    takes **heavy** where **one** listed signal fires, and **light** only where **all
+    three** listed conditions hold.
+
+    One `heavy` signal is countable: three or more files. The item already declares its
+    files, in the `## Touches` block ADR 0046 added, so this reads that block and counts
+    it. The other `heavy` signals are prose — a contract, a schema, a code seam, an open
+    decision — and a tick cannot read prose. An item that fires only one of those reads
+    **medium** here, which is the documented default and the cheaper of the two answers.
+
+    **`light` is never derived.** Two of its three conditions are prose ("criteria fully
+    enumerated", "no open decision"), and the vocabulary needs all three. So a one-file
+    item reads **medium**, and a maintainer who wants `light` spawns it by hand. A Role
+    guessed one rung too low burns a round trip; a Role guessed one rung too high only
+    costs tokens.
+    """
+    return HEAVY if len(parse_touches(body)) >= HEAVY_TOUCHES else MEDIUM
+
+
 def fill_spawn(template, item):
     """`--spawn-command` with every token of one work item filled in.
 
-    Five tokens, and each one is a value only this tick holds: `{item}`, `{slug}`,
-    `{title}`, `{body}` and `{skill}`. **The title and the body arrive shell-quoted**,
-    because an item body holds quotes, newlines and backticks and the command runs
-    through a shell. A token the template does not use is never replaced.
+    Six tokens, and each one is a value only this tick holds: `{item}`, `{slug}`,
+    `{title}`, `{body}`, `{skill}` and `{role}`. **The title and the body arrive
+    shell-quoted**, because an item body holds quotes, newlines and backticks and the
+    command runs through a shell. A token the template does not use is never replaced.
+
+    **`{role}` exists so that one schedule can start items of different classes.** With
+    no token the Role would be a literal in the stored command string, and every item the
+    loop ever started would take that one Role. The skill body calls one model for a whole
+    batch a defect, so the automatic loop must not hold it.
 
     **This composes no launch command.** The whole invocation is the caller's own string,
     the way `scripts/close_item.py` takes its teardown command. So this seam holds no
@@ -1832,6 +1866,7 @@ def fill_spawn(template, item):
         "title": shlex.quote(item["title"]),
         "body": shlex.quote(item["body"]),
         "skill": skill_for(item["labels"]),
+        "role": role_for(item["body"]),
     }
     filled = template
     for token, value in values.items():
@@ -2241,10 +2276,12 @@ def main(argv=None):
         "--spawn-command",
         required=True,
         help="the command that turns one work item into a live worker, which the caller "
-        "reads from scripts/spawn_item.py. It takes {item}, {slug}, {title}, {body} and "
-        "{skill}. This tick fills all five, and the title and the body arrive "
-        "shell-quoted. So this seam holds no spawn flag of its own and composes no launch "
-        "command",
+        "reads from scripts/spawn_item.py. It takes {item}, {slug}, {title}, {body}, "
+        "{skill} and {role}. This tick fills all six, and the title and the body arrive "
+        "shell-quoted. {role} is heavy where the item declares three or more paths in its "
+        "## Touches block, and medium otherwise, so one schedule starts items of "
+        "different classes. So this seam holds no spawn flag of its own and composes no "
+        "launch command",
     )
 
     predicate = subcommands.add_parser(

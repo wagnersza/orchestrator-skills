@@ -170,11 +170,19 @@ orca worktree ps   --json     # topology: every worktree with branch, card statu
 
 ## 9. worker-list
 
-The worker terminal is titled with the slug (`--title "$SLUG"`). Match on that; skip the setup/shell terminals — don't just take the first.
+**Match on `agentIdentity`, and never on the title.** `terminal create` takes
+`--title "$SLUG"`, and the TUI then overwrites it with its own name. A worker terminal
+reads `"title": "✳ Claude Code"` a second later, so a slug match finds nothing and every
+read reports `NO AGENT TERM`. `agentIdentity` holds the harness name (`claude`), and a
+setup or shell terminal carries none. So one truthy test skips the shells without naming
+a harness here.
 
 ```bash
-orca terminal list --worktree name:$SLUG --json | python3 -c "import json,sys;ts=json.load(sys.stdin)['result']['terminals'];c=[t for t in ts if '$SLUG' in (t.get('title')or'')];print(c[0]['handle'] if c else 'NO AGENT TERM')"
+orca terminal list --worktree name:$SLUG --json | python3 -c "import json,sys;ts=json.load(sys.stdin)['result']['terminals'];c=[t for t in ts if t.get('agentIdentity')];print(c[0]['handle'] if c else 'NO AGENT TERM')"
 ```
+
+Verified on 2026-09-02 against a live worker: the title read `✳ Claude Code` and
+`agentIdentity` read `claude`.
 
 ## 10. teardown
 
