@@ -110,10 +110,22 @@ gh label create rating:worth-exploring --color D4C5F9 --description "The layer 5
 
 This repo's issues are also cards on a GitHub Projects v2 board. **The board is an input,
 and nothing writes it.** One question is asked of it: is this item's card in the start
-column. That is the second fact of a ready-queue entry, beside the `ready-for-agent`
-label. **Both facts are necessary, and one fact on its own starts nothing.** Rationale:
+column. **What that answer authorises depends on the item's kind.** Three rows, and an item
+matches one:
+
+| Item kind | What authorises it |
+|---|---|
+| `user-story` | its card sits in the start column. **No label, ever.** |
+| child of an authorised story | it wears `ready-for-agent`, and every `## Blocked by` edge is closed. **Its own column is not read.** |
+| standalone leaf | it wears `ready-for-agent`, **and** its own card sits in the start column. |
+
+A story card authorises that story's whole run, so one drag starts every labelled,
+unblocked child. A child with no label stays stopped. On the standalone row both facts are
+necessary, and one fact on its own starts nothing. Rationale:
 [`orchestrator/docs/adr/0054-the-board-is-an-input-not-a-mirror.md`](../../orchestrator/docs/adr/0054-the-board-is-an-input-not-a-mirror.md)
 and
+[`orchestrator/docs/adr/0062-a-story-card-authorises-its-run.md`](../../orchestrator/docs/adr/0062-a-story-card-authorises-its-run.md),
+which narrows
 [`orchestrator/docs/adr/0045-a-story-start-is-automatic-under-two-roofs.md`](../../orchestrator/docs/adr/0045-a-story-start-is-automatic-under-two-roofs.md).
 
 Two coordinates, and the name of the start column:
@@ -128,9 +140,11 @@ the address a card write needs, and nothing writes a card. So the name is the wh
 coordinate, and the reader compares it to the `Status` name the board answers.
 
 **A `To do` card is not promoted to the `ready-for-agent` label.** No pass reads one fact
-and writes the other, in either direction. The two facts stay separate. That is what keeps
-`Ready` the maintainer's own lane. An item dragged to `Ready` gains no label, and a
-labelled item left in `Ready` starts nothing.
+and writes the other, in either direction, and that holds for a story card too. The two
+facts stay separate. That is what keeps `Ready` the maintainer's own lane. An item dragged
+to `Ready` gains no label, and a labelled standalone leaf left in `Ready` starts nothing. A
+labelled child of an authorised story does start there, because a child's own column is
+never read.
 
 ### The one call
 
