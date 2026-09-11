@@ -231,25 +231,27 @@ def body(parent=0, blocked=(), touches=()):
 
 
 def story_queue():
-    """A queue holding one started story, its two leaves, and one standalone item.
+    """A queue holding one authorised story, its two leaves, and one standalone item.
 
-    The story holds both facts, so the tick can descend into it. Its two leaves declare
-    disjoint Touch sets, and the standalone item holds both facts of its own and belongs to
-    no story run. Each case takes this and edits the records it is about.
+    Each record carries the fact its kind owns (ADR 0062). The story wears no label and its
+    card sits in the start column, which is the whole gate for a spec. Its two leaves wear
+    `ready-for-agent` with no card of their own, and they declare disjoint Touch sets. The
+    standalone item holds both facts of its own and belongs to no story run. Each case takes
+    this and edits the records it is about.
     """
     return {
         str(STORY): {
-            "labels": [USER_STORY, READY_FOR_AGENT],
+            "labels": [USER_STORY],
             "board": START_COLUMN,
             "title": "the story",
         },
         str(LEAF_ONE): {
-            "labels": [],
+            "labels": [READY_FOR_AGENT],
             "title": "the first leaf",
             "body": body(parent=STORY, touches=["scripts/one.py"]),
         },
         str(LEAF_TWO): {
-            "labels": [],
+            "labels": [READY_FOR_AGENT],
             "title": "the second leaf",
             "body": body(parent=STORY, touches=["scripts/two.py"]),
         },
@@ -2326,6 +2328,28 @@ class WorkerStateTestCase(unittest.TestCase):
             self.assertNotIn(word, card_only)
         self.assertEqual(self.writes(), [])
 
+    def test_a_user_story_is_authorised_by_its_card_and_never_by_a_label(self):
+        """The first row of the gate table. A story is a spec, and no worker implements one.
+        So its card in the start column is the whole gate, and it needs no `ready-for-agent`
+        label ever. A story card outside that column authorises nothing (ADR 0062)."""
+        self.write_fixture(labels=[USER_STORY], board=START_COLUMN)
+        authorised = self.gate(expect=EXIT_DUE)
+
+        self.write_fixture(labels=[USER_STORY], board=READY_LANE)
+        parked = self.gate(expect=EXIT_NOTHING)
+
+        self.assertTrue(authorised.startswith(f"{START}:"), authorised)
+        self.assertIn("authorises its own children", authorised)
+        self.assertTrue(parked.startswith(f"{NO_FACT}:"), parked)
+        self.assertIn("authorises nothing", parked)
+        # The label is never asked for on this row, so neither line names a missing label
+        # and neither answer is the forgotten-label state.
+        for line in (authorised, parked):
+            self.assertIn(f"is a {USER_STORY} spec", line)
+            self.assertNotIn(ONE_FACT, line)
+            self.assertNotIn(f"no {READY_FOR_AGENT} label", line)
+        self.assertEqual(self.writes(), [])
+
     def test_a_card_outside_the_start_column_rests_whatever_its_label_says(self):
         """The board is the narrower fact, so a card outside the start column is the quiet
         state. A labelled item parked in the lane before it reads the same way as an
@@ -2753,9 +2777,10 @@ class WorkerStateTestCase(unittest.TestCase):
         self.assertEqual(self.spawned(), [LEAF_ONE])
 
     def test_a_started_parent_is_never_spawned_for_the_work_itself(self):
-        """A `user-story` parent that holds both facts is a spec. The tick descends to its
-        unblocked children and starts one of those, and it writes no `ready-for-agent`
-        label on any child. So the rule that only a human writes that label survives."""
+        """A `user-story` parent whose card sits in the start column is a spec. The tick
+        descends to its unblocked children and starts one of those, and it writes no
+        `ready-for-agent` label on any child. So the rule that only a human writes that
+        label survives."""
         self.write_queue(story_queue())
 
         line = self.queue_cli()
@@ -2764,12 +2789,11 @@ class WorkerStateTestCase(unittest.TestCase):
         self.assertEqual(self.spawned(), [LEAF_ONE])
         self.assertEqual(self.writes(), [])
 
-        # A child of a live story run needs neither fact of its own. The parent's card can
-        # go back to the maintainer's lane and the run still owns its children.
+        # A live story run keeps authorising its children. The parent's card can go back to
+        # the maintainer's lane and the run still owns them, on their own labels.
         items = story_queue()
         items[str(LEAF_ONE)]["labels"] = [IN_PROGRESS]
         items[str(STORY)]["board"] = READY_LANE
-        items[str(STORY)]["labels"] = [USER_STORY]
         items.pop(str(STANDALONE))
         self.write_queue(items)
         self.clear_spawned()
@@ -2786,7 +2810,7 @@ class WorkerStateTestCase(unittest.TestCase):
         items.pop(str(STANDALONE))
         items[str(LEAF_ONE)]["labels"] = [USER_STORY]
         items[str(NESTED_LEAF)] = {
-            "labels": [],
+            "labels": [READY_FOR_AGENT],
             "title": "the nested leaf",
             "body": body(parent=LEAF_ONE, touches=["scripts/three.py"]),
         }
@@ -2796,6 +2820,155 @@ class WorkerStateTestCase(unittest.TestCase):
 
         self.assertIn(f"work item #{NESTED_LEAF} is the one item", line)
         self.assertEqual(self.spawned(), [NESTED_LEAF])
+
+    # --- the three rows of the gate table (ADR 0062) -------------------------
+
+    def test_a_story_card_authorises_the_whole_run_with_no_label_on_the_story(self):
+        """The first row, through a whole tick. The story wears no `ready-for-agent` label
+        and its card sits in the start column, and that one drag authorises the run. The
+        story itself is never spawned, because it is a spec."""
+        items = story_queue()
+        items.pop(str(STANDALONE))
+        self.assertNotIn(READY_FOR_AGENT, items[str(STORY)]["labels"])
+        self.write_queue(items)
+
+        line = self.queue_cli()
+
+        self.assertIn(f"work item #{LEAF_ONE} is the one item", line)
+        self.assertEqual(self.spawned(), [LEAF_ONE])
+        self.assertEqual(self.writes(), [])
+
+        # The next tick reaches the second child, and no tick reaches the story itself.
+        items[str(LEAF_ONE)]["labels"] = [IN_PROGRESS]
+        self.write_queue(items)
+
+        self.queue_cli()
+
+        self.assertEqual(self.spawned(), [LEAF_ONE, LEAF_TWO])
+
+    def test_a_child_of_an_authorised_story_is_started_on_its_label_alone(self):
+        """The second row. The child's own column is never read, so a maintainer drags the
+        story card and no child card. A card in the maintainer's own lane starts the same
+        way as no card at all."""
+        items = story_queue()
+        items.pop(str(STANDALONE))
+        items.pop(str(LEAF_TWO))
+        items[str(LEAF_ONE)]["board"] = READY_LANE
+        self.write_queue(items)
+
+        line = self.queue_cli()
+
+        self.assertIn(f"work item #{LEAF_ONE} is the one item", line)
+        self.assertEqual(self.spawned(), [LEAF_ONE])
+
+        # The base fixture gives that child no card at all, and it starts the same way.
+        items = story_queue()
+        items.pop(str(STANDALONE))
+        items.pop(str(LEAF_TWO))
+        self.write_queue(items)
+        self.clear_spawned()
+
+        self.queue_cli()
+
+        self.assertEqual(self.spawned(), [LEAF_ONE])
+
+    def test_an_unlabelled_child_of_an_authorised_story_is_no_candidate(self):
+        """The guard on the second row, and the behaviour ADR 0062 narrowed. The descent
+        once reached every unblocked child, so a ticket nobody approved started because its
+        parent moved. Now a child with no label stays stopped, and that is how a maintainer
+        parks one ticket under a running story."""
+        items = story_queue()
+        items.pop(str(STANDALONE))
+        items[str(LEAF_ONE)]["labels"] = []
+        self.write_queue(items)
+
+        self.queue_cli()
+
+        # The labelled sibling started, so the story was authorised and the descent ran.
+        self.assertEqual(self.spawned(), [LEAF_TWO])
+
+        items.pop(str(LEAF_TWO))
+        self.write_queue(items)
+        self.clear_spawned()
+
+        line = self.queue_cli(expect=EXIT_NOTHING)
+
+        self.assertIn("is startable on this tick", line)
+        self.assertEqual(self.spawned(), [])
+        self.assertEqual(self.writes(), [])
+
+    def test_a_standalone_leaf_still_needs_both_facts(self):
+        """The third row, unchanged. One fact starts nothing on its own, whichever fact it
+        is. This is the path a maintainer takes to run one ticket and nothing else."""
+        items = story_queue()
+        for gone in (STORY, LEAF_ONE, LEAF_TWO):
+            items.pop(str(gone))
+        items[str(STANDALONE)]["board"] = READY_LANE
+        self.write_queue(items)
+
+        label_only = self.queue_cli(expect=EXIT_NOTHING)
+
+        self.assertEqual(self.spawned(), [])
+
+        items[str(STANDALONE)]["board"] = START_COLUMN
+        items[str(STANDALONE)]["labels"] = []
+        self.write_queue(items)
+
+        card_only = self.queue_cli(expect=EXIT_NOTHING)
+
+        self.assertIn("sit in the start column with no label", card_only)
+        self.assertIn(f"#{STANDALONE}", card_only)
+        self.assertEqual(self.spawned(), [])
+        self.assertNotIn("no label", label_only)
+
+        items[str(STANDALONE)]["labels"] = [READY_FOR_AGENT]
+        self.write_queue(items)
+
+        self.queue_cli()
+
+        self.assertEqual(self.spawned(), [STANDALONE])
+
+    def test_a_story_card_outside_the_start_column_authorises_nothing(self):
+        """A parked story is silent, as a parked leaf already is. None of its children
+        becomes a candidate through it, whatever label each child wears."""
+        items = story_queue()
+        items.pop(str(STANDALONE))
+        items[str(STORY)]["board"] = READY_LANE
+        self.write_queue(items)
+
+        line = self.queue_cli(expect=EXIT_NOTHING)
+
+        self.assertEqual(self.spawned(), [])
+        self.assertEqual(self.writes(), [])
+
+        # The card is the one fact that moved, so the same queue starts a child once the
+        # story card is back in the start column.
+        items[str(STORY)]["board"] = START_COLUMN
+        self.write_queue(items)
+
+        self.queue_cli()
+
+        self.assertEqual(self.spawned(), [LEAF_ONE])
+        self.assertNotIn(f"#{STORY}", line)
+
+    def test_a_user_story_is_never_named_as_a_forgotten_label(self):
+        """A story with no label is its correct resting state, so naming it printed noise on
+        every tick. A leaf in the same column with no label is still named, so the report
+        narrowed for one kind and for nothing else."""
+        items = story_queue()
+        items[str(LEAF_ONE)]["labels"] = []
+        items[str(LEAF_TWO)]["labels"] = []
+        items[str(STANDALONE)]["labels"] = []
+        self.write_queue(items)
+
+        line = self.queue_cli(expect=EXIT_NOTHING)
+
+        self.assertIn("sit in the start column with no label", line)
+        self.assertIn(f"#{STANDALONE}", line)
+        self.assertNotIn(f"#{STORY}", line)
+        self.assertIn("1 item(s)", line)
+        self.assertEqual(self.spawned(), [])
+        self.assertEqual(self.writes(), [])
 
     def test_a_child_with_an_open_blocker_stays_unstarted(self):
         """The descent reads the open-blocker predicate the Ready queue already reads. A
@@ -2894,12 +3067,12 @@ class WorkerStateTestCase(unittest.TestCase):
         items.pop(str(STANDALONE))
         items[str(LEAF_ONE)]["labels"] = [IN_PROGRESS]
         items[str(SECOND_STORY)] = {
-            "labels": [USER_STORY, READY_FOR_AGENT],
+            "labels": [USER_STORY],
             "board": START_COLUMN,
             "title": "the second story",
         }
         items[str(SECOND_LEAF)] = {
-            "labels": [],
+            "labels": [READY_FOR_AGENT],
             "title": "the leaf of the second story",
             "body": body(parent=SECOND_STORY, touches=["scripts/four.py"]),
         }
