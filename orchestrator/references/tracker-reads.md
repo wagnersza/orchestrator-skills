@@ -76,8 +76,22 @@ read, and the board reconcile runs on the same answer. Where the flows need it:
 **"What next?"**, **"Work a #N"**, and **Board status**.
 
 **A blocker that is absent from this answer is closed**, because the read holds every
-open item up to the page cap. That is the ready predicate, with no second read
-([`../CONTEXT.md`](../CONTEXT.md), **Ready queue**).
+open item up to the page cap. So the `## Blocked by` half of the ready predicate needs no
+second read ([`../CONTEXT.md`](../CONTEXT.md), **Ready queue**).
+
+**The fact that authorises a start depends on the item's kind**, so a caller reads the
+labels of this answer against one of three rows:
+
+| Item kind | What authorises it |
+|---|---|
+| `user-story` | its card sits in the start column. **No label, ever.** |
+| child of an authorised story | it wears `ready-for-agent`, and every `## Blocked by` edge is closed. **Its own column is not read.** |
+| standalone leaf | it wears `ready-for-agent`, **and** its own card sits in the start column. |
+
+The board read that answers the card is the per-repo one in
+[`../../docs/agents/issue-tracker.md`](../../docs/agents/issue-tracker.md), because the
+coordinates are per-repo data. Where that file names no board, the label alone is the whole
+gate ([`../docs/adr/0062-a-story-card-authorises-its-run.md`](../docs/adr/0062-a-story-card-authorises-its-run.md)).
 
 ```bash
 gh issue list --repo <owner>/<name> --state open --limit 200 \

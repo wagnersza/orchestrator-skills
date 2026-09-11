@@ -220,34 +220,50 @@ _Avoid_: ticket, issue, task (pick one — prefer work item).
 **Ready queue**:
 The set of work items a worker can start now — labelled `ready-for-agent` with every `## Blocked by` edge closed. The orchestrator resolves this over whatever tracker `docs/agents/issue-tracker.md` names.
 
-**The automation needs one fact more, and it is the card.** An item starts by itself only
-where it carries the label *and* its card sits in the board's `To do` column. Both facts are
-necessary. So a card in `To do` with no label never starts, and a labelled item whose card
-sits in `Ready` never starts either. That second case is the point: `Ready` is the
-maintainer's own lane, and no agent enters it. **Where `docs/agents/issue-tracker.md` names
-no board, the label alone is the whole gate**, which is the fallback a **Merge queue**
-already takes
-([`docs/adr/0045-a-story-start-is-automatic-under-two-roofs.md`](docs/adr/0045-a-story-start-is-automatic-under-two-roofs.md)).
+**The gate reads the item's kind first, then asks the fact that kind owns.** Three rows,
+and an item matches one:
 
-**The card is read first, and a queue read reports only a card in `To do` with no label.**
-That is a forgotten label, and it is the one disagreement a maintainer repairs. A card
-outside `To do` is not reported, whatever its label says. The label is the wide fact: a
+| Item kind | What authorises it |
+|---|---|
+| `user-story` | its card sits in the board's `To do` column. **No label, ever.** |
+| child of an authorised story | it wears `ready-for-agent`, and every `## Blocked by` edge is closed. **Its own column is not read.** |
+| standalone leaf | it wears `ready-for-agent`, **and** its own card sits in `To do`. |
+
+**A story card authorises its whole run**, so one drag makes every labelled, unblocked child
+startable. **A child with no label stays stopped**, whatever its parent holds, and that is
+how a maintainer parks one ticket. On the standalone row both facts are necessary. So a leaf
+card in `To do` with no label never starts, and a labelled leaf whose card sits in `Ready`
+never starts either. That second case is the point: `Ready` is the maintainer's own lane, and
+no agent enters it. **Where `docs/agents/issue-tracker.md` names no board, the label alone is
+the whole gate**, which is the fallback a **Merge queue** already takes
+([`docs/adr/0062-a-story-card-authorises-its-run.md`](docs/adr/0062-a-story-card-authorises-its-run.md),
+narrowing
+[`docs/adr/0045-a-story-start-is-automatic-under-two-roofs.md`](docs/adr/0045-a-story-start-is-automatic-under-two-roofs.md)).
+
+**The card is read first, and a queue read reports only a leaf card in `To do` with no
+label.** That is a forgotten label, and it is the one disagreement a maintainer repairs. A
+card outside `To do` is not reported, whatever its label says. The label is the wide fact: a
 groomed backlog carries it on most open items. So naming those items made every tick recite
-the backlog. **Reading the card first changes no start decision**, because the gate is still
-an `and` of the same two facts
-([`docs/adr/0061-the-board-is-read-before-the-label.md`](docs/adr/0061-the-board-is-read-before-the-label.md)).
+the backlog. **A `user-story` is never named there either**, because a story with no label is
+its correct resting state
+([`docs/adr/0061-the-board-is-read-before-the-label.md`](docs/adr/0061-the-board-is-read-before-the-label.md),
+narrowed by
+[`docs/adr/0062-a-story-card-authorises-its-run.md`](docs/adr/0062-a-story-card-authorises-its-run.md)).
 
 **Story run**:
 One user story the automation owns end to end: the `user-story` parent, plus every **Worker**
 it spawns for that story's children, plus the story proof that runs before the parent closes.
-It begins when the parent holds both facts of a **Ready queue** entry. It ends when the parent
-closes.
+It begins when the parent's card sits in the start column, which is the whole **Ready queue**
+gate for a `user-story`. It ends when the parent closes.
 
-**A child of a live Story run needs neither fact.** The queue tick descends from the parent to
-its unblocked children and spawns them, and it writes no `ready-for-agent` label on any of
-them. So the rule that only a human writes that label is unchanged, and one human act starts
-ten children. A child that itself carries `user-story` is a nested spec, so the descent
-continues to the implementable leaves, which is the rule the `work on N` flow already holds.
+**A child of a live Story run starts on its `ready-for-agent` label alone.** The queue tick
+descends from the parent to its unblocked children, and it spawns each child that wears that
+label. It reads no child's own card. It writes the label on no child, so the rule that only a
+human writes it is unchanged. One drag then starts ten children, on the labels a grooming
+pass already wrote. **A child with no label stays stopped**, which is how a maintainer
+parks one ticket under a running story. A child that itself carries `user-story` is a nested
+spec, so the descent continues to the implementable leaves, which is the rule the `work on N`
+flow already holds.
 
 `work on N` stays as the manual override. It writes the label and spawns at once, and it is a
 convenience rather than the mechanism
@@ -376,9 +392,12 @@ an owned run is a **Position**, and **no label records that**
 The `Status` field on a work item's card, where the tracker has a project board (GitHub Projects v2). **The board is an input, and nothing writes it.** One question is asked of it: is this item's card in the start column. So `Status` is no projection of the **Work-state labels**, and there is no derivation table, no reconcile pass and no sync command. `Tracker.board_status` is the one reader. The two coordinates and the name of the start column live in `docs/agents/issue-tracker.md`, alongside the labels; a repo with no board omits that section, and the label alone is the whole gate. Rationale: [`docs/adr/0054-the-board-is-an-input-not-a-mirror.md`](docs/adr/0054-the-board-is-an-input-not-a-mirror.md).
 
 **One column is the start column, and its direction is board to label.** `To do` is that
-column. A card the maintainer drags there means "an agent can start this now". It is the
-second fact of a **Ready queue** entry, beside the `ready-for-agent` label
-([`docs/adr/0045-a-story-start-is-automatic-under-two-roofs.md`](docs/adr/0045-a-story-start-is-automatic-under-two-roofs.md)).
+column. A card the maintainer drags there means "an agent can start this now". **What the
+card authorises depends on the item's kind.** A `user-story` card authorises that story's
+whole run, and it needs no label. A standalone leaf card is the second fact beside the
+`ready-for-agent` label. A child of an authorised story starts on its label alone, so its own
+card is never read. The three rows are the **Ready queue** unit above
+([`docs/adr/0062-a-story-card-authorises-its-run.md`](docs/adr/0062-a-story-card-authorises-its-run.md)).
 
 **A drag is intent in every column, because nothing overwrites a card.** No drag removes a
 label, so a card dragged back out of `To do` changes nothing. A take-back is the maintainer
