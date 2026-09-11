@@ -7,8 +7,8 @@ the first prompt. `phase` asks it and prints the answer. `tick` asks it and appl
 the answer. One seam answers all three, for every tool and every harness (ADR 0019).
 
 The other two ask the question that comes before all of them: *may this work item start
-at all?* `start` reads the two facts of a story start for one item and prints the answer.
-`queue` reads them for every open item, and starts one (ADR 0045).
+at all?* `start` reads the fact one item's kind owns and prints the answer. `queue` reads
+it for every open item, and starts one (ADR 0045, narrowed by ADR 0062).
 
 **`ready`** — is a live agent process running with its working directory inside
 this worktree? Exit 0 ready, non-zero not:
@@ -27,18 +27,29 @@ question: *may this item start?* It writes nothing at all:
 
 | Code | Meaning |
 |---|---|
-| 0 | both facts hold, so this item may start |
-| 1 | one fact holds, or neither — the printed line names which |
+| 0 | the fact this item's kind owns holds, so it may start |
+| 1 | a fact is missing — the printed line names which |
 
-**A start is two facts, and both are necessary** (ADR 0045). The item carries the ready
-state, and its board card sits in the start column. A card in that column with no label
-starts nothing. A labelled item whose card sits anywhere else starts nothing either, so
-the column before the start column stays the maintainer's own lane.
+**The gate reads the item's kind first, then asks the fact that kind owns** (ADR 0062,
+narrowing ADR 0045):
 
-**Exactly one fact is neither an error nor a refusal.** It is how a maintainer parks a
+| Item kind | What authorises it |
+|---|---|
+| `user-story` | its card sits in the start column. **No label, ever.** |
+| child of an authorised story | it wears `ready-for-agent`, and every `## Blocked by` edge is closed. **Its own column is not read.** |
+| standalone leaf | it wears `ready-for-agent`, **and** its own card sits in the start column. |
+
+**A story is a spec, and no worker implements one.** So one drag of the story card
+authorises the whole run. The `ready-for-agent` label then keeps its one meaning: a leaf a
+human approved. **On the standalone row both facts are still necessary.** A card in that
+column with no label starts nothing. A labelled leaf whose card sits anywhere else starts
+nothing either, so the column before the start column stays the maintainer's own lane.
+
+**A missing fact is neither an error nor a refusal.** It is how a maintainer parks a
 groomed item, and a forgotten drag reads the same way. So the answer is a quiet code and
-a line that names which fact is missing. A queue report names every item in that state,
-which is what keeps the disagreement visible.
+a line that names which fact is missing. A queue report names every leaf card in the start
+column with no label, which is what keeps the disagreement visible. **It names no
+`user-story`**, because a story with no label is its correct resting state.
 
 **With no board coordinates the label alone decides.** A tracker that names no board is a
 supported configuration, and its absence is never an error. The three coordinates are
@@ -72,7 +83,7 @@ The tick reads in one order, and the order is the contract:
 |---|---|
 | 1 | one list read answers every open work item, its labels and its body |
 | 2 | the worker cap answers first, because it bounds every run at once |
-| 3 | the start gate answers each item, over one board read |
+| 3 | the start gate answers each item by its kind, over one board read |
 | 4 | the candidates are the authorised leaves that nobody owns and nothing blocks |
 | 5 | `max_stories` delays a candidate that opens a new **Story run** |
 | 6 | the **Touch set** compare delays a candidate that overlaps a live **Worker** |
@@ -84,9 +95,12 @@ value, so no flag raises it.
 
 **A `user-story` parent is never spawned for the work itself.** It is a spec, so the tick
 descends to its unblocked children and spawns one of those. A child that carries the same
-label is a nested spec, and the descent continues to the implementable leaves. **The tick
-writes no `ready-for-agent` label on any child**, so the rule that only a human writes
-that label survives word for word. A child of a live **Story run** needs neither fact.
+label is a nested spec, and the descent continues to the implementable leaves. **A
+descended child starts on its `ready-for-agent` label alone**, and its own card is never
+read. **The tick writes that label on no child.** So the rule that only a human writes it
+survives word for word, and it now gates the descent too. A child with no label stays
+stopped, which is how a maintainer parks one ticket under a running story. A child of a
+live **Story run** reads the same way, because act one already happened for that story.
 
 **The descent reads the same open-blocker predicate the Ready queue reads.** A blocker
 absent from the open items is closed, and only a still-open edge blocks. No second
@@ -1377,15 +1391,23 @@ def claim(item, tracker):
     return EXIT_APPLIED, f"claim: applied: {swap_line(item, removed, added)}"
 
 
-# --- the two-facts start gate (ADR 0045) ------------------------------------
+# --- the start gate (ADR 0045, narrowed by ADR 0062) ------------------------
 
-# The three answers the start gate gives. `START` is both facts, so the item may start.
-# `ONE_FACT` is a card in the start column with no label, which is a forgotten label, and
-# it is never an error. `NO_FACT` is every item whose card sits outside that column. A
-# groomed item rests there, and a parked one rests there too (ADR 0061).
+# The three answers the start gate gives. `START` means the fact the item's kind owns
+# holds, so the item may start. That fact is the card for a `user-story`, and both facts
+# for a leaf. `ONE_FACT` is a leaf card in the start column with no label, which is a
+# forgotten label, and it is never an error. `NO_FACT` is every item whose card sits
+# outside that column. A groomed item rests there, and a parked one rests there too
+# (ADR 0061).
 START = "start"
 ONE_FACT = "one-fact"
 NO_FACT = "no-fact"
+
+# The label that makes a work item a spec rather than a leaf. The gate reads it first,
+# because a story and a leaf are authorised by different facts (ADR 0062). A story is never
+# spawned for the work itself: the tick descends to its children. A child that carries the
+# same label is a nested spec, and the descent continues through it.
+USER_STORY = "user-story"
 
 # The phrase a failed board read puts in its detail line. A failed read counts no card, so
 # the gate answers `NO_FACT` and starts nothing. That answer is quiet by design, so the
@@ -1394,28 +1416,37 @@ BOARD_UNREAD = "the board read failed"
 
 
 def start_gate(item, labels, tracker, project=0, owner="", column=""):
-    """`(answer, detail)` for whether one work item may start: the two facts of act one.
+    """`(answer, detail)` for whether one work item may start: the fact its kind owns.
 
-    Three answers and no fourth: `START`, `ONE_FACT`, `NO_FACT`. **Both facts are
-    necessary** (ADR 0045). The first is the ready state, which the caller already read
-    this tick. The second is the board card, read through the three coordinates.
+    Three answers and no fourth: `START`, `ONE_FACT`, `NO_FACT`.
+
+    **The gate reads the item's kind first, then asks the fact that kind owns** (ADR 0062).
+    A `user-story` is a spec, and no worker implements one. So its card in `column` is the
+    whole gate, and it needs no `ready-for-agent` label ever. A maintainer drags one story
+    card to authorise the whole run. The label then keeps its one meaning: a leaf a human
+    approved. **For a leaf both facts are still necessary** (ADR 0045), so the set of
+    standalone items that start does not move.
 
     **The card is read first, and the label answers only for a card in `column`** (ADR
-    0061). Both facts are still necessary, so the set of items that start does not move.
-    What moves is which item a queue report names. The board is the narrower fact of the
-    two, and a label outside `column` is the ordinary resting state of a groomed backlog.
+    0061). The board is the narrower fact of the two, and a label outside `column` is the
+    ordinary resting state of a groomed backlog.
 
-    - **`START`** — the item carries the ready state, and its card sits in `column`.
-    - **`ONE_FACT`** — its card sits in `column` and it carries no label. That is a
-      forgotten label, and it is the one disagreement a maintainer repairs. This is
-      **never an error and never a refusal**. A queue report names every item here.
+    - **`START`** — a `user-story` whose card sits in `column`, whatever its labels say, or
+      a leaf that carries the ready state with its card in `column`.
+    - **`ONE_FACT`** — a **leaf** whose card sits in `column` and that carries no label.
+      That is a forgotten label, and it is the one disagreement a maintainer repairs. This
+      is **never an error and never a refusal**. A queue report names every item here.
+      **A `user-story` never answers this.** A story with no label is its correct resting
+      state, so a report that named it printed noise on every tick.
     - **`NO_FACT`** — its card sits outside `column`, whatever the label says. A groomed
-      item rests here, and so does one a maintainer parked with the label on. Neither
-      needs reporting, because the board already says where each one sits.
+      item rests here, and so does one a maintainer parked with the label on. A parked
+      story authorises nothing from here. None of these needs reporting, because the board
+      already says where each one sits.
 
     **With no coordinates the label alone decides.** A tracker that names no board is a
     supported configuration, so the board read asks nothing and its absence is never an
-    error. The label then answers `START` on its own, and one fact is the whole gate.
+    error. The label then answers `START` on its own, and one fact is the whole gate. A
+    story authorises nothing through a column that does not exist.
 
     **A board read that fails counts no card**, and it is no error either. Nothing starts
     on a card this seam cannot read, whatever the label says, so the answer is `NO_FACT`
@@ -1456,6 +1487,13 @@ def start_gate(item, labels, tracker, project=0, owner="", column=""):
         if status
         else f"it has no card in the {column!r} column"
     )
+    if USER_STORY in labels:
+        spec = (
+            f"work item #{item} is a {USER_STORY} spec, so its card is the whole gate"
+        )
+        if carded:
+            return START, f"{spec}, and {sits}, so it authorises its own children"
+        return NO_FACT, f"{spec}, and {elsewhere}, so it authorises nothing"
     if not carded:
         return NO_FACT, f"{wearing}, and {elsewhere}"
     if labelled:
@@ -1466,9 +1504,9 @@ def start_gate(item, labels, tracker, project=0, owner="", column=""):
 def start(item, tracker, project=0, owner="", column=""):
     """The `start` answer: `(exit code, the one line to print)`.
 
-    It writes nothing at all, the same as `phase`. Exit 0 means both facts hold, and every
-    other answer is the quiet code. So a caller reads one bit, and the printed line names
-    which fact is missing.
+    It writes nothing at all, the same as `phase`. Exit 0 means the fact this item's kind
+    owns holds, and every other answer is the quiet code. So a caller reads one bit, and
+    the printed line names which fact is missing.
 
     **A failed read of the item is quiet too, and it is never a start.** A read that failed
     cannot say the item carries the ready state, so nothing starts on it.
@@ -1486,11 +1524,6 @@ def start(item, tracker, project=0, owner="", column=""):
 
 
 # --- the queue tick (ADR 0045, ADR 0046) ------------------------------------
-
-# The label that makes a work item a spec rather than a leaf. A story is never spawned
-# for the work itself: the tick descends to its children. A child that carries the same
-# label is a nested spec, and the descent continues through it.
-USER_STORY = "user-story"
 
 # The **Work-state label**s that say somebody already owns the item — a **Worker**, a
 # reviewer, or the maintainer. An item wearing one of them is never a queue candidate.
@@ -1711,7 +1744,7 @@ def overlapping_worker(item, live, parallel_check):
 def queue_report(gates):
     """The parked items a queue read names, as one clause of the line a tick prints.
 
-    An item whose card sits in the start column with no label is a forgotten label. It
+    A leaf whose card sits in the start column with no label is a forgotten label. It
     otherwise reads as an empty queue, and nothing repairs the disagreement on its own. So
     the count and the first numbers ride the line. **It is never an error and never a
     comment**, and the cap is the one every other report takes (ADR 0045).
@@ -1719,6 +1752,11 @@ def queue_report(gates):
     **A card outside the start column is not named here, whatever its label says** (ADR
     0061). That is the resting state of a groomed backlog, so naming it made every tick
     recite the backlog instead of the one item a maintainer acts on.
+
+    **A `user-story` is never named here either** (ADR 0062). A story with no label is its
+    correct resting state, and its card in the start column is the whole gate. So the gate
+    answers `START` for a story and never `ONE_FACT`. This function reads those answers, so
+    it needs no second read of the kind.
 
     A failed board read answers `NO_FACT` for every item, so it names itself instead. One
     clause says so, because a tick that cannot see the board otherwise prints the same
@@ -1742,14 +1780,21 @@ def queue_candidates(items, gates, by_number, children):
 
     Two roads reach a candidate, and both end at a leaf:
 
-    - **A leaf that holds both facts of a start gate is a candidate on its own.**
-    - **A `user-story` parent that holds both facts is never spawned for the work
-      itself.** The tick descends to its unblocked children instead, and it writes no
-      `ready-for-agent` label on any of them. So the rule that only a human writes that
-      label survives word for word.
+    - **A standalone leaf that holds both facts of a start gate is a candidate on its
+      own**, and that path does not change (ADR 0045).
+    - **A `user-story` parent whose card sits in the start column authorises its whole
+      run**, and it is never spawned for the work itself. The tick descends to its
+      children instead, and a descended child is a candidate where **it wears
+      `ready-for-agent`**. Its own card is never read, so the maintainer drags one story
+      card and no child card (ADR 0062).
 
-    **A child of a live Story run needs neither fact**, because act one already happened
-    for that story.
+    **A child with no label stays stopped**, whatever its parent holds. That is how a
+    maintainer parks one ticket under a running story, and the tick writes the label on no
+    child. So the rule that only a human writes that label survives word for word, and it
+    now gates the descent too.
+
+    **A live Story run keeps authorising its children**, because act one already happened
+    for that story. Each of those children still needs its own label.
     """
     live_stories = {
         item["number"]
@@ -1764,7 +1809,10 @@ def queue_candidates(items, gates, by_number, children):
         and (gates[item["number"]][0] == START or item["number"] in live_stories)
     }
     from_stories = {
-        leaf for story in authorised for leaf in descendants(story, children)
+        leaf
+        for story in authorised
+        for leaf in descendants(story, children)
+        if READY_FOR_AGENT in (by_number.get(leaf) or {}).get("labels", ())
     }
     open_numbers = set(by_number)
     candidates = [
@@ -1788,8 +1836,9 @@ def queue_plan(tracker, board, roofs, parallel_check=TOUCHES):
 
     1. One list read answers every open work item, its labels and its body.
     2. The worker cap answers first, because it bounds every run at once.
-    3. The start gate answers each item, over one board read.
-    4. The candidates are the authorised leaves that nobody owns and nothing blocks.
+    3. The start gate answers each item by its kind, over one board read.
+    4. The candidates are the authorised leaves that nobody owns and nothing blocks: a
+       labelled child of an authorised story, or a standalone leaf holding both facts.
     5. `max_stories` delays a candidate that opens a new **Story run**.
     6. The **Touch set** compare delays a candidate that overlaps a live **Worker**.
 
@@ -2185,9 +2234,10 @@ def main(argv=None):
             "Answer what the Worker watch asks about one worker: is a live agent "
             "process at work in this worktree, and is a transition due for its "
             "work item. The start subcommand answers the question before all of those: "
-            "may this work item start at all. It reads two facts, the ready-for-agent "
-            "label and the board card, and it writes nothing. The queue subcommand reads "
-            "those same two facts for every open item, and starts at most one of them. "
+            "may this work item start at all. It reads the item's kind first, then the "
+            "fact that kind owns: the board card for a user-story, and both facts for a "
+            "leaf. It writes nothing. The queue subcommand asks the same question of "
+            "every open item, and starts at most one of them. "
             "The phase subcommand computes and writes nothing. The tick "
             "subcommand computes through the same code path and then applies the one "
             "transition it computed. A merged pull request is one of those transitions, "
@@ -2220,16 +2270,18 @@ def main(argv=None):
 
     opener = subcommands.add_parser(
         "start",
-        help="may this work item start? Exit 0 both facts, non-zero one fact or "
-        "neither. It writes nothing at all",
+        help="may this work item start? Exit 0 the fact its kind owns holds, non-zero a "
+        "fact is missing. It writes nothing at all",
         description=(
-            "The two-facts start gate. A work item may start when it carries the "
-            "ready-for-agent label and its board card sits in the start column. Exit 0 "
-            "means both facts hold, and the printed line names them. Exit 1 means one "
-            "fact holds or neither does, and the line names which one. A one-fact answer "
-            "is a parked item or a forgotten drag. A no-fact answer is where a groomed "
-            "item rests. "
-            "Exactly one fact is never an error and never a refusal, so the column "
+            "The start gate. It reads the item's kind first, then asks the fact that kind "
+            "owns. A user-story is authorised by its card in the start column alone, and "
+            "it needs no ready-for-agent label ever. A leaf needs both facts: the label, "
+            "and its own card in that column. Exit 0 means the item may start, and the "
+            "printed line names why. Exit 1 means a fact is missing, and the line names "
+            "which one. A one-fact answer is a leaf card in the start column with no "
+            "label, which is a forgotten drag. A no-fact answer is where a groomed item "
+            "rests, and a parked story authorises nothing from there. "
+            "A missing fact is never an error and never a refusal, so the column "
             "before the start column stays the maintainer's own lane. With no board "
             "coordinates the label alone decides, and that absence is never an error. "
             "It writes no tracker command and moves no card, so it can be run against a "
@@ -2246,8 +2298,9 @@ def main(argv=None):
         help="read the whole queue and start at most one work item. No path exits 0",
         description=(
             "The whole body of a queue tick. It reads every open work item and applies "
-            "the two-facts start gate. It descends through any user-story parent to its "
-            "unblocked children. It counts the live story runs and the live workers "
+            "the start gate by the item's kind. It descends through any authorised "
+            "user-story parent to its unblocked children, and it starts one that wears "
+            "ready-for-agent. It counts the live story runs and the live workers "
             "against the two roofs. It compares the declared Touch sets against every "
             "live worker. Then it runs --spawn-command for at most one item. "
             "One item per tick is a hard rule and never a tuning value, so no flag "
