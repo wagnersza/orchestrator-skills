@@ -757,7 +757,7 @@ at the top of this skill:
 
 ```bash
 ROOT="<base directory>/.."
-# read 1 — the manifest names the hook file
+# read 1 — the manifest names no hook file, because the standard path is automatic
 python3 -c "import json,sys;print(json.load(open(sys.argv[1])).get('hooks','NO HOOKS KEY'))" \
   "$ROOT/.claude-plugin/plugin.json"
 # read 2 — that file resolves, and it parses
@@ -770,8 +770,11 @@ python3 -c "import json,sys;print(sorted(json.load(open(sys.argv[1])).get('hooks
 
 Report one row per read: **live** / **not live**, with what the command printed.
 
-- **Read 1 prints `./hooks/hooks.json`.** Any other value, and the plane is off. The
-  repair is that one key in `.claude-plugin/plugin.json`, and it is also the rollback.
+- **Read 1 prints `NO HOOKS KEY`.** The harness loads `hooks/hooks.json` by convention, so
+  the manifest names no hook file of its own. A printed path is the fault: the harness then
+  reads one file twice, and it refuses the **whole plugin** rather than the one hook. The
+  repair is to delete that key from `.claude-plugin/plugin.json`
+  ([ADR 0060](../orchestrator/docs/adr/0060-the-manifest-names-no-standard-hook-file.md)).
 - **Read 2 prints the three event names.** A file that does not resolve, or that does not
   parse, is a plane the harness loads nothing from.
 - **Read 3 answers for this repo alone.** With no marker every hook exits at once and
@@ -847,7 +850,10 @@ the tracker rather than a worktree:
   three, and the label alone is then the whole gate.
 - **The spawn command is the whole `scripts/spawn_item.py` invocation**, with its own tool
   commands already in it. The tick fills five tokens of one work item into that string:
-  `{item}`, `{slug}`, `{title}`, `{body}` and `{skill}`. The argument surface of that seam
+  `{item}`, `{slug}`, `{title}`, `{body}`, `{skill}` and `{role}`. **Write `--role {role}`
+  into the string, and never a literal Role.** A literal makes every item the loop ever
+  starts take one Role, which is the batch-model defect the skill body already names. The
+  argument surface of that seam
   is its own `--help`, so this page restates none of it.
 - **Prove the precheck runs before the schedule exists.** Run the same command once by
   hand, from the repo root. Exit 1 is a quiet tick and it is the answer a fresh repo gives.

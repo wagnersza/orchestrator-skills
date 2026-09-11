@@ -36,9 +36,15 @@ models:
   heavy:
     model:  opus-5
     effort: high
-  light:
+  medium:
     model:  sonnet-5
     effort: medium
+  light:
+    model:  sonnet-5
+    effort: low
+  review:
+    model:  gpt-5.6-sol
+    effort: high
 ```
 """
 
@@ -119,6 +125,8 @@ class SpawnItemTestCase(unittest.TestCase):
         schedule_command="",
         execute=False,
         expect=0,
+        role="light",
+        raw=False,
     ):
         argv = [
             sys.executable,
@@ -127,7 +135,7 @@ class SpawnItemTestCase(unittest.TestCase):
             "--item",
             str(ITEM),
             "--role",
-            "light",
+            role,
             "--config",
             str(self.config),
             "--worktree",
@@ -161,6 +169,8 @@ class SpawnItemTestCase(unittest.TestCase):
             [*argv, *extra], cwd=REPO_ROOT, capture_output=True, text=True
         )
         self.assertEqual(proc.returncode, expect, f"stderr: {proc.stderr}")
+        if raw:
+            return proc
         return json.loads(proc.stdout)
 
     def step(self, plan, number):
@@ -231,6 +241,33 @@ class SpawnItemTestCase(unittest.TestCase):
         self.assertFalse(self.sent.exists())
         replan = self.spawn(expect=EXIT_REFUSED)
         self.assertEqual(self.step(replan, 5)["status"], "blocked")
+
+    # --- the checklist is a file, not only a prompt section -------------------
+
+    def test_step_three_seeds_the_checklist_file_the_watch_reads(self):
+        """The prompt names the file, and `worker_state` reads that same path.
+
+        A worker that finds no file ticks no box. The watch then reads the item as
+        stalled however much work landed, and the close leaks the worktree.
+        """
+        self.worktree.mkdir()
+        self.child_in(self.worktree)
+
+        self.spawn(execute=True, expect=EXIT_OK)
+
+        seeded = self.worktree / ".orchestrator" / f"checklist-{ITEM}.md"
+        self.assertTrue(seeded.is_file(), f"no checklist at {seeded}")
+        self.assertEqual(seeded.read_text(), "- [ ] implement + self-test")
+
+    def test_step_three_is_done_only_where_both_files_already_match(self):
+        """A prompt on disk with no checklist beside it is not a finished step 3."""
+        self.worktree.mkdir()
+        self.child_in(self.worktree)
+        self.spawn(execute=True, expect=EXIT_OK)
+
+        (self.worktree / ".orchestrator" / f"checklist-{ITEM}.md").unlink()
+
+        self.assertEqual(self.step(self.spawn(), 3)["status"], "todo")
 
     # --- the label written before the prompt ---------------------------------
 
@@ -308,7 +345,59 @@ class SpawnItemTestCase(unittest.TestCase):
             "echo {tool} {harness} {yolo} {model} {effort}",
         )
         terminal = self.step(plan, 2)
-        self.assertEqual(terminal["command"], "echo orca claude on sonnet-5 medium")
+        self.assertEqual(terminal["command"], "echo orca claude on sonnet-5 low")
+
+    # --- every Role the vocabulary names resolves -----------------------------
+
+    def test_every_role_in_the_vocabulary_resolves_to_a_pair(self):
+        """`orchestrator/CONTEXT.md` is the source, so the two lists cannot drift.
+
+        The seam's own `ROLES` is not read here on purpose. A test that reads the list
+        it is checking passes on any list.
+        """
+        context = (REPO_ROOT / "orchestrator" / "CONTEXT.md").read_text()
+        entry = context.split("**Role**:")[1].split("_Avoid_:")[0]
+        named = [
+            role
+            for role in ("heavy", "medium", "light", "review")
+            if f"**{role}**" in entry
+        ]
+        self.assertEqual(
+            len(named), 4, f"CONTEXT.md names {named}, expected four Roles"
+        )
+        for role in named:
+            plan = self.spawn(
+                "--terminal-command",
+                "echo {model} {effort}",
+                role=role,
+            )
+            self.assertEqual(plan["role"], role)
+            self.assertNotIn("{model}", self.step(plan, 2)["command"])
+
+    def test_the_medium_role_resolves_its_own_pair(self):
+        plan = self.spawn(
+            "--terminal-command",
+            "echo {model} {effort}",
+            role="medium",
+        )
+        self.assertEqual(self.step(plan, 2)["command"], "echo sonnet-5 medium")
+
+    def test_an_unknown_name_in_the_models_block_is_reported(self):
+        self.config.write_text(CONFIG_TEXT.replace("  light:", "  lite:"))
+        proc = self.spawn(expect=EXIT_ERROR, raw=True)
+        self.assertIn("lite", proc.stderr)
+        self.assertIn("no Role", proc.stderr)
+
+    def test_a_key_outside_the_models_block_is_not_read_as_a_role(self):
+        """`gates:` holds `thresholds:` and `infra:` at the indent a Role takes.
+
+        Both would match the role pattern, so an unscoped scan would report either one
+        as an unknown Role and refuse a config that is correct.
+        """
+        gates = "gates:\n  thresholds:\n    coverage: 90\n  infra:\n    halt_on: none\n"
+        self.config.write_text(CONFIG_TEXT.replace("```\n", gates + "```\n", 1))
+        plan = self.spawn(role="medium")
+        self.assertEqual(plan["role"], "medium")
 
     def test_a_flag_typo_exits_64(self):
         proc = subprocess.run(

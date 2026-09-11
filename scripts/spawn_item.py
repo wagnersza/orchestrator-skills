@@ -100,7 +100,11 @@ STATUS_SKIPPED = "skipped"
 STATUS_BLOCKED = "blocked"
 STATUS_FAILED = "failed"
 
-ROLES = ("heavy", "light", "review")
+# Every Role the vocabulary names, in the order `orchestrator/CONTEXT.md` lists them.
+# One list, read by the `--role` choices and by the config parse, so the two cannot
+# disagree. `scripts/test_spawn_item.py` reads the same names out of `CONTEXT.md` and
+# fails where this list drifts from it.
+ROLES = ("heavy", "medium", "light", "review")
 
 
 class ConfigError(RuntimeError):
@@ -120,6 +124,26 @@ class CommandError(RuntimeError):
 
 FENCE = re.compile(r"```yaml\n(.*?)```", re.DOTALL)
 ROLE_BLOCK = re.compile(r"^  (\w+):[^\n]*\n((?:    .+\n?)+)", re.MULTILINE)
+MODELS_KEY = re.compile(r"^models:[^\n]*$", re.MULTILINE)
+
+
+def models_block(body):
+    """The lines under the config's `models:` key, and nothing else.
+
+    The role scan is scoped to this block on purpose. `ROLE_BLOCK` matches any key at
+    two spaces of indent whose own keys sit at four, and `gates:` holds two of those
+    (`thresholds:` and `infra:`). So an unscoped scan cannot tell an unknown Role from
+    a key that was never a Role, and it can only stay silent about both.
+    """
+    key = MODELS_KEY.search(body)
+    if not key:
+        return ""
+    lines = []
+    for line in body[key.end() :].splitlines(keepends=True):
+        if line.strip() and not line.startswith("  "):
+            break
+        lines.append(line)
+    return "".join(lines)
 
 
 def parse_orchestrator_config(text):
@@ -140,8 +164,10 @@ def parse_orchestrator_config(text):
         return match.group(1) if match else ""
 
     roles = {}
-    for name, block in ROLE_BLOCK.findall(body):
+    unknown = []
+    for name, block in ROLE_BLOCK.findall(models_block(body)):
         if name not in ROLES:
+            unknown.append(name)
             continue
         model = re.search(r"model:\s*(\S+)", block)
         effort = re.search(r"effort:\s*(\S+)", block)
@@ -149,6 +175,11 @@ def parse_orchestrator_config(text):
             "model": model.group(1) if model else "",
             "effort": effort.group(1) if effort else "",
         }
+    if unknown:
+        raise ConfigError(
+            f"the config's models block names {', '.join(sorted(unknown))}, which "
+            f"is no Role. The Roles are {', '.join(ROLES)}"
+        )
     return {
         "tool": scalar("tool"),
         "harness": scalar("harness"),
@@ -298,7 +329,10 @@ def build_plan(args, tracker, config, pair):
     # --- 3. the rendered prompt. A missing input refuses the whole spawn: a
     #        prompt with a field missing must never reach a worker.
     prompt_path = Path(args.prompt_file)
-    prompt_command = f"render {PROMPT_TEMPLATE.name} to {prompt_path}"
+    checklist_path = worker_state.checklist_path(args.worktree, args.item)
+    prompt_command = (
+        f"render {PROMPT_TEMPLATE.name} to {prompt_path}, and seed {checklist_path}"
+    )
     try:
         rendered = render_prompt(
             PROMPT_TEMPLATE.read_text(encoding="utf-8"),
@@ -314,15 +348,24 @@ def build_plan(args, tracker, config, pair):
         refusal = {"step": 3, "reason": reason, "exit_code": EXIT_REFUSED}
         steps.append(step(3, "prompt", prompt_command, STATUS_REFUSED, reason))
     else:
-        already = prompt_path.is_file() and prompt_path.read_text() == rendered
+        already = (
+            prompt_path.is_file()
+            and prompt_path.read_text() == rendered
+            and checklist_path.is_file()
+            and checklist_path.read_text() == args.checklist
+        )
         steps.append(
             step(
                 3,
                 "prompt",
                 prompt_command,
                 STATUS_DONE if already else STATUS_TODO,
-                "already rendered at this path" if already else "renders the prompt",
+                "already rendered at this path"
+                if already
+                else "renders the prompt, and seeds the checklist",
                 rendered=rendered,
+                checklist=args.checklist,
+                checklist_path=str(checklist_path),
             )
         )
 
@@ -519,6 +562,14 @@ def run_step(entry, tracker, prompt_path, item):
     if entry["step"] == 3:
         prompt_path.parent.mkdir(parents=True, exist_ok=True)
         prompt_path.write_text(entry["rendered"])
+        # The checklist is a second file, and not only a section of the prompt. The
+        # prompt tells the worker the file sits at the root of the worktree, and
+        # `worker_state.checklist_path` reads that same path to tell progress from a
+        # stall. A worker that finds no file ticks no box, so the watch reads it as
+        # stalled and the close leaks the worktree.
+        checklist = Path(entry["checklist_path"])
+        checklist.parent.mkdir(parents=True, exist_ok=True)
+        checklist.write_text(entry["checklist"])
         return
     if entry["step"] == 5:
         code, line = worker_state.claim(item, tracker)
@@ -557,7 +608,7 @@ def main(argv=None):
     parser.add_argument(
         "--role",
         required=True,
-        choices=("heavy", "light", "review"),
+        choices=ROLES,
         help="which model/effort pair to read from the config's models block",
     )
     parser.add_argument(

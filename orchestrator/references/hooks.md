@@ -5,10 +5,13 @@ Everything else is advice: a skill body states a rule, a **Checklist** repeats i
 a review note claims it was kept. So a rule holds where a model remembers it, and it is
 skipped where the model does not.
 
-Three hooks ship with the plugin. `.claude-plugin/plugin.json` holds one key,
-`"hooks": "./hooks/hooks.json"`, so the enforcement installs with the skill and needs
-no step from the maintainer. Each hook is stdlib-only Python with a suite of its own,
-which is the bar the two seams already hold.
+Three hooks ship with the plugin. The harness reads `hooks/hooks.json` by convention, so
+the enforcement installs with the skill and needs no step from the maintainer and no key in
+the manifest. **`.claude-plugin/plugin.json` must hold no `hooks` key.** A key that names
+the standard path makes the harness read one file twice, and it then refuses the whole
+plugin
+([ADR 0060](../docs/adr/0060-the-manifest-names-no-standard-hook-file.md)). Each hook is
+stdlib-only Python with a suite of its own, which is the bar the two seams already hold.
 
 **The plane law is one sentence: a hook answers, and a seam performs.** A hook never
 writes a label, never merges and never spawns. Rationale, the rejected options, the
@@ -163,6 +166,7 @@ everything passes a deny test and breaks every run.
 a session after a restart. `/orchestrator-setup` reports whether the plane is live, and
 it names that restart. It installs nothing, because the hooks ship with the plugin.
 
-**The rollback is one line.** Delete the `hooks` key from
-`.claude-plugin/plugin.json`. Nothing in the loop was changed, so every flow keeps
-working with the plane off.
+**The rollback is one file, and it is no longer a manifest key.** Rename or delete
+`hooks/hooks.json`. The harness then finds no hook file at the standard path and loads the
+plugin with the plane off. Nothing in the loop was changed, so every flow keeps working
+([ADR 0060](../docs/adr/0060-the-manifest-names-no-standard-hook-file.md)).
