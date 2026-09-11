@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Layer 5 story gate — #288 the start gate reads a story by its card</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script>mermaid.initialize({startOnLoad: true, theme: "neutral"});</script>
+<style>
+  .sketch { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.78rem; line-height: 1.5; white-space: pre; }
+</style>
+</head>
+<body class="bg-slate-50 text-slate-800">
+
+<header class="bg-slate-900 text-slate-100">
+  <div class="max-w-5xl mx-auto px-6 py-10">
+    <p class="text-xs uppercase tracking-widest text-slate-400">Layer 5 story gate — advisory, it stops nothing</p>
+    <h1 class="text-3xl font-semibold mt-2">The start gate reads a story by its card, and a child by its label</h1>
+    <p class="mt-3 text-slate-300">
+      User story
+      <a class="underline" href="https://github.com/wagnersza/orchestrator-skills/issues/288">#288</a>,
+      children
+      <a class="underline" href="https://github.com/wagnersza/orchestrator-skills/issues/289">#289</a>
+      and
+      <a class="underline" href="https://github.com/wagnersza/orchestrator-skills/issues/290">#290</a>.
+    </p>
+    <dl class="mt-6 grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm">
+      <div><dt class="text-slate-400">Commit read</dt><dd class="font-mono">50ae87d</dd></div>
+      <div><dt class="text-slate-400">Version on main</dt><dd class="font-mono">0.41.0</dd></div>
+      <div><dt class="text-slate-400">Candidates</dt><dd>4, of which 2 <span class="font-semibold">Strong</span></dd></div>
+      <div><dt class="text-slate-400">Already filed</dt><dd>1, as #278 / #282</dd></div>
+    </dl>
+  </div>
+</header>
+
+<main class="max-w-5xl mx-auto px-6 py-10 space-y-10">
+
+<section class="bg-white rounded-xl border border-slate-200 p-6">
+  <h2 class="text-xl font-semibold">The overall read</h2>
+  <p class="mt-3">
+    The seam came out of this story clean. The behaviour change in
+    <code class="bg-slate-100 px-1 rounded">scripts/worker_state.py</code> is about ten lines of real
+    logic, and the rest of the 191-line diff is docstring.
+    <code class="bg-slate-100 px-1 rounded">startable</code>,
+    <code class="bg-slate-100 px-1 rounded">descendants</code>,
+    <code class="bg-slate-100 px-1 rounded">open_blockers</code>,
+    <code class="bg-slate-100 px-1 rounded">story_is_live</code> and the two roofs were not touched.
+    The new fixture carries the fact each item kind owns, so the suite reads the new contract
+    instead of working around it. <strong>start_gate</strong> stays a deep module: six parameters
+    in, one <code class="bg-slate-100 px-1 rounded">(answer, detail)</code> pair out, and no writes.
+  </p>
+  <p class="mt-3">
+    The friction the story left sits at the <strong>edges</strong>, not in the gate. One shipped page
+    still holds the rule the story reversed, and the <code class="bg-slate-100 px-1 rounded">start</code>
+    subcommand cannot answer the row the story added.
+  </p>
+</section>
+
+<section class="bg-white rounded-xl border border-slate-200 p-6">
+  <h2 class="text-xl font-semibold">The gate the story shipped</h2>
+  <p class="mt-3 text-sm text-slate-600">ADR 0062, three rows. This is the contract every candidate below is measured against.</p>
+  <div class="mt-4 overflow-x-auto">
+    <table class="w-full text-sm border-collapse">
+      <thead><tr class="bg-slate-100 text-left">
+        <th class="p-3 border border-slate-200">Item kind</th>
+        <th class="p-3 border border-slate-200">What authorises it</th>
+      </tr></thead>
+      <tbody>
+        <tr><td class="p-3 border border-slate-200 font-mono">user-story</td>
+            <td class="p-3 border border-slate-200">its card sits in the start column. <strong>No label, ever.</strong></td></tr>
+        <tr><td class="p-3 border border-slate-200">child of an authorised story</td>
+            <td class="p-3 border border-slate-200">it wears <code>ready-for-agent</code>, and every <code>## Blocked by</code> edge is closed. <strong>Its own column is not read.</strong></td></tr>
+        <tr><td class="p-3 border border-slate-200">standalone leaf</td>
+            <td class="p-3 border border-slate-200">it wears <code>ready-for-agent</code>, <strong>and</strong> its own card sits in the start column. Unchanged.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- CANDIDATE 1 -->
+<article class="bg-white rounded-xl border-2 border-rose-300 p-6">
+  <div class="flex items-start justify-between gap-4">
+    <h2 class="text-xl font-semibold">1. <code>orchestrator/SKILL.md</code> still ships the rule ADR 0062 reversed</h2>
+    <span class="shrink-0 bg-rose-600 text-white text-xs font-semibold px-3 py-1 rounded-full">Strong</span>
+  </div>
+
+  <div class="mt-4 bg-rose-50 border-l-4 border-rose-500 p-4 text-sm">
+    <strong>The failure already happened, on this commit.</strong>
+    <code>grep -rl 0062 --include=*.md</code> returns three files, and the page that loads on every
+    turn is not one of them.
+  </div>
+
+  <h3 class="mt-6 font-semibold text-slate-700">Files</h3>
+  <ul class="mt-2 text-sm space-y-1 font-mono">
+    <li>orchestrator/SKILL.md:269 — "A seam answers the two facts for one item… exit 0 means both facts hold"</li>
+    <li>orchestrator/SKILL.md:350-356 — "ready when it holds two facts… Both facts are necessary"</li>
+    <li>orchestrator/SKILL.md:376 — "Report every item whose card sits in the start column with no label"</li>
+    <li>orchestrator/SKILL.md:415 — "it applies the two facts of the ready queue read to each one"</li>
+    <li>orchestrator/CONTEXT.md:226 · docs/agents/issue-tracker.md:116 · orchestrator/references/tracker-reads.md:85 — the same three-row table, verbatim</li>
+  </ul>
+
+  <h3 class="mt-6 font-semibold text-slate-700">Problem</h3>
+  <p class="mt-2 text-sm">
+    Commit <code>a3ca8ca</code> says it states the three rows "on every shipped page". It missed the
+    page a session reads on every turn. So an orchestrator session obeys a <strong>Ready queue</strong>
+    rule that ADR 0062 reversed. It refuses to start a labelled child whose card sits in
+    <code>Ready</code>, and it reports a <code>user-story</code> as a forgotten label on every read.
+    That is the exact noise ADR 0062 removed from the tick.
+    Nothing caught it: <code>scripts/test_links.py</code> puts every Markdown file under the suite, but
+    it walks link targets, not rule bodies. The <strong>leverage</strong> cost is measured: this
+    contract has been narrowed three times (0045 → 0061 → 0062), and each narrowing needs four
+    identical table edits plus five prose restatements.
+  </p>
+
+  <h3 class="mt-6 font-semibold text-slate-700">Solution</h3>
+  <p class="mt-2 text-sm">
+    Fix the four stale passages in <code>orchestrator/SKILL.md</code> and cite ADR 0062. Then pick one
+    home for the table. <code>orchestrator/CONTEXT.md</code> <strong>Ready queue</strong> is the domain
+    model, so it wins, and the other copies become one-line pointers. A copy must sometimes stay,
+    because the per-repo <code>docs/agents/issue-tracker.md</code> is a fair claim. There, extend
+    <code>scripts/test_links.py</code> to read the rows out of the named home and assert each copy is
+    byte-identical.
+  </p>
+
+  <h3 class="mt-6 font-semibold text-slate-700">Benefits</h3>
+  <p class="mt-2 text-sm">
+    <strong>Locality</strong>: the rule a session obeys and the rule the seam enforces stop being
+    separate documents. <strong>Leverage</strong>: the next narrowing edits one table instead of four.
+    Tests: <code>test_links.py</code> gains one duplicate-block assertion, so the next contract change
+    fails the suite instead of shipping quietly.
+  </p>
+
+  <h3 class="mt-6 font-semibold text-slate-700">Before / After</h3>
+  <div class="mt-2 grid md:grid-cols-2 gap-4">
+    <div class="bg-rose-50 border border-rose-200 rounded p-4">
+      <p class="text-xs font-semibold text-rose-700 uppercase tracking-wide">Before</p>
+      <div class="sketch mt-2">ADR 0062 ──&gt; CONTEXT.md        (table)
+         ──&gt; issue-tracker.md  (table)
+         ──&gt; tracker-reads.md  (table)
+
+SKILL.md (two-fact rule, cites 0045)
+   ^ nothing links it
+   ^ nothing tests it
+   ^ every session reads it</div>
+    </div>
+    <div class="bg-emerald-50 border border-emerald-200 rounded p-4">
+      <p class="text-xs font-semibold text-emerald-700 uppercase tracking-wide">After</p>
+      <div class="sketch mt-2">CONTEXT.md (the one table)
+    ^  &lt;── pointer ── issue-tracker.md
+    ^  &lt;── pointer ── tracker-reads.md
+    ^  &lt;── pointer ── SKILL.md
+    └── test_links.py asserts
+        each copy byte-identical</div>
+    </div>
+  </div>
+
+  <h3 class="mt-6 font-semibold text-slate-700">Duplicate check and ADR conflict</h3>
+  <p class="mt-2 text-sm">
+    The SKILL.md restatements are slated for deletion by <strong>#88</strong> under story
+    <strong>#201</strong>, but that is a wave-5 1.0.0 story and it does not touch the three table
+    copies. The stale rule shipping today, and the missing agreement check, are <strong>new</strong>.
+    No ADR conflict. It breaks a <code>CLAUDE.md</code> rule instead: "every claim in a skill body
+    traces to a reference file or an ADR". These claims trace to ADR 0045, which ADR 0062 narrowed.
+  </p>
+</article>
+
+<!-- CANDIDATE 2 -->
+<article class="bg-white rounded-xl border-2 border-rose-300 p-6">
+  <div class="flex items-start justify-between gap-4">
+    <h2 class="text-xl font-semibold">2. The start gate owns two of its three rows, so <code>start --item N</code> disagrees with the tick</h2>
+    <span class="shrink-0 bg-rose-600 text-white text-xs font-semibold px-3 py-1 rounded-full">Strong</span>
+  </div>
+
+  <h3 class="mt-6 font-semibold text-slate-700">Files</h3>
+  <ul class="mt-2 text-sm space-y-1 font-mono">
+    <li>scripts/worker_state.py:1418 <code>start_gate</code> — answers row 1 and row 3</li>
+    <li>scripts/worker_state.py:1811-1816 — row 2 lives here, as a raw label read inside <code>queue_candidates</code></li>
+    <li>scripts/worker_state.py:1504-1523 <code>start</code> — the CLI answer, one item, one board read</li>
+    <li>orchestrator/SKILL.md:269-283 — tells a session this seam answers the gate</li>
+  </ul>
+
+  <h3 class="mt-6 font-semibold text-slate-700">Problem</h3>
+  <p class="mt-2 text-sm">
+    ADR 0062's table has three rows. <code>start_gate</code> sees one item and its labels, so it cannot
+    know whether that item is a child of an authorised story. Row 2 needs the <code>## Parent</code>
+    walk and the parent's card, so it was implemented inside <code>queue_candidates</code> as a set
+    comprehension over the labels.
+  </p>
+  <p class="mt-2 text-sm">
+    The concrete failure: run <code>worker_state.py start --item &lt;child&gt;</code> for a labelled child
+    of a story whose card sits in <code>To do</code>. It prints
+    <code>no-fact: work item #N carries the ready-for-agent label, and it has no card in the 'To do'
+    column</code> and exits 1, while the same tick, in the same minute, starts that child. A session
+    that trusts the seam (as <code>SKILL.md:269</code> instructs) refuses the work the automation
+    performs. The module named "the start gate" is not the gate.
+  </p>
+
+  <h3 class="mt-6 font-semibold text-slate-700">Solution</h3>
+  <p class="mt-2 text-sm">
+    One function resolves the whole table over one open-items read. <code>queue_plan</code> already
+    builds <code>by_number</code> and <code>children</code>, so <code>start</code> makes the same list
+    read and asks the same function. The cheaper variant keeps <code>start_gate</code> per-item and adds
+    a fourth answer for "authorised through my parent", resolved only by the caller that holds the
+    tree. But then the three-answer vocabulary grows and the table is still split.
+  </p>
+
+  <h3 class="mt-6 font-semibold text-slate-700">Benefits</h3>
+  <p class="mt-2 text-sm">
+    <strong>Locality</strong>: one function to read when asking "what starts this item", instead of a
+    gate plus a set comprehension. <strong>Leverage</strong>: the fourth narrowing of this table edits
+    one place. Tests: the row-2 and row-3 cases move out of the <code>queue_cli</code> subprocess and
+    into the in-process <code>self.gate</code> helper, which is already where row 1 is proved.
+  </p>
+
+  <h3 class="mt-6 font-semibold text-slate-700">Before / After</h3>
+  <div class="mt-2 grid md:grid-cols-2 gap-4">
+    <div class="bg-rose-50 border border-rose-200 rounded p-4">
+      <p class="text-xs font-semibold text-rose-700 uppercase tracking-wide">Before</p>
+      <div class="sketch mt-2">start --item N ──&gt; start_gate
+                     └─&gt; rows 1, 3
+                     (row 2 answered wrong)
+
+queue tick ──&gt; start_gate
+           └─&gt; queue_candidates
+               └─&gt; rows 1, 2, 3</div>
+    </div>
+    <div class="bg-emerald-50 border border-emerald-200 rounded p-4">
+      <p class="text-xs font-semibold text-emerald-700 uppercase tracking-wide">After</p>
+      <div class="sketch mt-2">start --item N ──┐
+                 ├─&gt; one gate over
+queue tick ──────┘    (item, tree)
+                      └─&gt; rows 1, 2, 3
+
+one answer, two callers</div>
+    </div>
+  </div>
+
+  <h3 class="mt-6 font-semibold text-slate-700">Duplicate check and ADR conflict</h3>
+  <p class="mt-2 text-sm">
+    New. Adjacent to <strong>#250</strong>, which lifts the CLI plane out of
+    <code>worker_state.py</code>, but that item is about argument plumbing and not about which rows the
+    gate answers. No ADR is reversed: ADR 0062 says "This ADR records the contract and wires nothing",
+    so it never says what <code>start --item N</code> returns for row 2. Reopening is not warranted. An
+    amendment naming the seam's answer for row 2 is.
+  </p>
+</article>
+
+<!-- CANDIDATE 3 -->
+<article class="bg-white rounded-xl border border-amber-300 p-6">
+  <div class="flex items-start justify-between gap-4">
+    <h2 class="text-xl font-semibold">3. "Kind first" is not first: the no-board branch decides before the kind is read</h2>
+    <span class="shrink-0 bg-amber-500 text-white text-xs font-semibold px-3 py-1 rounded-full">Worth exploring</span>
+  </div>
+
+  <h3 class="mt-6 font-semibold text-slate-700">Files</h3>
+  <ul class="mt-2 text-sm space-y-1 font-mono">
+    <li>scripts/worker_state.py:1423 — the docstring claim, "the gate reads the item's kind first"</li>
+    <li>scripts/worker_state.py:1460-1470 — the label read, then the no-board early return</li>
+    <li>scripts/worker_state.py:1490 — the kind, read third</li>
+    <li>orchestrator/docs/adr/0062-a-story-card-authorises-its-run.md:48-49 · orchestrator/CONTEXT.md:237-239</li>
+  </ul>
+
+  <h3 class="mt-6 font-semibold text-slate-700">Problem</h3>
+  <p class="mt-2 text-sm">
+    The gate has two disjoint decision tables, and only one of them knows the item's kind. On a tracker
+    that names no board (a configuration this repo calls supported), <code>start_gate</code> returns on
+    the label alone. So a <code>user-story</code> is authorised <strong>only if it wears
+    <code>ready-for-agent</code></strong>. That is the option ADR 0062 rejected, made mandatory.
+    ADR 0062 reads the other way, and the docstring repeats it, but the code authorises a labelled story
+    and descends into its children. No test covers a story in that mode: the no-board case uses a leaf
+    fixture.
+  </p>
+
+  <h3 class="mt-6 font-semibold text-slate-700">Solution</h3>
+  <p class="mt-2 text-sm">
+    Answer the open question first. On a no-board tracker, does a story authorise its run on the label,
+    or does the fallback become leaf-only? Then read the kind before the config check, so there is one
+    table and the docstring is true.
+  </p>
+
+  <h3 class="mt-6 font-semibold text-slate-700">Benefits</h3>
+  <p class="mt-2 text-sm">
+    <strong>Locality</strong>: one decision table instead of two, and the "kind first" claim becomes
+    checkable. Tests: one case, a <code>user-story</code> with no board coordinates, which today has no
+    answer to assert.
+  </p>
+
+  <h3 class="mt-6 font-semibold text-slate-700">Before / After</h3>
+  <div class="mt-2 grid md:grid-cols-2 gap-4">
+    <div class="bg-rose-50 border border-rose-200 rounded p-4">
+      <p class="text-xs font-semibold text-rose-700 uppercase tracking-wide">Before</p>
+      <div class="sketch mt-2">labelled? ─&gt; no board? ─&gt; board read
+                  │            └─&gt; kind? ─&gt; rows 1/3
+                  └─&gt; label only
+                      (kind never read)</div>
+    </div>
+    <div class="bg-emerald-50 border border-emerald-200 rounded p-4">
+      <p class="text-xs font-semibold text-emerald-700 uppercase tracking-wide">After</p>
+      <div class="sketch mt-2">kind? ─&gt; no board? ─&gt; the row that
+                            kind owns,
+                            board or no board
+
+one table, docstring true</div>
+    </div>
+  </div>
+
+  <h3 class="mt-6 font-semibold text-slate-700">Duplicate check and ADR conflict</h3>
+  <div class="mt-2 bg-amber-50 border-l-4 border-amber-500 p-4 text-sm">
+    New. <strong>Contradicts ADR 0062 against itself</strong>: its no-board sentence says a story
+    authorises nothing through a column that does not exist, and its rejected-options list forbids a
+    label on a story. Reopening is warranted, as an amendment naming the no-board row for a
+    <code>user-story</code>, and never as a reversal. Nothing is broken on this repo today, because this
+    repo has a board.
+  </div>
+</article>
+
+<!-- CANDIDATE 4 -->
+<article class="bg-white rounded-xl border border-amber-300 p-6">
+  <div class="flex items-start justify-between gap-4">
+    <h2 class="text-xl font-semibold">4. Every candidate wears <code>ready-for-agent</code>, and two roads prove it separately</h2>
+    <span class="shrink-0 bg-amber-500 text-white text-xs font-semibold px-3 py-1 rounded-full">Worth exploring</span>
+  </div>
+
+  <h3 class="mt-6 font-semibold text-slate-700">Files</h3>
+  <ul class="mt-2 text-sm space-y-1 font-mono">
+    <li>scripts/worker_state.py:1714-1724 <code>startable</code> — reads the labels for the story and owned facts, not for the ready label</li>
+    <li>scripts/worker_state.py:1811-1816 — the story road checks the label</li>
+    <li>scripts/worker_state.py:1818-1823 — the standalone road gets it implied by the gate answer</li>
+  </ul>
+
+  <h3 class="mt-6 font-semibold text-slate-700">Problem</h3>
+  <p class="mt-2 text-sm">
+    After ADR 0062 one invariant holds on both roads: a candidate that is not a spec carries
+    <code>ready-for-agent</code>. Row 3 gets it from the gate answer, the no-board fallback gets it from
+    the gate answer, and row 2 gets it from a filter. So the rule "an unlabelled item stays stopped" has
+    two proofs in two shapes. And <code>startable</code>, the function whose name claims to answer "is
+    this a leaf a tick can start now", reads three of the four facts. A reader has to compose the gate
+    answer's meaning with a set comprehension to see the fourth.
+  </p>
+
+  <h3 class="mt-6 font-semibold text-slate-700">Solution</h3>
+  <p class="mt-2 text-sm">
+    Move the ready-label check into <code>startable</code>, which already holds the labels. The story
+    road then collapses to the descendants walk. Behaviour is byte-identical: on every branch, a
+    non-story item that answers the start value is labelled.
+  </p>
+
+  <h3 class="mt-6 font-semibold text-slate-700">Benefits</h3>
+  <p class="mt-2 text-sm">
+    <strong>Locality</strong>: one function answers "can this leaf start", for both roads.
+    <strong>Leverage</strong>: <code>startable</code> becomes a pure predicate over three arguments with
+    a direct unit test, which is what <strong>#278</strong> asks for the untested functions. Tests: the
+    existing subprocess cases keep passing unchanged, and that is the proof the move preserves
+    behaviour.
+  </p>
+
+  <h3 class="mt-6 font-semibold text-slate-700">Before / After</h3>
+  <div class="mt-2 grid md:grid-cols-2 gap-4">
+    <div class="bg-rose-50 border border-rose-200 rounded p-4">
+      <p class="text-xs font-semibold text-rose-700 uppercase tracking-wide">Before</p>
+      <div class="sketch mt-2">candidate =
+   ( in from_stories
+       [label checked HERE]
+     OR gate == START
+       [label implied] )
+   AND startable(no spec,
+                 unowned,
+                 unblocked)</div>
+    </div>
+    <div class="bg-emerald-50 border border-emerald-200 rounded p-4">
+      <p class="text-xs font-semibold text-emerald-700 uppercase tracking-wide">After</p>
+      <div class="sketch mt-2">candidate =
+   ( in descendants(authorised)
+     OR gate == START )
+   AND startable(labelled,
+                 no spec,
+                 unowned,
+                 unblocked)</div>
+    </div>
+  </div>
+
+  <h3 class="mt-6 font-semibold text-slate-700">Duplicate check and ADR conflict</h3>
+  <p class="mt-2 text-sm">
+    New. <strong>#278</strong> would give <code>startable</code> its direct test, and this candidate
+    changes what that test asserts. So run this one first if both run. No ADR conflict: it restates
+    ADR 0062's rows without moving one.
+  </p>
+</article>
+
+<section class="bg-white rounded-xl border border-slate-200 p-6">
+  <h2 class="text-xl font-semibold">Already filed</h2>
+  <p class="mt-3 text-sm">
+    <strong>Rows 2 and 3 of the newest contract are proved by subprocess only.</strong> The six cases
+    the story added all go through <code>queue_cli</code>, which shells out. Only row 1 runs in process
+    through the <code>self.gate</code> helper. This is
+    <a class="underline" href="https://github.com/wagnersza/orchestrator-skills/issues/278">#278</a>,
+    with the direct-test-for-<code>queue_plan</code> half as
+    <a class="underline" href="https://github.com/wagnersza/orchestrator-skills/issues/282">#282</a>.
+    Nothing new is filed for it.
+  </p>
+</section>
+
+<section class="bg-slate-900 text-slate-100 rounded-xl p-6">
+  <h2 class="text-xl font-semibold">Top recommendation</h2>
+  <p class="mt-3">
+    <strong>Candidate 1.</strong> Every other finding here is a shape argument. But
+    <code class="bg-slate-800 px-1 rounded">orchestrator/SKILL.md</code> is telling live sessions a rule
+    this story reversed, and the repo has no check that would ever say so.
+  </p>
+</section>
+
+<footer class="max-w-5xl mx-auto px-6 pb-12 text-xs text-slate-500">
+  <p>
+    A reading of the code at commit <span class="font-mono">50ae87d</span>, and not a live document. The
+    code moves after this, so a card here can go stale. Read the work item instead, because a candidate
+    that became work carries the current facts. Layer 5 is advisory and it stops nothing
+    (ADR 0033). Tailwind and Mermaid load from a CDN, so a reader with no network sees the text and the
+    tables, and the diagrams do not draw.
+  </p>
+</footer>
+
+</main>
+</body>
+</html>
