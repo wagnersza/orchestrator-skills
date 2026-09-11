@@ -243,29 +243,34 @@ Don't assume — read the repo first:
 
 A language family is one column of the gate matrix in
 [`references/quality-gates.md`](../orchestrator/references/quality-gates.md). Each column
-names the tools that family needs. Only the Python column has landed.
+names the tools that family needs. The Python and TypeScript columns have landed.
 
-Read the repo root for a Python marker file:
+Read the repo root for a marker file of each landed family:
 
 ```bash
 for M in pyproject.toml setup.py setup.cfg requirements.txt; do
   [ -f "$M" ] && echo "python: $M"
 done
+find . -maxdepth 4 -name tsconfig.json -not -path '*/node_modules/*' -print | \
+  while read -r F; do echo "typescript: $F"; done
 ```
 
 **A marker turns the family on.** Report every marker the loop printed, and name the
-family beside it. More than one marker is still one family. Each family you turn on goes
-to `gates.langs` in the config ([orchestrator.template.md](orchestrator.template.md)). The
-value is the family name, so a repo with a Python marker gets `python`.
+family beside it. More than one marker of the same family is still one family. So several
+`tsconfig.json` files in a monorepo turn `typescript` on once, and never several times.
+Each family you turn on goes to `gates.langs` in the config
+([orchestrator.template.md](orchestrator.template.md)), beside any family an earlier marker
+already turned on. A repo that hits both markers gets `[python, typescript]`. The value is
+the family name, so a repo with only a Python marker gets `python`.
 
 **No marker turns no family on.** Leave `gates.langs` blank, say so in one line, and
 continue with setup. A repo with no marker file is a supported configuration, the same as
 a blank recipe field. **Never stop setup here.**
 
-**The Go, TypeScript, Terraform and Kubernetes families each wait for a work item of their
-own.** No column names their tools yet. So this step turns none of them on, even where a
-marker file for one of them sits in the repo. Name the marker you saw, and say that the
-column has not landed.
+**The Go, Terraform and Kubernetes families each wait for a work item of their own.** No
+column names their tools yet. So this step turns none of them on, even where a marker file
+for one of them sits in the repo. Name the marker you saw, and say that the column has not
+landed.
 
 **This condition is also the install condition.** Step 4 requires a family's gate tools
 where that family is on, and nowhere else. One condition, read in two steps, so the two
@@ -516,12 +521,13 @@ Scope — only the chosen pieces apply:
   [ADR 0012](../orchestrator/docs/adr/0012-playwright-cli-is-the-only-browser-surface.md)).
 - **gate tools — conditional on the language family step 1a turned on.** Each family has
   one table of tool rows in
-  [`references/requirements.md`](../orchestrator/references/requirements.md), and
-  `## Python gate tools` is the one that landed. Where `python` is on, that table is the
-  required set. Where no family is on, no row of it applies and setup checks nothing.
-  **This is the same condition step 1a used**, so the detection and the install cannot
-  disagree about when a tool is required. The gate profile then narrows that set, and it
-  never widens it — see the install loop below.
+  [`references/requirements.md`](../orchestrator/references/requirements.md).
+  `## Python gate tools` and `## TypeScript gate tools` are the two that landed. Where a
+  family is on, its table is part of the required set — a repo where step 1a turned on
+  both `python` and `typescript` installs both tables. Where no family is on, no row of
+  either applies and setup checks nothing. **This is the same condition step 1a used**, so
+  the detection and the install cannot disagree about when a tool is required. The gate
+  profile then narrows that set, and it never widens it — see the install loop below.
 - **tool:** the one in config (`orca` / `cmux` / `herdr`).
 - **harness(es):** the impl harness, **and** the review harness if
   `review.enabled` — a cross-vendor review setup (e.g. impl `claude`/opus-5,
@@ -564,8 +570,9 @@ it by running the command from `requirements.md`:
   present CLI here, with the line the update block in `requirements.md` already
   carries for it.
 - **Gate tools specifically — one row at a time, and every name comes from the table.**
-  Run the check command of each row in `## Python gate tools`. Install each missing one
-  with that row's install command. **Never name a tool that has no row there.** The matrix
+  Run the check command of each row in `## Python gate tools` and, where `typescript` is
+  on, `## TypeScript gate tools` too. Install each missing one with that row's install
+  command. **Never name a tool that has no row there.** The matrix
   and the catalog are held together by
   [`../scripts/test_quality_gates.py`](../scripts/test_quality_gates.py), and a name
   invented here escapes that test. Every command in that table carries a **(verify)**
@@ -584,8 +591,9 @@ it by running the command from `requirements.md`:
   - **A row that needs a credential is never installed.** If a row needs an API key, a
     license or a login, report it as **needs the user**, with the exact remaining action.
     A credential cannot arrive unattended, and a config that names such a tool present is
-    a config that lies. No Python row needs one today, so this rule waits for the family
-    that brings one. `## Vendor keys` in the same catalog holds the rule for a harness.
+    a config that lies. No Python row and no TypeScript row needs one today, so this rule
+    waits for the family that brings one. `## Vendor keys` in the same catalog holds the
+    rule for a harness.
   - **A present gate tool stays as it is.** The update block in `requirements.md` carries
     no line for one, so step 0a did not update it and this loop does not either. A green
     check is the whole answer.
