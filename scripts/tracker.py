@@ -12,6 +12,13 @@ formats came with them (ADR 0040).
 commands live as code (ADR 0039). A read is also checked before it is parsed: `run`
 raises on a non-zero exit, so no caller parses an error block.
 
+**The board read is filtered, and it answers every card it asks for or it raises.** The
+read asks the board for the cards that are not `Done`, which is every card a gate can act
+on, and it asks for far more of them than the board holds. A board of 188 cards answers 54
+rows. So the filter stands here rather than a walk over the pages of the whole board. Where
+the answer fills the page exactly, the read raises `TrackerError`: a truncated board then
+reads as `unreadable` and never as a missing card (`_board`).
+
 **One class, and the tracker is four values on it**: the CLI name, the host, the
 repository and the fixture. Where two trackers disagree, the branch is inside the
 one method that differs. So a new tracker lands here and in no seam.
@@ -56,9 +63,13 @@ from urllib.parse import quote
 GH = "gh"
 GLAB = "glab"
 
-# How many cards one board read asks for. The number is part of the recipe in
-# `docs/agents/issue-tracker.md`, so it is no bound this module chose.
-BOARD_LIMIT = 100
+# How many cards one board read asks for, and which cards it asks for. Both are part of
+# the recipe in `docs/agents/issue-tracker.md`, so neither one is a bound this module
+# chose. The filter is the Projects filter syntax, and it keeps the answer to the cards a
+# gate can act on: a board of 188 cards answers 54 rows. A read that fills the limit
+# exactly raises rather than answers (`_board`).
+BOARD_LIMIT = 500
+BOARD_QUERY = "-status:Done"
 
 # How many open work items one queue read asks for. Both numbers are part of the recipe
 # in `orchestrator/references/tracker-reads.md`, so neither one is a bound this module
@@ -429,6 +440,14 @@ class Tracker:
         An empty string covers three facts: no board at all, an item with no card, and
         a card with no status. A caller compares the name it wants, so none of the
         three is an error.
+
+        **A card the read never returned is a fourth case, and it is not one of those
+        three.** It raises instead of answering an empty string, because a truncated read
+        cannot tell a missing card from a card it did not reach (`_board`).
+
+        A card in `Done` is outside the filtered read, so it answers the same empty string
+        as an item with no card. No gate acts on either one, because neither name is the
+        start column.
         """
         if self.fixture is not None:
             return str(self._item(item).get("board") or "")
@@ -445,11 +464,35 @@ class Tracker:
         per item every minute. So this adapter makes one query per tick whatever
         the queue holds (ADR 0045). A caller that asks about a second board reads again,
         because the held answer names the board it came from.
+
+        **The read is filtered, and the filter is what keeps it whole.** The read asks for
+        the cards that are not `Done`, so the answer holds every card a gate can act on
+        and none of the archive. That is the fault this filter closes. The board held 188
+        cards and one unfiltered read asked for 100. So 88 cards answered nothing, and
+        every new item read as an item with no card, because a new card sits at the end.
+        The same board answers 54 rows through the filter, and the limit above is ten
+        times that.
+
+        **A read that fills the limit exactly raises rather than answers.** The answer can
+        then be a full page, and a card past that page is invisible. So the caller reads
+        `unreadable` and never a missing card, because a read that cannot answer must
+        never answer "no".
+
+        **A host that does not support the filter fails the read, which is also loud.**
+        The filter needs github.com or GitHub Enterprise Server 3.20 and later. An older
+        host answers a non-zero exit, so `read_json` raises and the caller reads
+        `unreadable`. No older host answers "no card".
         """
         key = (project, owner)
         if self._cards is None or self._cards[0] != key:
             data = read_json(self._board_list_argv(project, owner))
-            self._cards = (key, list(data.get("items") or []))
+            cards = list(data.get("items") or [])
+            if len(cards) >= BOARD_LIMIT:
+                raise TrackerError(
+                    f"the board read filled its limit of {BOARD_LIMIT} cards, so the "
+                    "answer can be one page of a longer board and no card can be counted"
+                )
+            self._cards = (key, cards)
         return self._cards[1]
 
     # --- the argv a seam runs or prints
@@ -609,6 +652,11 @@ class Tracker:
     def _board_list_argv(self, project, owner):
         """The argv of the one board read, which is the recipe the tracker file holds.
 
+        **The filter rides in the argv, and it names no column.** `-status:Done` is every
+        card that is not finished, so this read never needs the start column and the
+        caller still compares the `Status` name it wants. A card in any other column
+        answers its own name, the same as before the filter.
+
         A project board is one tracker's own surface, so this builder names that CLI
         and the CLI name on this object does not reach it. A repo on the other
         tracker has no such board, so it passes no board argument and this read
@@ -628,6 +676,8 @@ class Tracker:
             "json",
             "--limit",
             str(BOARD_LIMIT),
+            "--query",
+            BOARD_QUERY,
         ]
 
     # --- the writes a seam makes

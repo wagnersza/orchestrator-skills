@@ -40,7 +40,9 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 # A directory of machinery, not of prose. None of it is this repo's Markdown.
-SKIP_DIRS = {".git", ".pytest_cache", "node_modules"}
+# `.orchestrator` is one worker's own scaffolding, and it is gitignored: the brief and
+# the checklist a spawn writes there hold links to the tracker, not to this repo.
+SKIP_DIRS = {".git", ".orchestrator", ".pytest_cache", "node_modules"}
 
 # An external target needs a request to check, and this suite makes none.
 SKIP_SCHEMES = ("http://", "https://", "mailto:")
