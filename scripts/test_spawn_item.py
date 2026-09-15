@@ -109,6 +109,28 @@ class SpawnItemTestCase(unittest.TestCase):
             time.sleep(0.05)
         self.fail(f"the child process {proc.pid} never appeared in ps output")
 
+    def child_in_after(self, cwd, delay, seconds=30):
+        """One process that only starts matching `cwd` after `delay` seconds.
+
+        It stands in for an agent that needs time to start. The process starts
+        outside the worktree, waits, and then replaces itself with a child whose
+        working directory is inside it. One pid does both halves, so the cleanup
+        kills it whichever half it is in.
+        """
+        code = (
+            f"import os, sys, time; time.sleep({delay}); os.chdir({str(cwd)!r}); "
+            "os.execv(sys.executable, [sys.executable, '-c', "
+            f"'import time; time.sleep({seconds})'])"
+        )
+        proc = subprocess.Popen(
+            [sys.executable, "-c", code],
+            cwd=str(self.root),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        self.addCleanup(self.stop, proc)
+        return proc
+
     def stop(self, proc):
         if proc.poll() is None:
             proc.kill()
@@ -219,7 +241,7 @@ class SpawnItemTestCase(unittest.TestCase):
         """No live process inside the worktree, so the gate refuses on its own."""
         self.worktree.mkdir()
 
-        plan = self.spawn(execute=True, expect=EXIT_REFUSED)
+        plan = self.spawn("--ready-timeout", "0", execute=True, expect=EXIT_REFUSED)
 
         gate = self.step(plan, 4)
         self.assertEqual(gate["status"], "refused")
@@ -235,12 +257,57 @@ class SpawnItemTestCase(unittest.TestCase):
         """The single most valuable assertion here: no label, and no prompt sent."""
         self.worktree.mkdir()
 
-        self.spawn(execute=True, expect=EXIT_REFUSED)
+        self.spawn("--ready-timeout", "0", execute=True, expect=EXIT_REFUSED)
 
         self.assertEqual(self.tracker_writes(), [])
         self.assertFalse(self.sent.exists())
         replan = self.spawn(expect=EXIT_REFUSED)
         self.assertEqual(self.step(replan, 5)["status"], "blocked")
+
+    # --- the gate waits for the agent to boot --------------------------------
+
+    def test_the_gate_waits_for_a_process_that_appears_after_a_delay(self):
+        """The bug this behaviour fixes: an agent that starts late reads as absent.
+
+        The process only matches the worktree after three seconds, which is longer
+        than one poll. A single check refuses here, and the wait passes.
+        """
+        self.worktree.mkdir()
+        self.child_in_after(self.worktree, delay=3)
+
+        plan = self.spawn("--ready-timeout", "30", execute=True, expect=EXIT_OK)
+
+        self.assertEqual(self.step(plan, 4)["status"], "done")
+        self.assertEqual(self.step(plan, 5)["status"], "done")
+        self.assertTrue(self.sent.exists(), "the prompt was never sent")
+
+    def test_a_wait_that_runs_out_refuses_the_same_way_and_names_the_wait(self):
+        """A wait is bounded. It runs out, and the refusal reads as it did before."""
+        self.worktree.mkdir()
+
+        plan = self.spawn("--ready-timeout", "1", execute=True, expect=EXIT_REFUSED)
+
+        self.assertEqual(plan["refused"]["step"], 4)
+        self.assertEqual(plan["exit_code"], EXIT_REFUSED)
+        self.assertTrue(
+            plan["refused"]["reason"].startswith("not ready:"),
+            plan["refused"]["reason"],
+        )
+        self.assertIn("The gate waited 1s of 1s", plan["refused"]["reason"])
+        self.assertEqual(self.tracker_writes(), [])
+        self.assertFalse(self.sent.exists())
+
+    def test_a_plan_run_never_waits(self):
+        """Plan mode reads the gate once, so it stays instant and mutates nothing."""
+        self.worktree.mkdir()
+
+        started = time.monotonic()
+        plan = self.spawn("--ready-timeout", "600", expect=EXIT_REFUSED)
+
+        self.assertLess(time.monotonic() - started, 30)
+        self.assertEqual(self.step(plan, 4)["status"], "refused")
+        self.assertNotIn("The gate waited", plan["refused"]["reason"])
+        self.assertFalse(self.sent.exists())
 
     # --- the checklist is a file, not only a prompt section -------------------
 

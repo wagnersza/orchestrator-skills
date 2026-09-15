@@ -11,7 +11,7 @@ order:
 | 1. worktree | create it, unless it already exists |
 | 2. terminal | start the worker process, unless one already matches inside the worktree |
 | 3. prompt | render `orchestrator/references/prompt.template.md`, and write it to disk |
-| 4. readiness gate | the process check `scripts/worker_state.py` already owns. A failure here refuses the whole spawn, so no prompt is ever sent to a process that is not alive |
+| 4. readiness gate | the process check `scripts/worker_state.py` already owns, retried for up to 60 seconds. A failure here refuses the whole spawn, so no prompt is ever sent to a process that is not alive |
 | 5. `in-progress` label | one label swap, through `scripts/worker_state.py`'s own writer. The prompt is delivered inside this same step, right after the label lands, so the label is always on the item before the prompt reaches the worker |
 | 6. follow-along panel | opens the work item inside the worker's worktree. Skipped, and not refused, where the caller passes no `--panel-command` |
 | 7. item schedule | named `orchestrator-item-<N>`, so one name still removes it at close. Skipped where the caller passes no `--schedule-command` |
@@ -54,6 +54,14 @@ This seam calls `worker_state.ready`, and invents no second signal. A worktree t
 does not exist yet reads as *not yet due*, so a spawn plans cleanly before its first
 step has run. A worktree that exists with no matching process reads as a refusal.
 
+**Step 4 waits for the agent to boot.** An agent takes seconds to reach a live
+process, so a single check right after step 2 reads a worker that is still starting as
+an absent one. Under `--execute`, step 4 asks `worker_state.ready` again every 2
+seconds until it passes or the wait runs out. The default wait is 60 seconds, and
+`--ready-timeout` raises it. The refusal names how long the gate waited, so a report
+tells a slow start from a harness that never started at all. A plan run does not wait:
+it reads the gate once and stays instant.
+
 **The `in-progress` label is one call to `scripts/worker_state.py`'s own claim.** No
 second writer exists for that label, so a caller here and the orchestrator's own claim
 step can never disagree about how it is written.
@@ -68,6 +76,7 @@ import json
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 # Both invocation forms reach the adapter: `python3 <plugin root>/scripts/spawn_item.py`
@@ -105,6 +114,13 @@ STATUS_FAILED = "failed"
 # disagree. `scripts/test_spawn_item.py` reads the same names out of `CONTEXT.md` and
 # fails where this list drifts from it.
 ROLES = ("heavy", "medium", "light", "review")
+
+# How long step 4 waits for the agent process to appear, and how often it looks. An
+# agent needs seconds to reach a live process, so one check straight after step 2
+# reads a worker that is still starting as an absent one. `--ready-timeout` raises the
+# wait, and a plan run never waits at all.
+READY_TIMEOUT = 60.0
+READY_POLL = 2.0
 
 
 class ConfigError(RuntimeError):
@@ -247,6 +263,27 @@ def render_prompt(text, item_number, item_title, item_body, checklist, gates, sk
 
 
 # --- the plan -----------------------------------------------------------------
+
+
+def wait_for_ready(worktree, process, timeout=READY_TIMEOUT, poll=READY_POLL):
+    """The readiness gate, asked again until it passes or the wait runs out.
+
+    Returns `(code, line, waited)`, where `code` and `line` are the ones
+    `worker_state.ready` gave last and `waited` is how many seconds this call spent.
+    Only a `not ready` answer is retried: a missing worktree is a fact no wait
+    changes. A refusal carries the wait in its line, so the caller reports more than
+    "not ready" (work items #294 to #297 each died on the single check).
+    """
+    started = time.monotonic()
+    while True:
+        code, line = worker_state.ready(worktree, process)
+        waited = time.monotonic() - started
+        if code != worker_state.EXIT_NOT_READY or waited >= timeout:
+            break
+        time.sleep(min(poll, timeout - waited))
+    if code != worker_state.EXIT_COMPLETE:
+        line = f"{line}. The gate waited {waited:.0f}s of {timeout:.0f}s"
+    return code, line, waited
 
 
 def step(number, name, command, status, note, **extra):
@@ -395,6 +432,19 @@ def build_plan(args, tracker, config, pair):
                     f"not yet checked: {line}",
                 )
             )
+        elif args.execute:
+            # The agent can still be starting, so this run is not a refusal yet. The
+            # execute loop asks again until the wait runs out, and refuses there.
+            steps.append(
+                step(
+                    4,
+                    "readiness gate",
+                    gate_command,
+                    STATUS_TODO,
+                    f"{line}. The gate waits up to "
+                    f"{args.ready_timeout:.0f}s for the agent to boot",
+                )
+            )
         else:
             refusal = {"step": 4, "reason": line, "exit_code": EXIT_REFUSED}
             steps.append(step(4, "readiness gate", gate_command, STATUS_REFUSED, line))
@@ -506,7 +556,9 @@ def build(args, tracker, config, pair):
 # --- execute --------------------------------------------------------------
 
 
-def execute(plan, tracker, prompt_path, item, worktree, process):
+def execute(
+    plan, tracker, prompt_path, item, worktree, process, ready_timeout=READY_TIMEOUT
+):
     """Run the plan in order and stop at the first refusal.
 
     The same split `scripts/close_item.py` runs: nothing here is re-derived, and
@@ -516,7 +568,8 @@ def execute(plan, tracker, prompt_path, item, worktree, process):
     that did not exist at plan time left the gate `todo`, because there was
     nothing yet to check. By the time this loop reaches it, steps 1 and 2 have
     run, so the gate asks `worker_state.ready` again, for real, before step 5
-    ever sends a prompt.
+    ever sends a prompt. It keeps asking for up to `ready_timeout` seconds, so the
+    gate waits for an agent that is still starting rather than refusing it.
     """
     for entry in plan["steps"]:
         if entry["status"] == STATUS_REFUSED:
@@ -524,12 +577,23 @@ def execute(plan, tracker, prompt_path, item, worktree, process):
         if entry["status"] != STATUS_TODO:
             continue
         if entry["step"] == 4:
-            code, line = worker_state.ready(worktree, process)
+            code, line, _ = wait_for_ready(worktree, process, ready_timeout)
             if code != worker_state.EXIT_COMPLETE:
                 entry["status"] = STATUS_REFUSED
                 entry["note"] = line
-                plan["refused"] = {"step": 4, "reason": line, "exit_code": EXIT_REFUSED}
+                refusal = {"step": 4, "reason": line, "exit_code": EXIT_REFUSED}
+                plan["refused"] = refusal
                 plan["exit_code"] = EXIT_REFUSED
+                # The plan left these steps `todo` or `skipped`, because the gate
+                # was still waiting when it was built. They read as blocked, the
+                # same as they do under a gate that refused at plan time.
+                for later in plan["steps"]:
+                    if later["step"] > 4 and later["status"] in (
+                        STATUS_TODO,
+                        STATUS_SKIPPED,
+                    ):
+                        later["status"] = STATUS_BLOCKED
+                        later["note"] = not_reached(refusal)
                 return EXIT_REFUSED
             entry["status"] = STATUS_DONE
             continue
@@ -701,6 +765,15 @@ def main(argv=None):
         "no network and no login (used by the tests)",
     )
     parser.add_argument(
+        "--ready-timeout",
+        type=float,
+        default=READY_TIMEOUT,
+        metavar="SECONDS",
+        help="how long step 4 waits for the agent process to appear before it "
+        f"refuses the spawn (default: {READY_TIMEOUT:.0f}). Raise it for a harness "
+        "that boots slowly. A plan run never waits",
+    )
+    parser.add_argument(
         "--execute",
         action="store_true",
         help="run the plan instead of printing it. The run stops at the first refusal",
@@ -733,6 +806,7 @@ def main(argv=None):
             args.item,
             Path(args.worktree),
             args.process,
+            args.ready_timeout,
         )
         if args.execute
         else plan["exit_code"]
