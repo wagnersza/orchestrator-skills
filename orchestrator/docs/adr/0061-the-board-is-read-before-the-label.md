@@ -1,5 +1,11 @@
 # The board is read before the label, so only a card in the start column reports a gap
 
+> The report of this ADR is narrowed again by
+> [ADR 0064](0064-the-start-gate-reads-two-labelled-sets.md). The tick reads two labelled
+> sets rather than a board list there, so it cannot see the card of an unlabelled item. The
+> one-fact clause and `BOARD_UNREAD` both leave the tick, and a `report` verb names the gap.
+> The order of the two facts stands as written here.
+
 `0045-a-story-start-is-automatic-under-two-roofs.md` gave the queue tick a start
 gate of two facts: the `ready-for-agent` label, and the item's card in the board's
 start column. Both are necessary. It also made the gate name every item that holds

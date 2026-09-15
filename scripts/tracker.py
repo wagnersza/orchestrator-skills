@@ -12,12 +12,16 @@ formats came with them (ADR 0040).
 commands live as code (ADR 0039). A read is also checked before it is parsed: `run`
 raises on a non-zero exit, so no caller parses an error block.
 
-**The board read is filtered, and it answers every card it asks for or it raises.** The
-read asks the board for the cards that are not `Done`, which is every card a gate can act
-on, and it asks for far more of them than the board holds. A board of 188 cards answers 54
-rows. So the filter stands here rather than a walk over the pages of the whole board. Where
-the answer fills the page exactly, the read raises `TrackerError`: a truncated board then
-reads as `unreadable` and never as a missing card (`_board`).
+**A card arrives with its item, and the whole board is one read a human asks for.** The
+start gate needs the card of a `user-story` and of a `ready-for-agent` leaf, and of nothing
+else. So `labelled_items` reads one of those sets by label and the card comes back in the
+same command. `board_cards` is the whole-board list, and the `report` verb is its one caller
+(ADR 0064).
+
+**Every list read here refuses rather than truncate.** A page that comes back full can be
+one page of a longer list, so no row on it can be counted and no absent row is absent.
+`check_page` raises `TrackerError` on that count, and it names the constant to raise. A
+truncated read then reads as `unreadable` and never as a missing item.
 
 **One class, and the tracker is four values on it**: the CLI name, the host, the
 repository and the fixture. Where two trackers disagree, the branch is inside the
@@ -37,7 +41,7 @@ item and one per pull request:
                               "merge_commit": "a1b2c3d",
                               "head": "someone/54-a-branch"}}}
 
-`board` is the `Status` option name on that item's card. It is the one fact the board
+`board` is the `Status` option name on that item's card. It is the one fact a card
 answers, and no caller writes it back (ADR 0054). `head` is the branch that pull
 request was opened from, and it is what a caller matches to find the pull request for
 a branch. `title` and `body` are what a queue read asks for, and the body is where the
@@ -66,16 +70,29 @@ GLAB = "glab"
 # How many cards one board read asks for, and which cards it asks for. Both are part of
 # the recipe in `docs/agents/issue-tracker.md`, so neither one is a bound this module
 # chose. The filter is the Projects filter syntax, and it keeps the answer to the cards a
-# gate can act on: a board of 188 cards answers 54 rows. A read that fills the limit
-# exactly raises rather than answers (`_board`).
+# gate can act on: a board of 188 cards answers 54 rows. `report` is the one caller
+# (ADR 0064).
 BOARD_LIMIT = 500
 BOARD_QUERY = "-status:Done"
 
-# How many open work items one queue read asks for. Both numbers are part of the recipe
+# How many work items one list read asks for. Both numbers are part of the recipe
 # in `orchestrator/references/tracker-reads.md`, so neither one is a bound this module
-# chose. One tracker pages with a limit and the other with a page size.
+# chose. One tracker pages with a limit and the other with a page size. Both the open
+# items and one labelled set take them, because both reads list work items.
 ITEM_LIMIT = 200
 PAGE_SIZE = 100
+
+# The field that carries a work item's project cards, and the single-select field on one
+# card that answers the `Status` name. A project board is one tracker's own surface, so
+# only that tracker's reads name either of them.
+CARD_FIELD = "projectItems"
+STATUS_FIELD = "status"
+
+# The four fields a queue read asks of each work item, plus the card field the start gate
+# reads with them. The board is never listed for this, so the card rides the item
+# (ADR 0064).
+ITEM_FIELDS = "number,title,labels,body"
+CARDED_FIELDS = f"{ITEM_FIELDS},{CARD_FIELD}"
 
 # The two spellings of an open work item. One tracker answers `OPEN` and the other
 # answers `opened`, so no caller compares either string itself.
@@ -110,6 +127,45 @@ def read_json(argv, empty="{}"):
     object and another asks for a list.
     """
     return json.loads(run(argv) or empty)
+
+
+def check_page(rows, limit, constant):
+    """`rows`, or `TrackerError` where the read filled its own page.
+
+    **Every list read here goes through this, and a full page is never an answer.** A read
+    that asks for `limit` rows and gets `limit` rows can be one page of a longer list. So no
+    row on it can be counted, and a row that is absent from it is not absent from the
+    tracker. A gate that reads such a page answers "no" to a question it never saw
+    (ADR 0064).
+
+    The message names the count, the limit and the constant a maintainer raises. That line
+    is what turns a stopped queue into a one-line repair.
+    """
+    if len(rows) >= limit:
+        raise TrackerError(
+            f"a list read answered {len(rows)} row(s) against its limit of {limit}, so the "
+            f"answer can be one page of a longer list and no row can be counted. Raise "
+            f"{constant} in scripts/tracker.py"
+        )
+    return rows
+
+
+def card_status(entry):
+    """The `Status` name on the first card one work item read answers, or an empty string.
+
+    **The read names each board by title and never by number**, so the two board
+    coordinates cannot pick one card out of two. One board per repo is the shape
+    `docs/agents/issue-tracker.md` describes, so the first card that carries a status is the
+    only one a supported configuration holds (ADR 0064).
+
+    An empty string covers an item with no card, a card with no status, and a tracker with
+    no board at all. A caller compares the name it wants, so none of the three is an error.
+    """
+    for card in entry.get(CARD_FIELD) or []:
+        name = (card.get(STATUS_FIELD) or {}).get("name") or ""
+        if name:
+            return name
+    return ""
 
 
 def label_names(labels):
@@ -155,8 +211,8 @@ class Tracker:
         # adapter before it makes a read. A constructor that reads a file turns a failed
         # read into a traceback out of that construction.
         self._fixture: Any = None
-        # The cards of one board, held after the first read of them. `_board` explains
-        # why they are held.
+        # The cards of one board, held after the first read of them. `board_cards`
+        # explains why they are held.
         self._cards: Any = None
 
     @property
@@ -285,9 +341,11 @@ class Tracker:
     def open_items(self):
         """Every open work item, lowest number first, in the `item_record` shape.
 
-        **The one list read, and a queue tick makes it once a minute.** The body comes
+        **The widest list read, and a queue tick makes it once a minute.** The body comes
         with it, because the `## Parent`, `## Blocked by` and `## Touches` edges live
-        there and a second read per item costs one command per item.
+        there and a second read per item costs one command per item. It asks for no card:
+        the tick needs the card of the items that can start, and `labelled_items` answers
+        those with the item (ADR 0064).
 
         The order is by number, so a caller that starts one item per tick starts the
         oldest candidate first. That is what makes an overlap a delay rather than a
@@ -322,22 +380,32 @@ class Tracker:
                 entry.get("labels"),
                 entry.get("body"),
             )
-            for entry in read_json(
-                [
-                    GH,
-                    "issue",
-                    "list",
-                    "--state",
-                    "open",
-                    "--limit",
-                    str(ITEM_LIMIT),
-                    "--json",
-                    "number,title,labels,body",
-                    *self._repo_flag(),
-                ],
-                "[]",
+            for entry in check_page(
+                read_json(self._gh_list_argv(ITEM_FIELDS), "[]") or [],
+                ITEM_LIMIT,
+                "ITEM_LIMIT",
             )
-            or []
+        ]
+
+    def _gh_list_argv(self, fields, label=""):
+        """The argv of one `gh` list read: the open work items, or one labelled set.
+
+        Both reads are the same command with the same limit, and the labelled one adds one
+        flag. So the two can never drift apart on the state they ask for or the page they
+        take.
+        """
+        return [
+            GH,
+            "issue",
+            "list",
+            "--state",
+            "open",
+            *(["--label", label] if label else []),
+            "--limit",
+            str(ITEM_LIMIT),
+            "--json",
+            fields,
+            *self._repo_flag(),
         ]
 
     def _glab_open_items(self):
@@ -349,19 +417,6 @@ class Tracker:
         That path is why the repository is required here, the same as it is for the two
         other `glab api` reads above. The body arrives under its own name there.
         """
-        if not self.repo:
-            raise TrackerError(
-                "a glab read of the open work items needs --repo as OWNER/NAME, "
-                "because the project path is part of the command"
-            )
-        argv = [
-            GLAB,
-            "api",
-            f"projects/{self.repo.replace('/', '%2F')}/issues"
-            f"?state=opened&per_page={PAGE_SIZE}",
-        ]
-        if self.host:
-            argv += ["--hostname", self.host]
         return [
             item_record(
                 entry.get("iid"),
@@ -369,8 +424,119 @@ class Tracker:
                 entry.get("labels"),
                 entry.get("description"),
             )
-            for entry in read_json(argv, "[]") or []
+            for entry in check_page(
+                read_json(self._glab_list_argv(), "[]") or [], PAGE_SIZE, "PAGE_SIZE"
+            )
         ]
+
+    def _glab_list_argv(self, label=""):
+        """The argv of one `glab` list read: the open work items, or one labelled set."""
+        if not self.repo:
+            raise TrackerError(
+                "a glab read of the open work items needs --repo as OWNER/NAME, "
+                "because the project path is part of the command"
+            )
+        query = f"state=opened&per_page={PAGE_SIZE}"
+        if label:
+            query += f"&labels={quote(label, safe='')}"
+        argv = [GLAB, "api", f"projects/{self.repo.replace('/', '%2F')}/issues?{query}"]
+        if self.host:
+            argv += ["--hostname", self.host]
+        return argv
+
+    def labelled_items(self, label):
+        """Every open work item wearing one label, with its card, in the record shape.
+
+        **One command answers the set and each item's card status** (ADR 0064). The start
+        gate needs the card of a `user-story` and of a `ready-for-agent` leaf, and of no
+        other item. So the read is bounded by the work a maintainer approved rather than by
+        the size of a board, and the tick lists no board at all.
+
+        The record is the `item_record` shape plus a `board` key, which is the `Status` name
+        on that item's own card. A tracker with no project board answers an empty string
+        there, because the field the card rides is one tracker's own surface.
+
+        The order is by number, the same as `open_items`, so a caller that reads both sees
+        one order.
+        """
+        if self.fixture is not None:
+            found = [
+                {
+                    **item_record(
+                        number,
+                        record.get("title"),
+                        record.get("labels"),
+                        record.get("body"),
+                    ),
+                    "board": str(record.get("board") or ""),
+                }
+                for number, record in (self.fixture.get("items") or {}).items()
+                if str(record.get("state") or OPEN_STATES[0]).upper() in OPEN_STATES
+                and label in label_names(record.get("labels"))
+            ]
+        elif self.cli == GLAB:
+            # No project board on this tracker, so the card is an empty string and the
+            # read asks for no field of one.
+            found = [
+                {
+                    **item_record(
+                        entry.get("iid"),
+                        entry.get("title"),
+                        entry.get("labels"),
+                        entry.get("description"),
+                    ),
+                    "board": "",
+                }
+                for entry in check_page(
+                    read_json(self._glab_list_argv(label), "[]") or [],
+                    PAGE_SIZE,
+                    "PAGE_SIZE",
+                )
+            ]
+        else:
+            found = [
+                {
+                    **item_record(
+                        entry.get("number"),
+                        entry.get("title"),
+                        entry.get("labels"),
+                        entry.get("body"),
+                    ),
+                    "board": card_status(entry),
+                }
+                for entry in check_page(
+                    read_json(self._gh_list_argv(CARDED_FIELDS, label), "[]") or [],
+                    ITEM_LIMIT,
+                    "ITEM_LIMIT",
+                )
+            ]
+        return sorted(found, key=lambda item: item["number"])
+
+    def item_card(self, item):
+        """The `Status` name on one work item's own card, or an empty string.
+
+        **One item, one call, and no list.** `start --item N` asks about the item a human
+        named, and that item can wear no label at all. So its card cannot arrive through a
+        labelled set, and a whole-board list to answer one card is the read ADR 0064
+        removed.
+        """
+        if self.fixture is not None:
+            return str(self._item(item).get("board") or "")
+        if self.cli == GLAB:
+            return ""
+        return card_status(
+            read_json(
+                [
+                    GH,
+                    "issue",
+                    "view",
+                    str(item),
+                    "--json",
+                    CARD_FIELD,
+                    *self._repo_flag(),
+                ]
+            )
+        )
 
     def pull_request(self, number):
         """The pull request's state, and the commit its merge landed as.
@@ -431,68 +597,56 @@ class Tracker:
         number, state = (merged or found or [(0, "")])[0]
         return {"number": number, "state": state}
 
-    def board_status(self, item, project, owner):
-        """The `Status` option name on this work item's card, or an empty string.
+    def board_cards(self, project, owner):
+        """Every card on one board as `{work item number: Status name}`, read once.
 
         **This is the one question the board answers, and nothing writes it back**
-        (ADR 0054). A caller asks whether the name is the start column.
+        (ADR 0054). **The `report` verb is its one caller** (ADR 0064). No gate reads it:
+        a gate needs the card of an item that can start, and `labelled_items` answers that
+        with the item.
 
-        An empty string covers three facts: no board at all, an item with no card, and
-        a card with no status. A caller compares the name it wants, so none of the
-        three is an error.
+        The answer is held after the first read, so a report that asks twice queries once.
+        A caller that asks about a second board reads again, because the held answer names
+        the board it came from.
 
-        **A card the read never returned is a fourth case, and it is not one of those
-        three.** It raises instead of answering an empty string, because a truncated read
-        cannot tell a missing card from a card it did not reach (`_board`).
+        **The read is filtered.** It asks for the cards that are not `Done`, so the answer
+        holds every card a gate can act on and none of the archive. A board of 188 cards
+        answers 54 rows through that filter.
 
-        A card in `Done` is outside the filtered read, so it answers the same empty string
-        as an item with no card. No gate acts on either one, because neither name is the
-        start column.
-        """
-        if self.fixture is not None:
-            return str(self._item(item).get("board") or "")
-        for entry in self._board(project, owner):
-            if (entry.get("content") or {}).get("number") == item:
-                return str(entry.get("status") or "")
-        return ""
-
-    def _board(self, project, owner):
-        """Every card on one board, read once per adapter.
-
-        **The read answers every card, so it is made once and held.** A queue tick asks
-        for the card of every open work item, and one call per item is one Projects query
-        per item every minute. So this adapter makes one query per tick whatever
-        the queue holds (ADR 0045). A caller that asks about a second board reads again,
-        because the held answer names the board it came from.
-
-        **The read is filtered, and the filter is what keeps it whole.** The read asks for
-        the cards that are not `Done`, so the answer holds every card a gate can act on
-        and none of the archive. That is the fault this filter closes. The board held 188
-        cards and one unfiltered read asked for 100. So 88 cards answered nothing, and
-        every new item read as an item with no card, because a new card sits at the end.
-        The same board answers 54 rows through the filter, and the limit above is ten
-        times that.
-
-        **A read that fills the limit exactly raises rather than answers.** The answer can
-        then be a full page, and a card past that page is invisible. So the caller reads
-        `unreadable` and never a missing card, because a read that cannot answer must
-        never answer "no".
+        **A read that fills the limit refuses rather than answers**, through `check_page`.
+        The answer can then be one page of a longer board, and a card past that page is
+        invisible. So the caller reads `unreadable` and never a missing card.
 
         **A host that does not support the filter fails the read, which is also loud.**
         The filter needs github.com or GitHub Enterprise Server 3.20 and later. An older
         host answers a non-zero exit, so `read_json` raises and the caller reads
         `unreadable`. No older host answers "no card".
+
+        A card with no work item behind it, which is a draft card, carries no number and it
+        is left out.
         """
+        if self.fixture is not None:
+            return {
+                int(number): str(record.get("board") or "")
+                for number, record in (self.fixture.get("items") or {}).items()
+                if record.get("board")
+            }
         key = (project, owner)
         if self._cards is None or self._cards[0] != key:
             data = read_json(self._board_list_argv(project, owner))
-            cards = list(data.get("items") or [])
-            if len(cards) >= BOARD_LIMIT:
-                raise TrackerError(
-                    f"the board read filled its limit of {BOARD_LIMIT} cards, so the "
-                    "answer can be one page of a longer board and no card can be counted"
-                )
-            self._cards = (key, cards)
+            cards = check_page(
+                list(data.get("items") or []), BOARD_LIMIT, "BOARD_LIMIT"
+            )
+            self._cards = (
+                key,
+                {
+                    int((entry.get("content") or {}).get("number") or 0): str(
+                        entry.get("status") or ""
+                    )
+                    for entry in cards
+                    if (entry.get("content") or {}).get("number")
+                },
+            )
         return self._cards[1]
 
     # --- the argv a seam runs or prints
@@ -656,6 +810,8 @@ class Tracker:
         card that is not finished, so this read never needs the start column and the
         caller still compares the `Status` name it wants. A card in any other column
         answers its own name, the same as before the filter.
+
+        **`report` is the one caller** (ADR 0064). No gate reaches this read.
 
         A project board is one tracker's own surface, so this builder names that CLI
         and the CLI name on this object does not reach it. A repo on the other

@@ -293,7 +293,11 @@ class SpawnItemTestCase(unittest.TestCase):
             plan["refused"]["reason"].startswith("not ready:"),
             plan["refused"]["reason"],
         )
-        self.assertIn("The gate waited 1s of 1s", plan["refused"]["reason"])
+        # The elapsed half of that phrase is a real clock, and one poll overshoots the
+        # bound on a loaded machine. So the case reads the bound it passed in, and it
+        # asserts on no elapsed value of its own.
+        self.assertIn("The gate waited ", plan["refused"]["reason"])
+        self.assertIn("s of 1s", plan["refused"]["reason"])
         self.assertEqual(self.tracker_writes(), [])
         self.assertFalse(self.sent.exists())
 
