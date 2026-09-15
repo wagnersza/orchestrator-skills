@@ -14,6 +14,12 @@ then asserts the file exists only when it should. The single most valuable
 assertion in the file is that the marker is absent — see
 `test_a_refused_gate_runs_no_teardown_and_names_the_reason`.
 
+The last group covers the abandon path, which removes a worktree that never opened a
+pull request. Its cases read the same fixture and the same marker, because an abandon
+runs the very teardown command a close runs. What they assert on top of that is what an
+abandon must never do: close the item, add a label, or remove a worktree that still
+holds work.
+
     python3 -m pytest scripts/ -q
     python3 -m unittest discover -s scripts -t . -q     # fallback, no pytest
 """
@@ -43,19 +49,29 @@ ISSUE = 32
 PR = 48
 REVIEW_LABEL = "to-review"
 
+# The label an abandoned worktree's item still carries, and the label only a human
+# writes. An abandon takes the first one off and never writes the second.
+START_LABEL = "in-progress"
+READY_LABEL = "ready-for-agent"
+
 # The second tracker, and the two values its commands need. `--repo` names the checkout
 # on disk, so the tracker project has an argument of its own.
 HOST = "git.example.com"
 PROJECT = "team/thing"
 GLAB = ["--tracker-cli", "glab", "--tracker-host", HOST, "--tracker-repo", PROJECT]
 
-# A closing reason with no space in it, so one write is one line in the write log.
+# A closing reason with no space in it, so one write is one line in the write log. The
+# abandon reason is the same shape, for the same reason.
 REASON = "merged-and-closed"
+ABANDON_REASON = "the-readiness-gate-refused-the-spawn"
 
 EXIT_OK = 0
 EXIT_ERROR = 1
 EXIT_PR_NOT_MERGED = 2
 EXIT_WORKTREE_DIRTY = 3
+EXIT_PR_OPEN = 4
+EXIT_COMMITS_AHEAD = 5
+EXIT_USAGE = 64
 
 
 def git(cwd, *args):
@@ -127,7 +143,8 @@ class CloseItemTestCase(unittest.TestCase):
             capture_output=True,
             env=GIT_ENV,
         )
-        git(self.worktree, "checkout", "-qb", f"{ISSUE}-close-item-seam")
+        self.branch = f"{ISSUE}-close-item-seam"
+        git(self.worktree, "checkout", "-qb", self.branch)
 
         self.marker = self.root / "teardown-ran"
         self.write_fixture()
@@ -140,12 +157,17 @@ class CloseItemTestCase(unittest.TestCase):
         issue_state="OPEN",
         labels=(REVIEW_LABEL,),
         comments=(),
+        pr_head="",
     ):
         """Stand in for the two tracker reads: the PR and the issue.
 
         One record for this item and one for its PR, in the one format
         `scripts/tracker.py` documents. `scripts/worker_state.py` reads the same one.
         There is no card key, because no read here asks for one (ADR 0054).
+
+        `pr_head` is the branch the PR was opened from, and it is what the abandon's
+        third proof matches. The default is empty, so the default fixture is a branch
+        with no pull request of its own.
         """
         self.fixture = self.root / "gh.json"
         item = {"state": issue_state, "labels": list(labels)}
@@ -157,6 +179,7 @@ class CloseItemTestCase(unittest.TestCase):
                 str(PR): {
                     "state": pr_state,
                     "merge_commit": self.merge_commit if pr_state == "MERGED" else "",
+                    "head": pr_head,
                 }
             },
         }
@@ -167,12 +190,25 @@ class CloseItemTestCase(unittest.TestCase):
         """A teardown command that leaves proof it ran, and destroys nothing."""
         return f"touch {self.marker}"
 
+    def seam(self, argv, expect=0):
+        """Run the seam once and return the finished process.
+
+        The one runner, so a usage error can be read as well as a plan: exit 64 prints
+        no plan at all, and the message on standard error is the whole answer.
+        """
+        proc = subprocess.run(
+            [sys.executable, "-m", "scripts.close_item", *argv],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            env=GIT_ENV,
+        )
+        self.assertEqual(proc.returncode, expect, f"stderr: {proc.stderr}")
+        return proc
+
     def close(self, *extra, worktree=True, teardown_command=True, expect=0):
-        """Run the seam and return the parsed plan."""
+        """Run the close path and return the parsed plan."""
         argv = [
-            sys.executable,
-            "-m",
-            "scripts.close_item",
             "--issue",
             str(ISSUE),
             "--pr",
@@ -188,15 +224,32 @@ class CloseItemTestCase(unittest.TestCase):
             argv += ["--worktree", str(self.worktree)]
         if teardown_command:
             argv += ["--teardown-command", self.teardown_command()]
-        proc = subprocess.run(
-            [*argv, *extra],
-            cwd=REPO_ROOT,
-            capture_output=True,
-            text=True,
-            env=GIT_ENV,
-        )
-        self.assertEqual(proc.returncode, expect, f"stderr: {proc.stderr}")
-        return json.loads(proc.stdout)
+        return json.loads(self.seam([*argv, *extra], expect).stdout)
+
+    def abandon_argv(self, worktree=True, teardown_command=True):
+        """The abandon invocation: no `--pr`, and a reason instead of a merge."""
+        argv = [
+            "--issue",
+            str(ISSUE),
+            "--repo",
+            str(self.checkout),
+            "--remove-label",
+            START_LABEL,
+            "--abandon",
+            ABANDON_REASON,
+            "--gh-fixture",
+            str(self.fixture),
+        ]
+        if worktree:
+            argv += ["--worktree", str(self.worktree)]
+        if teardown_command:
+            argv += ["--teardown-command", self.teardown_command()]
+        return argv
+
+    def abandon(self, *extra, worktree=True, teardown_command=True, expect=0):
+        """Run the abandon path and return the parsed plan."""
+        argv = self.abandon_argv(worktree, teardown_command)
+        return json.loads(self.seam([*argv, *extra], expect).stdout)
 
     def step(self, plan, number):
         for entry in plan["steps"]:
@@ -204,8 +257,10 @@ class CloseItemTestCase(unittest.TestCase):
                 return entry
         self.fail(f"step {number} missing: {[s['step'] for s in plan['steps']]}")
 
-    def part(self, plan, name):
-        for entry in self.step(plan, 7)["parts"]:
+    def part(self, plan, name, number=7):
+        """One write inside the tracker step. It is step 7 of a close, and 4 of an
+        abandon."""
+        for entry in self.step(plan, number)["parts"]:
             if entry["name"] == name:
                 return entry
         self.fail(f"part {name} missing")
@@ -654,6 +709,158 @@ class CloseItemTestCase(unittest.TestCase):
         source = (REPO_ROOT / "scripts" / "close_item.py").read_text()
         for coordinate in ("PVT_kwHO", "PVTSSF_lAHO", "issue-tracker"):
             self.assertNotIn(coordinate, source, f"{coordinate!r} is in the seam")
+
+    # --- the abandon: a worktree that never opened a pull request -----------
+
+    def commit_in_the_worktree(self):
+        """One commit on the item's branch, which is work an abandon must not remove."""
+        write(self.worktree / "half-done.md", "work with no pull request\n")
+        git(self.worktree, "add", "-A")
+        git(self.worktree, "commit", "-qm", "a first commit nobody reviewed")
+
+    def test_an_abandon_of_an_empty_worktree_removes_it_and_leaves_the_item_open(self):
+        """The whole point: no pull request, no merge, and the worktree still goes."""
+        self.write_fixture(labels=(START_LABEL,))
+        plan = self.abandon("--execute", "--teardown")
+
+        self.assertEqual(plan["path"], "abandon")
+        self.assertEqual([s["step"] for s in plan["steps"]], [1, 2, 3, 4, 5])
+        self.assertEqual(
+            [s["name"] for s in plan["steps"]],
+            ["no commit", "worktree clean", "no pull request", "tracker", "teardown"],
+        )
+        self.assertEqual(self.statuses(plan), ["done"] * 5)
+        self.assertIsNone(plan["refused"])
+        # The worktree went, through the same command the close runs.
+        self.assertTrue(self.marker.exists())
+        self.assertEqual(plan["ran"][-1], self.teardown_command())
+        # The item stays open: the label came off, the reason went on, and nothing
+        # closed it.
+        self.assertEqual(
+            self.tracker_writes(),
+            [
+                f"gh issue edit {ISSUE} --remove-label {START_LABEL}",
+                f"gh issue comment {ISSUE} --body {ABANDON_REASON}",
+            ],
+        )
+        for line in self.tracker_writes():
+            self.assertNotIn("close", line)
+            self.assertNotIn("--add-label", line)
+
+    def test_a_commit_on_the_branch_refuses_the_abandon_and_removes_nothing(self):
+        """A commit is work, and work is never abandoned unread."""
+        self.commit_in_the_worktree()
+        before = self.disk_state()
+
+        plan = self.abandon("--execute", "--teardown", expect=EXIT_COMMITS_AHEAD)
+
+        self.assertEqual(self.step(plan, 1)["status"], "refused")
+        self.assertEqual(plan["refused"]["step"], 1)
+        self.assertEqual(len(self.step(plan, 1)["commits_ahead"]), 1)
+        self.assertIn("nobody reviewed", plan["refused"]["reason"])
+        self.assertIn("pull request", plan["refused"]["reason"])
+        self.assertEqual(plan["exit_code"], EXIT_COMMITS_AHEAD)
+        # Every step after it is blocked, so the worktree and the item are untouched.
+        self.assertEqual(self.statuses(plan), ["refused"] + ["blocked"] * 4)
+        self.assertNothingMutated(before)
+
+    def test_a_dirty_worktree_refuses_the_abandon_with_the_dirty_code(self):
+        """The same proof and the same code as the close: uncommitted work stays."""
+        write(self.worktree / "unsaved.md", "work nobody committed\n")
+        before = self.disk_state()
+
+        plan = self.abandon("--execute", "--teardown", expect=EXIT_WORKTREE_DIRTY)
+
+        self.assertEqual(self.step(plan, 1)["status"], "done")
+        self.assertEqual(self.step(plan, 2)["status"], "refused")
+        self.assertEqual(self.step(plan, 2)["dirty_files"], ["unsaved.md"])
+        self.assertIn("no reflog", plan["refused"]["reason"])
+        self.assertNothingMutated(before)
+
+    def test_an_open_pull_request_refuses_the_abandon_on_a_code_of_its_own(self):
+        """There is a review to finish, so the merge is the way out and not this."""
+        self.write_fixture(pr_state="OPEN", labels=(START_LABEL,), pr_head=self.branch)
+        before = self.disk_state()
+
+        plan = self.abandon("--execute", "--teardown", expect=EXIT_PR_OPEN)
+
+        self.assertEqual(
+            self.statuses(plan), ["done", "done", "refused", "blocked", "blocked"]
+        )
+        self.assertEqual(self.step(plan, 3)["pull_request"], PR)
+        self.assertIn(f"#{PR}", plan["refused"]["reason"])
+        self.assertIn("review to finish", plan["refused"]["reason"])
+        # Its own code, because 2 already means the opposite fact.
+        self.assertNotEqual(EXIT_PR_OPEN, EXIT_PR_NOT_MERGED)
+        self.assertNothingMutated(before)
+
+    def test_the_abandon_plan_mutates_nothing_either(self):
+        """Plan mode is the default on this path too, --teardown included."""
+        self.write_fixture(labels=(START_LABEL,))
+        before = self.disk_state()
+
+        plan = self.abandon("--teardown")
+
+        self.assertEqual(plan["mode"], "plan")
+        self.assertEqual(plan["mutates"], "nothing")
+        self.assertEqual(plan["exit_code"], EXIT_OK)
+        self.assertEqual(self.step(plan, 4)["status"], "todo")
+        self.assertEqual(self.step(plan, 5)["status"], "todo")
+        self.assertNothingMutated(before)
+
+    def test_an_abandon_plans_no_close_and_no_added_label(self):
+        """An abandon moves no work state, so neither write can be planned at all."""
+        self.write_fixture(labels=(START_LABEL,))
+        plan = self.abandon()
+
+        names = [entry["name"] for entry in self.step(plan, 4)["parts"]]
+        self.assertEqual(names, ["label", "note"])
+        self.assertNotIn("close", names)
+        self.assertIn(
+            f"--remove-label {START_LABEL}", self.part(plan, "label", 4)["command"]
+        )
+        self.assertNotIn("--add-label", self.part(plan, "label", 4)["command"])
+
+        # A caller that asks for the start label is a caller with a typo, and 64 says
+        # so without touching anything.
+        proc = self.seam(
+            [*self.abandon_argv(), "--add-label", READY_LABEL], expect=EXIT_USAGE
+        )
+        self.assertIn("--add-label", proc.stderr)
+        self.assertEqual(self.tracker_writes(), [])
+
+    def test_the_two_paths_refuse_each_other_s_flags_with_the_usage_code(self):
+        """A flag typo is 64, so no caller reads one as a refusal."""
+        proc = self.seam([*self.abandon_argv(), "--pr", str(PR)], expect=EXIT_USAGE)
+        self.assertIn("--pr", proc.stderr)
+
+        # And a close with no pull request names the flag rather than refusing.
+        argv = [
+            "--issue",
+            str(ISSUE),
+            "--repo",
+            str(self.checkout),
+            "--gh-fixture",
+            str(self.fixture),
+        ]
+        proc = self.seam(argv, expect=EXIT_USAGE)
+        self.assertIn("--abandon", proc.stderr)
+        self.assertNotEqual(EXIT_USAGE, EXIT_PR_NOT_MERGED)
+
+    def test_a_second_abandon_posts_no_second_comment(self):
+        """The reason is a comment, and a comment repeats unless the write reads first."""
+        self.write_fixture(
+            labels=(START_LABEL,), comments=[f"a line, {ABANDON_REASON}"]
+        )
+        plan = self.abandon("--execute", "--teardown")
+
+        self.assertEqual(self.part(plan, "note", 4)["status"], "done")
+        self.assertIn("already on the item", self.part(plan, "note", 4)["note"])
+        self.assertEqual(
+            self.tracker_writes(),
+            [f"gh issue edit {ISSUE} --remove-label {START_LABEL}"],
+        )
+        self.assertTrue(self.marker.exists())
 
     def test_the_seam_names_no_tracker_cli(self):
         """Every tracker command comes from the adapter, so this seam writes no CLI
