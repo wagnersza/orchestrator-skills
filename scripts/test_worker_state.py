@@ -56,7 +56,15 @@ import unittest
 from pathlib import Path
 
 from scripts import worker_state
-from scripts.tracker import BOARD_LIMIT, BOARD_QUERY, Tracker
+from scripts.tracker import (
+    BOARD_LIMIT,
+    BOARD_QUERY,
+    CARD_FIELD,
+    CARDED_FIELDS,
+    ITEM_FIELDS,
+    ITEM_LIMIT,
+    Tracker,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -265,6 +273,22 @@ def story_queue():
             "title": "a standalone item",
             "body": body(touches=["docs/one.md"]),
         },
+    }
+
+
+def listed(number, labels=(), board="", title="an item", body=""):
+    """One work item in the shape a live `gh issue list` answers, plus its card.
+
+    `board` is the `Status` name on that item's card. A labelled read carries it back as a
+    project field, and the open-items read asks for no such field, so the stub below drops
+    it there.
+    """
+    return {
+        "number": number,
+        "title": title,
+        "labels": [{"name": one} for one in labels],
+        "body": body,
+        "board": board,
     }
 
 
@@ -488,14 +512,16 @@ class WorkerStateTestCase(unittest.TestCase):
         script.chmod(0o755)
         return log
 
-    def fake_crowded_board_cli(self, cards, labels):
-        """A `gh` whose board holds `cards` cards, and the file it logs its argv to.
+    def fake_gh(self, labels=(), card="", open_items=(), sets=None):
+        """A `gh` that answers each read a start gate makes, and its argv log.
 
-        The card of this case's item is the last of them, so an unfiltered read misses it:
-        **a board read with no `--query` is truncated to the `--limit` it asks for**, the
-        way a real `gh project item-list` answers. A read that carries the filter answers
-        that one card, the way the filter answers the cards outside `Done`. The issue read
-        answers `labels`.
+        Four reads, told apart the way the adapter builds them: an item view for the
+        labels, an item view for the card, a list of the open work items, and one list per
+        labelled set. `sets` maps a label name to the `listed` records that set holds, and
+        the `board` value of each record becomes that item's card.
+
+        A command the gate never makes exits non-zero. So a board read that reaches this
+        stub fails the case rather than answering it.
         """
         log = self.root / "gh.argv"
         script = self.bin / "gh"
@@ -503,16 +529,27 @@ class WorkerStateTestCase(unittest.TestCase):
             "#!/usr/bin/env python3\n"
             "import json, sys\n"
             f"open({str(log)!r}, 'a').write(' '.join(sys.argv[1:]) + '\\n')\n"
-            "if sys.argv[1] == 'issue':\n"
-            f"    print(json.dumps({{'labels': [{{'name': one}} for one in {list(labels)!r}],\n"
-            "                       'comments': []}))\n"
-            "    raise SystemExit\n"
-            "limit = int(sys.argv[sys.argv.index('--limit') + 1])\n"
-            f"filler = [{{'status': 'Done', 'content': {{'number': -n}}}}\n"
-            f"          for n in range(1, {cards})]\n"
-            f"mine = {{'status': {START_COLUMN!r}, 'content': {{'number': {ITEM}}}}}\n"
-            "answer = [mine] if '--query' in sys.argv else filler + [mine]\n"
-            "print(json.dumps({'items': answer[:limit]}))\n"
+            f"labels, card = {list(labels)!r}, {card!r}\n"
+            f"open_items, sets = {list(open_items)!r}, {dict(sets or {})!r}\n"
+            "argv = sys.argv[1:]\n"
+            "def carded(rows):\n"
+            "    return [dict(one, projectItems=[{'status': {'name': one['board']},\n"
+            "                                     'title': 'the board'}]\n"
+            "                                   if one['board'] else [])\n"
+            "            for one in rows]\n"
+            "if argv[:2] == ['issue', 'view']:\n"
+            "    print(json.dumps({'projectItems': [{'status': {'name': card},\n"
+            "                                        'title': 'the board'}] if card else []}\n"
+            "                     if 'projectItems' in argv else\n"
+            "                     {'labels': [{'name': one} for one in labels],\n"
+            "                      'comments': []}))\n"
+            "elif argv[:2] == ['issue', 'list'] and '--label' in argv:\n"
+            "    print(json.dumps(carded(sets.get(argv[argv.index('--label') + 1], []))))\n"
+            "elif argv[:2] == ['issue', 'list']:\n"
+            "    print(json.dumps(open_items))\n"
+            "else:\n"
+            "    print('stub: the gate makes no such read', file=sys.stderr)\n"
+            "    raise SystemExit(9)\n"
         )
         script.chmod(0o755)
         return log
@@ -786,6 +823,34 @@ class WorkerStateTestCase(unittest.TestCase):
             ),
             *extra,
             expect=expect,
+        )
+
+    def report_cli(
+        self, *extra, expect=EXIT_COMPLETE, fixture=True, board=True, lines=6
+    ):
+        """Run the board report through the command line.
+
+        A human reads this one, so it prints one line per gap rather than one line in all.
+        `lines` is the ceiling `run_seam` asserts: one head line and one per gap.
+        """
+        return self.run_seam(
+            "report",
+            *(("--gh-fixture", str(self.fixture)) if fixture else ()),
+            *(
+                (
+                    "--board-project",
+                    str(BOARD_PROJECT),
+                    "--board-owner",
+                    BOARD_OWNER,
+                    "--start-column",
+                    START_COLUMN,
+                )
+                if board
+                else ()
+            ),
+            *extra,
+            expect=expect,
+            lines=lines,
         )
 
     def ready(self, *extra, worktree=None, pattern=PROCESS_PATTERN, expect=0):
@@ -2469,66 +2534,74 @@ class WorkerStateTestCase(unittest.TestCase):
             self.write_fixture(labels=[READY_FOR_AGENT], board=READY_LANE)
             self.assertIn("names no board", self.gate(expect=EXIT_DUE, **missing))
 
-    def test_a_failed_board_read_counts_no_card_and_is_never_an_error(self):
+    def test_a_failed_card_read_is_unreadable_and_never_a_start(self):
         """Nothing starts on a card this gate cannot read, which is the safe direction. The
-        card is read first, so no card counted is the quiet state whatever the label says,
-        and the cause still rides the line (ADR 0061)."""
-        log = self.fake_cli("gh", issue={"labels": [{"name": READY_FOR_AGENT}]})
+        card read is one call per gate now rather than one per item, so a failure raises out
+        of the gate and the answer names itself (ADR 0064)."""
+        log = self.fake_cli("gh", api={})
 
         line = self.start_cli("--repo", "owner/name", fixture=False)
 
-        self.assertTrue(line.startswith(f"{NO_FACT}:"), line)
-        self.assertIn("the board read failed", line)
-        self.assertIn("starts nothing", line)
-        # The board read really ran and really failed: the stub CLI has no project payload.
-        self.assertIn("project item-list", log.read_text())
+        self.assertTrue(line.startswith("unreadable:"), line)
+        self.assertIn("nothing starts", line)
+        # The read really ran and really failed: the stub CLI has no issue payload.
+        self.assertIn("issue view", log.read_text())
 
-    def test_the_start_gate_reads_the_board_by_name_and_writes_nothing(self):
-        """One item read and one board read, and no write of any kind. The column is a
-        name and never an option id, because nothing writes a card. The stub CLI records
-        the argv, so this case asserts the recipe of docs/agents/issue-tracker.md."""
-        log = self.fake_cli(
-            "gh",
-            issue={"labels": [{"name": READY_FOR_AGENT}], "comments": []},
-            project={"items": [{"status": START_COLUMN, "content": {"number": ITEM}}]},
+    def test_the_start_gate_reads_the_card_with_the_item_and_lists_no_board(self):
+        """The card arrives with the item, and no whole board is listed (ADR 0064). One item
+        view for the labels, one for this item's own card, and the labelled sets plus the
+        open items for the story tree above it. No write of any kind, and the column is a
+        name and never an option id."""
+        log = self.fake_gh(
+            labels=[READY_FOR_AGENT],
+            card=START_COLUMN,
+            open_items=[listed(ITEM, [READY_FOR_AGENT])],
+            sets={READY_FOR_AGENT: [listed(ITEM, [READY_FOR_AGENT], START_COLUMN)]},
         )
         before = {path for path, _ in self.disk_state()}
 
         line = self.start_cli("--repo", "owner/name", fixture=False, expect=EXIT_DUE)
 
         self.assertTrue(line.startswith(f"{START}:"), line)
+        ran = log.read_text().splitlines()
         self.assertEqual(
-            log.read_text().splitlines(),
+            ran,
             [
                 f"issue view {ITEM} --json comments,labels --repo owner/name",
-                f"project item-list {BOARD_PROJECT} --owner {BOARD_OWNER} "
-                f"--format json --limit {BOARD_LIMIT} --query {BOARD_QUERY}",
+                f"issue view {ITEM} --json {CARD_FIELD} --repo owner/name",
+                f"issue list --state open --limit {ITEM_LIMIT} "
+                f"--json {ITEM_FIELDS} --repo owner/name",
+                f"issue list --state open --label {USER_STORY} --limit {ITEM_LIMIT} "
+                f"--json {CARDED_FIELDS} --repo owner/name",
+                f"issue list --state open --label {READY_FOR_AGENT} --limit {ITEM_LIMIT} "
+                f"--json {CARDED_FIELDS} --repo owner/name",
             ],
         )
+        self.assertNotIn("project item-list", log.read_text())
         # The one file this run added is the stub CLI's own argv log, which is this
         # test's instrument. The gate itself writes no file, the same as `phase`.
         added = {path for path, _ in self.disk_state()} - before
         self.assertEqual(added, {str(log)}, added)
 
-    def test_a_card_past_the_limit_of_the_whole_board_still_starts_the_item(self):
-        """The board grows every week, so the newest item's card sits last. A read of the
-        whole board stopped at its limit and answered "no card" for every card past it, so
-        the gate started nothing for any new item. The read is filtered now, so the gate
-        answers the start value from a card at any index of the board.
-        """
-        log = self.fake_crowded_board_cli(BOARD_LIMIT + 10, [READY_FOR_AGENT])
+    def test_the_gate_answers_whatever_the_size_of_the_board(self):
+        """The board grows every week and a new card sits last, so a whole-board list
+        stopped at its limit and answered "no card" for every card past it. The card rides
+        the item now, so no size of board reaches this answer and the gate lists none
+        (ADR 0064)."""
+        log = self.fake_gh(
+            labels=[READY_FOR_AGENT],
+            card=START_COLUMN,
+            open_items=[listed(ITEM, [READY_FOR_AGENT])],
+            sets={READY_FOR_AGENT: [listed(ITEM, [READY_FOR_AGENT], START_COLUMN)]},
+        )
 
         line = self.start_cli("--repo", "owner/name", fixture=False, expect=EXIT_DUE)
 
         self.assertTrue(line.startswith(f"{START}:"), line)
         self.assertIn(repr(START_COLUMN), line)
-        # One board read, and it carried the filter. Without it this board answers its
-        # limit of cards and the wanted one sits past them.
-        reads = [
-            one for one in log.read_text().splitlines() if one.startswith("project")
-        ]
-        self.assertEqual(len(reads), 1, reads)
-        self.assertIn(f"--query {BOARD_QUERY}", reads[0])
+        # No card limit gates this answer, because no read here asks a board for its cards.
+        self.assertNotIn("item-list", log.read_text())
+        self.assertNotIn("--limit 500", log.read_text())
 
     def test_the_start_gate_reads_no_worker_and_takes_no_worker_flag(self):
         """It answers whether an item may start, which is the question before there is a
@@ -3006,8 +3079,9 @@ class WorkerStateTestCase(unittest.TestCase):
 
         card_only = self.queue_cli(expect=EXIT_NOTHING)
 
-        self.assertIn("sit in the start column with no label", card_only)
-        self.assertIn(f"#{STANDALONE}", card_only)
+        # A tick reads the two labelled sets, so an unlabelled item is in neither of them
+        # and no tick can name its card. `report` names it (ADR 0064).
+        self.assertTrue(card_only.startswith("nothing:"), card_only)
         self.assertEqual(self.spawned(), [])
         self.assertNotIn("no label", label_only)
 
@@ -3041,10 +3115,10 @@ class WorkerStateTestCase(unittest.TestCase):
         self.assertEqual(self.spawned(), [LEAF_ONE])
         self.assertNotIn(f"#{STORY}", line)
 
-    def test_a_user_story_is_never_named_as_a_forgotten_label(self):
-        """A story with no label is its correct resting state, so naming it printed noise on
-        every tick. A leaf in the same column with no label is still named, so the report
-        narrowed for one kind and for nothing else."""
+    def test_a_quiet_tick_names_no_forgotten_label_at_all(self):
+        """A tick reads the two labelled sets, so an unlabelled item is in neither of them
+        and the tick cannot see its card. The forgotten label moved to `report`, which is
+        the one command that reads the board (ADR 0064)."""
         items = story_queue()
         items[str(LEAF_ONE)]["labels"] = []
         items[str(LEAF_TWO)]["labels"] = []
@@ -3053,10 +3127,10 @@ class WorkerStateTestCase(unittest.TestCase):
 
         line = self.queue_cli(expect=EXIT_NOTHING)
 
-        self.assertIn("sit in the start column with no label", line)
-        self.assertIn(f"#{STANDALONE}", line)
+        self.assertTrue(line.startswith("nothing:"), line)
+        self.assertNotIn("no label", line)
+        self.assertNotIn(f"#{STANDALONE}", line)
         self.assertNotIn(f"#{STORY}", line)
-        self.assertIn("1 item(s)", line)
         self.assertEqual(self.spawned(), [])
         self.assertEqual(self.writes(), [])
 
@@ -3199,26 +3273,6 @@ class WorkerStateTestCase(unittest.TestCase):
         self.assertIn(f"work item #{STANDALONE} is the one item", line)
         self.assertEqual(self.spawned(), [STANDALONE])
 
-    def test_the_queue_report_names_every_card_in_the_start_column_with_no_label(self):
-        """A forgotten label otherwise reads as an empty queue, and nothing repairs the
-        disagreement on its own. So those items ride the line of a quiet tick, and that is
-        never an error, never a refusal and never a comment."""
-        items = story_queue()
-        for number in (STORY, STANDALONE):
-            items[str(number)]["board"] = START_COLUMN
-            items[str(number)]["labels"] = []
-        self.write_queue(items)
-
-        line = self.queue_cli(expect=EXIT_NOTHING)
-
-        self.assertIn("sit in the start column with no label", line)
-        self.assertIn(f"#{STORY}", line)
-        self.assertIn(f"#{STANDALONE}", line)
-        for word in ("error", "refused"):
-            self.assertNotIn(word, line)
-        self.assertEqual(self.spawned(), [])
-        self.assertEqual(self.writes(), [])
-
     def test_a_card_parked_outside_the_start_column_is_not_named(self):
         """The board is the narrower fact, so a labelled item whose card sits in the lane
         before the start column is the resting state of a groomed backlog. Naming it made
@@ -3236,6 +3290,171 @@ class WorkerStateTestCase(unittest.TestCase):
         self.assertNotIn(f"#{STANDALONE}", line)
         self.assertEqual(self.spawned(), [])
         self.assertEqual(self.writes(), [])
+
+    def test_start_and_the_queue_agree_on_a_child_of_an_authorised_story(self):
+        """One table answers all three rows, so the two subcommands cannot disagree about
+        one item (ADR 0064). A labelled child of an authorised story is the row that used to
+        split: the tick started it, and the gate that answers the same question called it
+        parked, because the child row lived in the tick alone."""
+        items = story_queue()
+        items.pop(str(STANDALONE))
+        self.write_queue(items)
+
+        started = self.queue_cli()
+        child = worker_state.start(
+            LEAF_ONE, self.adapter(), BOARD_PROJECT, BOARD_OWNER, START_COLUMN
+        )
+
+        self.assertEqual(self.spawned(), [LEAF_ONE])
+        self.assertIn(f"work item #{LEAF_ONE} is the one item", started)
+        self.assertEqual(child[0], EXIT_DUE, child[1])
+        self.assertTrue(child[1].startswith(f"{START}:"), child[1])
+        self.assertIn(f"#{STORY} is an authorised {USER_STORY}", child[1])
+
+        # The child carries no card of its own, and the gate says so rather than reading one.
+        self.assertIn("Its own column is not read", child[1])
+
+        # Take the label off that child and both answers move together.
+        items[str(LEAF_ONE)]["labels"] = []
+        self.write_queue(items)
+        self.clear_spawned()
+
+        self.queue_cli()
+        stopped = worker_state.start(
+            LEAF_ONE, self.adapter(), BOARD_PROJECT, BOARD_OWNER, START_COLUMN
+        )
+
+        self.assertEqual(self.spawned(), [LEAF_TWO])
+        self.assertEqual(stopped[0], EXIT_NOTHING, stopped[1])
+        self.assertTrue(stopped[1].startswith(f"{NO_FACT}:"), stopped[1])
+        self.assertIn("stays stopped", stopped[1])
+
+    # --- the report verb (ADR 0064) -----------------------------------------
+
+    def test_the_report_names_the_four_gaps_and_writes_nothing(self):
+        """The one whole-board read left, and a human runs it. A forgotten label cannot ride
+        a tick line any more, because a tick reads the two labelled sets. So this verb is
+        where each disagreement between the board and the labels is named."""
+        items = story_queue()
+        # A card in the start column with no label, which is the forgotten label.
+        items[str(STANDALONE)]["labels"] = []
+        # A labelled leaf with a card in the lane before the start column.
+        items[str(LEAF_ONE)]["board"] = READY_LANE
+        # A labelled leaf with no card at all, which `story_queue` already gives LEAF_TWO.
+        self.write_queue(items)
+
+        line = self.report_cli()
+
+        self.assertIn(f"{len(items) - 1} live card(s) on project {BOARD_PROJECT}", line)
+        self.assertIn(f"{len(items)} open work item(s)", line)
+        self.assertIn(f"with no {READY_FOR_AGENT} label", line)
+        self.assertIn(f"#{STANDALONE}", line)
+        self.assertIn(f"card outside {START_COLUMN!r}", line)
+        self.assertIn("no card at all", line)
+        self.assertIn(f"#{LEAF_TWO}", line)
+        self.assertEqual(self.writes(), [])
+
+    def test_the_report_names_no_user_story_as_a_forgotten_label(self):
+        """A story with no label is its correct resting state, so naming it is noise
+        (ADR 0062). A leaf in the same column with no label is named, so the narrowing is
+        for one kind and for nothing else."""
+        items = story_queue()
+        items[str(STANDALONE)]["labels"] = []
+        self.write_queue(items)
+
+        line = self.report_cli()
+
+        self.assertIn(f"with no {READY_FOR_AGENT} label", line)
+        self.assertIn(f"#{STANDALONE}", line)
+        self.assertNotIn(
+            f"1 card(s) sit in {START_COLUMN!r} with no", line.split("\n")[0]
+        )
+        forgotten = [
+            one
+            for one in line.splitlines()
+            if f"with no {READY_FOR_AGENT} label" in one
+        ]
+        self.assertEqual(
+            forgotten,
+            [
+                f"1 card(s) sit in {START_COLUMN!r} "
+                f"with no {READY_FOR_AGENT} label: #{STANDALONE}"
+            ],
+        )
+
+    def test_the_report_reads_the_whole_board_and_a_tick_reads_none(self):
+        """The board read moved here whole, and the tick lists no board at all. So the one
+        `gh project item-list` call in this repo has one caller (ADR 0064)."""
+        rows = [listed(STANDALONE, [READY_FOR_AGENT], START_COLUMN)]
+        board = self.fake_cli(
+            "gh",
+            issue=[dict(one, board=None) for one in rows],
+            project={
+                "items": [
+                    {"status": START_COLUMN, "content": {"number": STANDALONE}},
+                    {"status": READY_LANE, "content": {"number": 999}},
+                ]
+            },
+        )
+
+        line = self.report_cli("--repo", "owner/name", fixture=False)
+
+        ran = board.read_text().splitlines()
+        self.assertEqual(
+            [one for one in ran if one.startswith("project")],
+            [
+                f"project item-list {BOARD_PROJECT} --owner {BOARD_OWNER} "
+                f"--format json --limit {BOARD_LIMIT} --query {BOARD_QUERY}"
+            ],
+        )
+        self.assertIn("2 live card(s)", line)
+        self.assertIn("#999", line)
+        self.assertIn("not open", line)
+
+    def test_the_report_with_no_board_says_so_and_names_the_labelled_items(self):
+        """A tracker that names no board is a supported configuration, so this verb answers
+        there too. The label is then the whole gate, and the report says which items hold
+        it."""
+        self.write_queue(story_queue())
+
+        line = self.report_cli(board=False)
+
+        self.assertIn("names no board", line)
+        self.assertIn(f"carry the {READY_FOR_AGENT} label", line)
+        self.assertIn(f"#{LEAF_ONE}", line)
+        self.assertEqual(self.writes(), [])
+
+    def test_a_report_read_that_failed_names_the_cause(self):
+        """A read that failed cannot name a gap, so the report says so rather than printing
+        an empty board."""
+        self.write_queue(story_queue())
+        self.break_fixture()
+
+        line = self.report_cli(expect=EXIT_NOTHING, lines=1)
+
+        self.assertTrue(line.startswith("unreadable:"), line)
+        self.assertIn("names no gap", line)
+
+    def test_a_labelled_set_that_fills_its_page_stops_the_tick(self):
+        """A read that cannot answer must never answer "no". A labelled set as large as the
+        limit can be one page of a longer set, so the tick refuses rather than start the
+        oldest item of that page (ADR 0064)."""
+        crowded = [
+            listed(number, [READY_FOR_AGENT], START_COLUMN)
+            for number in range(1, ITEM_LIMIT + 1)
+        ]
+        self.fake_gh(
+            open_items=[dict(one) for one in crowded],
+            sets={READY_FOR_AGENT: crowded},
+        )
+
+        line = self.queue_cli(
+            "--repo", "owner/name", fixture=False, expect=EXIT_REFUSED
+        )
+
+        self.assertTrue(line.startswith("unreadable:"), line)
+        self.assertIn("Raise ITEM_LIMIT", line)
+        self.assertEqual(self.spawned(), [])
 
     def test_a_failed_spawn_refuses_with_needs_human_and_one_comment(self):
         """A spawn that exited non-zero is a refusal. The item takes `needs-human` plus one
@@ -3349,46 +3568,38 @@ class WorkerStateTestCase(unittest.TestCase):
             ["run", "--title", item["title"], "--body", item["body"]],
         )
 
-    def test_one_board_read_answers_the_card_of_every_open_item(self):
-        """The read answers every card at once, so a tick makes one board query whatever
-        the queue holds. One query per item is one Projects query per item every minute
-        (ADR 0045)."""
-        listed = [
-            {
-                "number": number,
-                "title": "an item",
-                "labels": [{"name": READY_FOR_AGENT}],
-                "body": body(touches=[f"scripts/{number}.py"]),
-            }
+    def test_two_labelled_reads_answer_every_card_and_no_board_is_listed(self):
+        """A tick asks for the two labelled sets, and each item's card arrives in the same
+        call. So the read is bounded by the work a maintainer approved rather than by the
+        size of the board, and the tick lists no board at all (ADR 0064)."""
+        rows = [
+            listed(
+                number,
+                [READY_FOR_AGENT],
+                START_COLUMN,
+                body=body(touches=[f"scripts/{number}.py"]),
+            )
             for number in (STANDALONE, SECOND_LEAF)
         ]
-        log = self.fake_cli(
-            "gh",
-            issue=listed,
-            project={
-                "items": [
-                    {"status": START_COLUMN, "content": {"number": number}}
-                    for number in (STANDALONE, SECOND_LEAF)
-                ]
-            },
+        log = self.fake_gh(
+            open_items=[dict(one) for one in rows],
+            sets={READY_FOR_AGENT: rows},
         )
 
         line = self.queue_cli("--repo", "owner/name", fixture=False)
 
         self.assertIn(f"work item #{STANDALONE} is the one item", line)
         ran = log.read_text().splitlines()
+        self.assertEqual([one for one in ran if one.startswith("project")], [])
         self.assertEqual(
-            [one for one in ran if one.startswith("project")],
+            ran,
             [
-                f"project item-list {BOARD_PROJECT} --owner {BOARD_OWNER} "
-                f"--format json --limit {BOARD_LIMIT} --query {BOARD_QUERY}"
-            ],
-        )
-        self.assertEqual(
-            [one for one in ran if one.startswith("issue")],
-            [
-                "issue list --state open --limit 200 --json number,title,labels,body "
-                "--repo owner/name"
+                f"issue list --state open --limit {ITEM_LIMIT} "
+                f"--json {ITEM_FIELDS} --repo owner/name",
+                f"issue list --state open --label {USER_STORY} --limit {ITEM_LIMIT} "
+                f"--json {CARDED_FIELDS} --repo owner/name",
+                f"issue list --state open --label {READY_FOR_AGENT} "
+                f"--limit {ITEM_LIMIT} --json {CARDED_FIELDS} --repo owner/name",
             ],
         )
 
