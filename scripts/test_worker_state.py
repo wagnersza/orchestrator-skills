@@ -56,7 +56,7 @@ import unittest
 from pathlib import Path
 
 from scripts import worker_state
-from scripts.tracker import Tracker
+from scripts.tracker import BOARD_LIMIT, BOARD_QUERY, Tracker
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -476,6 +476,35 @@ class WorkerStateTestCase(unittest.TestCase):
             f"{cases}\n"
             "  *) echo 'stub: no payload for this command' >&2; exit 9 ;;\n"
             "esac\n"
+        )
+        script.chmod(0o755)
+        return log
+
+    def fake_crowded_board_cli(self, cards, labels):
+        """A `gh` whose board holds `cards` cards, and the file it logs its argv to.
+
+        The card of this case's item is the last of them, so an unfiltered read misses it:
+        **a board read with no `--query` is truncated to the `--limit` it asks for**, the
+        way a real `gh project item-list` answers. A read that carries the filter answers
+        that one card, the way the filter answers the cards outside `Done`. The issue read
+        answers `labels`.
+        """
+        log = self.root / "gh.argv"
+        script = self.bin / "gh"
+        script.write_text(
+            "#!/usr/bin/env python3\n"
+            "import json, sys\n"
+            f"open({str(log)!r}, 'a').write(' '.join(sys.argv[1:]) + '\\n')\n"
+            "if sys.argv[1] == 'issue':\n"
+            f"    print(json.dumps({{'labels': [{{'name': one}} for one in {list(labels)!r}],\n"
+            "                       'comments': []}))\n"
+            "    raise SystemExit\n"
+            "limit = int(sys.argv[sys.argv.index('--limit') + 1])\n"
+            f"filler = [{{'status': 'Done', 'content': {{'number': -n}}}}\n"
+            f"          for n in range(1, {cards})]\n"
+            f"mine = {{'status': {START_COLUMN!r}, 'content': {{'number': {ITEM}}}}}\n"
+            "answer = [mine] if '--query' in sys.argv else filler + [mine]\n"
+            "print(json.dumps({'items': answer[:limit]}))\n"
         )
         script.chmod(0o755)
         return log
@@ -2103,7 +2132,8 @@ class WorkerStateTestCase(unittest.TestCase):
         self,
     ):
         """A session that reads the comment needs no second read to compose the retry. So
-        the body carries the stall line, the reset, and the steps that are still unticked."""
+        the body carries the stall line, the reset, and the steps that are still unticked.
+        """
         write(self.checklist, UNTICKED.replace("- [ ] push the branch", "- [x] push"))
         self.write_fixture(labels=IMPL)
         self.backdate(3600)
@@ -2433,13 +2463,33 @@ class WorkerStateTestCase(unittest.TestCase):
             [
                 f"issue view {ITEM} --json comments,labels --repo owner/name",
                 f"project item-list {BOARD_PROJECT} --owner {BOARD_OWNER} "
-                f"--format json --limit 100",
+                f"--format json --limit {BOARD_LIMIT} --query {BOARD_QUERY}",
             ],
         )
         # The one file this run added is the stub CLI's own argv log, which is this
         # test's instrument. The gate itself writes no file, the same as `phase`.
         added = {path for path, _ in self.disk_state()} - before
         self.assertEqual(added, {str(log)}, added)
+
+    def test_a_card_past_the_limit_of_the_whole_board_still_starts_the_item(self):
+        """The board grows every week, so the newest item's card sits last. A read of the
+        whole board stopped at its limit and answered "no card" for every card past it, so
+        the gate started nothing for any new item. The read is filtered now, so the gate
+        answers the start value from a card at any index of the board.
+        """
+        log = self.fake_crowded_board_cli(BOARD_LIMIT + 10, [READY_FOR_AGENT])
+
+        line = self.start_cli("--repo", "owner/name", fixture=False, expect=EXIT_DUE)
+
+        self.assertTrue(line.startswith(f"{START}:"), line)
+        self.assertIn(repr(START_COLUMN), line)
+        # One board read, and it carried the filter. Without it this board answers its
+        # limit of cards and the wanted one sits past them.
+        reads = [
+            one for one in log.read_text().splitlines() if one.startswith("project")
+        ]
+        self.assertEqual(len(reads), 1, reads)
+        self.assertIn(f"--query {BOARD_QUERY}", reads[0])
 
     def test_the_start_gate_reads_no_worker_and_takes_no_worker_flag(self):
         """It answers whether an item may start, which is the question before there is a
@@ -2472,7 +2522,8 @@ class WorkerStateTestCase(unittest.TestCase):
 
     def test_a_failed_item_read_is_quiet_and_never_a_start(self):
         """A read that failed cannot say the item carries the ready state, so nothing
-        starts on it. It is quiet rather than a crash, the same as every other read here."""
+        starts on it. It is quiet rather than a crash, the same as every other read here.
+        """
         self.break_fixture()
 
         line = self.gate(expect=EXIT_NOTHING)
@@ -2972,7 +3023,8 @@ class WorkerStateTestCase(unittest.TestCase):
 
     def test_a_child_with_an_open_blocker_stays_unstarted(self):
         """The descent reads the open-blocker predicate the Ready queue already reads. A
-        blocker absent from the open items is closed, and only a still-open edge blocks."""
+        blocker absent from the open items is closed, and only a still-open edge blocks.
+        """
         items = story_queue()
         items.pop(str(STANDALONE))
         items[str(LEAF_ONE)]["body"] = body(
@@ -3231,7 +3283,8 @@ class WorkerStateTestCase(unittest.TestCase):
 
     def test_the_worktree_name_carries_the_item_number_first(self):
         """`{slug}` is the number and then the first words of the title, so a worktree
-        name says which item it holds and two items with one title still get two names."""
+        name says which item it holds and two items with one title still get two names.
+        """
         self.assertEqual(
             worker_state.slug_of(
                 212, "The queue subcommand, and the schedule at setup"
@@ -3289,7 +3342,7 @@ class WorkerStateTestCase(unittest.TestCase):
             [one for one in ran if one.startswith("project")],
             [
                 f"project item-list {BOARD_PROJECT} --owner {BOARD_OWNER} "
-                f"--format json --limit 100"
+                f"--format json --limit {BOARD_LIMIT} --query {BOARD_QUERY}"
             ],
         )
         self.assertEqual(

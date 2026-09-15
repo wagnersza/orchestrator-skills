@@ -71,6 +71,36 @@ class TrackerTest(unittest.TestCase):
         script.chmod(0o755)
         return log
 
+    def fake_board_cli(self, count, unfinished=()):
+        """A `gh` whose board holds `count` cards, and the file it logs its argv to.
+
+        **Every read is truncated to the `--limit` it asks for**, the way a real
+        `gh project item-list` answers. That truncation is the fault the filtered read
+        closes, so a fake that ignores the number proves nothing.
+
+        A read that carries `--query` answers the cards `unfinished` names, which stands
+        in for the cards the board holds outside `Done`. A read that carries none answers
+        the whole board, truncated.
+
+        Card number `n` sits at index `n` and its status is `lane n`. So a case names
+        the index it wants and reads back which card answered it.
+        """
+        log = self.root / "gh.argv"
+        script = self.bin / "gh"
+        script.write_text(
+            "#!/usr/bin/env python3\n"
+            "import json, sys\n"
+            f"open({str(log)!r}, 'a').write(' '.join(sys.argv[1:]) + '\\n')\n"
+            "limit = int(sys.argv[sys.argv.index('--limit') + 1])\n"
+            "card = lambda n: {'status': f'lane {n}', 'content': {'number': n}}\n"
+            f"whole = [card(n) for n in range({count})]\n"
+            f"answer = [card(n) for n in {list(unfinished)!r}] \\\n"
+            "    if '--query' in sys.argv else whole\n"
+            "print(json.dumps({'items': answer[:limit]}))\n"
+        )
+        script.chmod(0o755)
+        return log
+
     def write_fixture(self, **items):
         """One fixture file in the one format, and the path to it."""
         path = self.root / "tracker.json"
@@ -449,8 +479,43 @@ class TrackerTest(unittest.TestCase):
         self.assertEqual(one.board_status(ITEM, 6, "someone"), "In review")
         self.assertEqual(
             log.read_text().splitlines(),
-            ["project item-list 6 --owner someone --format json --limit 100"],
+            [
+                "project item-list 6 --owner someone --format json "
+                f"--limit {tracker.BOARD_LIMIT} --query {tracker.BOARD_QUERY}"
+            ],
         )
+
+    def test_a_card_past_the_limit_of_the_whole_board_is_still_read(self):
+        """The board grows every week and a new card sits at the end, so an unfiltered
+        read never returned it. The filter answers the cards outside `Done`, which is a
+        small set on any board. So the `Status` of a card at any index of the whole board
+        is still the answer, and one call is still the whole read.
+        """
+        past = tracker.BOARD_LIMIT + 40
+        log = self.fake_board_cli(tracker.BOARD_LIMIT + 50, unfinished=[7, past])
+
+        one = tracker.Tracker()
+
+        self.assertEqual(one.board_status(past, 6, "someone"), f"lane {past}")
+        # One call, and the filter is what answered: an unfiltered read of this board is
+        # truncated to the limit, and the card sits past it.
+        ran = log.read_text().splitlines()
+        self.assertEqual(len(ran), 1, ran)
+        self.assertIn(f"--query {tracker.BOARD_QUERY}", ran[0])
+
+    def test_a_board_read_that_cannot_return_every_card_raises(self):
+        """A read that cannot answer must never answer "no". An answer that fills the
+        limit exactly can be one page of a longer board, so no card in it can be counted.
+        That raises, and the caller reads `unreadable` rather than a missing card.
+        """
+        self.fake_board_cli(
+            tracker.BOARD_LIMIT * 2, unfinished=range(tracker.BOARD_LIMIT + 10)
+        )
+
+        with self.assertRaises(tracker.TrackerError) as raised:
+            tracker.Tracker().board_status(ITEM, 6, "someone")
+
+        self.assertIn("filled its limit", str(raised.exception))
 
     def test_a_card_for_another_item_is_not_this_item_s_card(self):
         self.fake_cli(

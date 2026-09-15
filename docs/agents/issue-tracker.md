@@ -146,16 +146,36 @@ to `Ready` gains no label, and a labelled standalone leaf left in `Ready` starts
 labelled child of an authorised story does start there, because a child's own column is
 never read.
 
-### The one call
+### The one filtered call
 
 ```bash
-gh project item-list 6 --owner wagnersza --format json --limit 100
+gh project item-list 6 --owner wagnersza --format json --limit 500 --query '-status:Done'
 ```
 
 The reader walks the answer and matches the card whose `content.number` is the item. The
-`Status` name on that card is the answer, and an item with no card answers nothing. **A
-card with no status, an item with no card, and a repo with no board all read the same
-way**, so none of the three is an error.
+`Status` name on that card is the answer, and an item with no card answers nothing.
+
+**The filter is what keeps the read whole, and it names no column.** `-status:Done` is every
+card that is not finished, which is every card a gate can act on. This board holds 188 cards
+and answers 54 rows, so the limit above is ten times the answer. A card in any lane still
+answers its own `Status` name, because the filter removes only the finished cards. An
+unfiltered read of 100 cards was the fault this closes: a new card sits at the end of the
+board, so every new item read as an item with no card.
+
+**A card the read never returned is not a missing card.** Where the answer holds exactly as
+many cards as `--limit` asked for, that answer can be one page of a longer board, so the
+read fails instead of answering. A read that cannot answer must never answer "no", and the
+tick reads that board as unreadable.
+
+**The filter needs github.com, or GitHub Enterprise Server 3.20 and later.** An older host
+answers an error, so the read fails and the tick reads the board as unreadable. No older
+host answers "no card".
+
+**A card with no status, an item with no card, and a repo with no board all read the same
+way**, so none of the three is an error. A card the read never returned is a fourth case,
+and that sentence does not cover it: it reads as unreadable, and never as a missing card. A
+card in `Done` is outside the filter, so it reads as an item with no card. No gate acts on
+either one, because `Done` is not the start column.
 
 The token needs the `read:project` scope (`gh auth refresh -s read:project`). **There is
 no write scope, because there is no write.**
