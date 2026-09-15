@@ -209,6 +209,10 @@ UNTICKED = """# Checklist — 54
 
 TICKED = UNTICKED.replace("- [ ]", "- [x]")
 
+# The brief the spawn writes beside the checklist. Only its write time is read, so the
+# text stands in for a whole rendered prompt.
+BRIEF = f"# Worker brief — work item {ITEM}\n"
+
 # The proof box the checklist template ships where `run_recipe` is not blank. It is one
 # more box and nothing else, which is the whole point of it.
 PROOF_BOX = "- [ ] prove the feature works through the browser surface\n"
@@ -303,6 +307,10 @@ class WorkerStateTestCase(unittest.TestCase):
 
         self.checklist = self.worktree / ".orchestrator" / f"checklist-{ITEM}.md"
         write(self.checklist, UNTICKED)
+        # The brief the spawn wrote, beside the checklist it seeded. Its write time is
+        # when this worker started, and the stall window starts no earlier than that.
+        self.prompt = self.worktree / ".orchestrator" / f"prompt-{ITEM}.md"
+        write(self.prompt, BRIEF)
         # The Gate record sits beside the checklist. No case writes it in setUp: a
         # worktree with no record is the state before the first gate run.
         self.gates = self.worktree / ".orchestrator" / f"gates-{ITEM}.jsonl"
@@ -582,11 +590,11 @@ class WorkerStateTestCase(unittest.TestCase):
         self.child_in(self.worktree)
 
     def backdate(self, seconds):
-        """Age both freshness facts, so a stall needs no real waiting.
+        """Age every freshness fact, so a stall needs no real waiting.
 
-        The commit is rewritten with an old date, and `os.utime` moves the
-        checklist's write time. The predicate takes the newer of the two, so
-        both must move.
+        The commit is rewritten with an old date, and `os.utime` moves the write time
+        of the checklist and of the brief. The predicate takes the newest of the three,
+        so all three must move.
         """
         old = time.time() - seconds
         stamp = time.strftime("%Y-%m-%dT%H:%M:%S+0000", time.gmtime(old))
@@ -598,6 +606,7 @@ class WorkerStateTestCase(unittest.TestCase):
             env={**GIT_ENV, "GIT_AUTHOR_DATE": stamp, "GIT_COMMITTER_DATE": stamp},
         )
         os.utime(self.checklist, (old, old))
+        os.utime(self.prompt, (old, old))
 
     def run_seam(self, *argv, expect=0, lines=1):
         """Run the seam and return what it printed, with the line count asserted."""
@@ -1228,6 +1237,33 @@ class WorkerStateTestCase(unittest.TestCase):
         self.assertTrue(
             self.ask(stall=HALF_HOUR, expect=EXIT_NOTHING).startswith("nothing:")
         )
+
+    def test_a_fresh_worker_is_never_stalled(self):
+        """The window starts at the later of the spawn and the work product, so a commit
+        the worker never made cannot date it (ADR 0063).
+
+        This is the measured case of work item #300. A worktree is cut from the default
+        branch, so it inherits a commit that was already older than the window at the
+        spawn. The first tick called a healthy worker stalled about two minutes in, and
+        the second wrote `needs-human`, which then blocked every later tick.
+        """
+        self.write_fixture(labels=IMPL)
+        self.backdate(3600)
+        # The spawn wrote the brief just now, and everything else it inherited is old.
+        os.utime(self.prompt, None)
+        child = self.child_in(self.worktree)
+
+        line = self.ask(stall=HALF_HOUR, expect=EXIT_NOTHING)
+
+        self.assertTrue(line.startswith("nothing:"), line)
+        self.assertNotIn("stalled", line)
+        self.assertIn(str(child.pid), line)
+        self.assertIn(self.prompt.name, line)
+
+        # One window after the spawn, the same worktree is a stall again. So the fix
+        # takes no stall away.
+        self.backdate(3600)
+        self.assertTrue(self.ask(stall=HALF_HOUR).startswith("stalled:"))
 
     def test_dead_and_stalled_never_both_fire(self):
         """`dead` is the absence of the live process `stalled` needs, so stale work
@@ -2157,10 +2193,12 @@ class WorkerStateTestCase(unittest.TestCase):
         markers = self.checklist.parent
         shutil.rmtree(markers)
         write(self.checklist, UNTICKED)
+        write(self.prompt, BRIEF)
         self.backdate(3600)
 
         self.assertEqual(
-            sorted(path.name for path in markers.iterdir()), ["checklist-54.md"]
+            sorted(path.name for path in markers.iterdir()),
+            ["checklist-54.md", "prompt-54.md"],
         )
         line = self.apply(stall=HALF_HOUR, expect=EXIT_REFUSED)
 
@@ -2172,6 +2210,7 @@ class WorkerStateTestCase(unittest.TestCase):
         self.stalling()
         shutil.rmtree(markers)
         write(self.checklist, UNTICKED)
+        write(self.prompt, BRIEF)
         self.backdate(3600)
         self.assertIn(
             f"retry 1 of {RE_PROMPTS}", self.apply(stall=HALF_HOUR, expect=EXIT_APPLIED)
