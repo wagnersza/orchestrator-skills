@@ -39,6 +39,35 @@ The five steps, and what each one does:
 **item closed to Done** workflow is what moves a card to `Done` (ADR 0054). So this
 seam takes no board coordinate and holds no board.
 
+**`--abandon` is the other path, and an abandon is not a close.** A worker can die
+before its first commit, and then no pull request exists and no merge can ever fire the
+five steps above. So this seam takes a second path for that worktree:
+
+    python3 <plugin root>/scripts/close_item.py --issue 316 \\
+        --repo /path/to/main/checkout --worktree /path/to/worktree \\
+        --remove-label in-progress \\
+        --abandon 'the readiness gate refused the spawn' \\
+        --execute --teardown --teardown-command '<op 12 && op 10>'
+
+**It moves no work state.** The work item stays open, the abandon adds no label, and it
+writes no start label, because only a human writes one. It removes the work-state label
+the caller names, and it posts one comment that says why the worktree went.
+
+**It proves there is nothing to lose before it removes anything.** Three proofs, each a
+step of its own, so a refusal names which one failed:
+
+| Step | Behaviour |
+|---|---|
+| 1. no commit | refuse where the branch is ahead of the base branch, and name the commits |
+| 2. worktree clean? | refuse if dirty, and name the files |
+| 3. no pull request | refuse where the branch already has an open one |
+| 4. label and note | remove the work-state label, and post the reason. No close, and no label added |
+| 5. remove the worktree | the same `--teardown-command`, so `hooks/refuse.py` needs no new exemption |
+
+That command removes the item's schedule as well as its worktree, because the caller
+composes it as operation 12 then operation 10. So no tick survives the worktree it
+watched, and this path needs no schedule flag of its own.
+
 Two things this seam never learns, because each one turns it from a testable
 part into a coupled one:
 
@@ -55,7 +84,10 @@ part into a coupled one:
   first and the close second (ADR 0056).
 
 The exit code carries the outcome, so the caller reports the cause and parses no
-prose: 0 clean, 2 the PR is not merged, 3 the worktree is dirty, 1 a step failed.
+prose. Every code holds one meaning, and the two paths share only the codes that carry
+the same proof: 0 clean, 1 a step failed, 2 the PR is not merged, 3 the worktree is
+dirty, 4 the branch has an open pull request, 5 the branch is ahead of the base branch,
+and 64 a flag with a typo.
 """
 
 import argparse
@@ -68,11 +100,12 @@ from pathlib import Path
 # puts `scripts/` on the path, and `python3 -m scripts.close_item` puts the repo root
 # there (ADR 0034).
 try:
-    from .tracker import GH, GLAB, Tracker, TrackerError
+    from .tracker import GH, GLAB, OPEN_STATES, Tracker, TrackerError
 except ImportError:  # the type checker reads the package form above
     from tracker import (  # type: ignore[no-redef, import-not-found]
         GH,
         GLAB,
+        OPEN_STATES,
         Tracker,
         TrackerError,
     )
@@ -81,6 +114,14 @@ EXIT_OK = 0
 EXIT_ERROR = 1
 EXIT_PR_NOT_MERGED = 2
 EXIT_WORKTREE_DIRTY = 3
+# The two proofs only an abandon makes. Each code keeps one meaning, so neither one
+# reuses a code above: a close refuses because a pull request is *not* merged, and an
+# abandon refuses because a pull request exists at all.
+EXIT_PR_OPEN = 4
+EXIT_COMMITS_AHEAD = 5
+# 64 is `EX_USAGE`, and it sits outside every outcome above: a flag with a typo is not a
+# refusal, so no caller reads it as one.
+EXIT_USAGE = 64
 
 STATUS_DONE = "done"
 STATUS_TODO = "todo"
@@ -134,6 +175,15 @@ def dirty_files(worktree):
     """
     lines = git(worktree, "status", "--porcelain").splitlines()
     return [line.split(None, 1)[1] for line in lines if line.strip()]
+
+
+def commits_ahead(worktree, branch):
+    """The commits `worktree` holds that `branch` does not, newest first.
+
+    One line per commit, so a refusal can name them. An empty list is the proof an
+    abandon needs: a spawn that died before its first commit has nothing to lose.
+    """
+    return git(worktree, "log", "--oneline", f"{branch}..HEAD").splitlines()
 
 
 # --- the plan ---------------------------------------------------------------
@@ -298,6 +348,19 @@ def build_plan(args, tracker):
     )
 
     # --- 8. remove the worktree. Two flags, or it does not run.
+    steps.append(teardown_step(8, args, worktree, refusal))
+
+    return steps, refusal
+
+
+def teardown_step(number, args, worktree, refusal):
+    """The one step that destroys anything, and both paths reach the same one.
+
+    The close reaches it as step 8 and the abandon as its step 5, so the number is an
+    argument. Everything else is the same: two flags or it does not run, and the command
+    is always the caller's own string. So `hooks/refuse.py` needs no second exemption for
+    an abandon, because the abandon runs the very command the close runs.
+    """
     command = args.teardown_command or "(no teardown command)"
     if refusal:
         status, note = STATUS_BLOCKED, not_reached(refusal)
@@ -324,9 +387,234 @@ def build_plan(args, tracker):
             STATUS_TODO,
             ("removes the worktree. This is the only step that destroys anything"),
         )
-    steps.append(step(8, "teardown", command, status, note))
+    return step(number, "teardown", command, status, note)
+
+
+# --- the abandon ------------------------------------------------------------
+
+
+def build_abandon_plan(args, tracker):
+    """Resolve the three proofs of an empty worktree and return the five ordered steps.
+
+    Reads only, the same as `build_plan`. **An abandon is not a close**: nothing here
+    closes the item and nothing here writes a work state onto it. The proofs come first,
+    and each one carries its own exit code, so a refusal names which proof failed.
+
+    A worktree that is already gone is no error. The three proofs skip, the tracker step
+    still runs, and teardown skips. So a part-applied abandon is resumable, the same way
+    a part-applied close is.
+    """
+    steps = []
+    refusal = None
+    branch = args.default_branch
+    worktree = Path(args.worktree)
+    absent = f"there is no worktree at {worktree} any more"
+
+    # --- 1. no commit ahead of the base branch. A commit is the proof that this
+    #        worktree holds work, and work is not abandoned.
+    read_commits = f"git -C {worktree} log --oneline {branch}..HEAD"
+    if not worktree.exists():
+        steps.append(step(1, "no commit", read_commits, STATUS_SKIPPED, absent))
+    else:
+        try:
+            ahead = commits_ahead(worktree, branch)
+        except GitError as exc:
+            reason = (
+                f"the read of the branch failed, so its commits are unproven: {exc}"
+            )
+            refusal = {"step": 1, "reason": reason, "exit_code": EXIT_ERROR}
+            steps.append(step(1, "no commit", read_commits, STATUS_REFUSED, reason))
+        else:
+            if ahead:
+                reason = (
+                    f"the branch in {worktree} holds work that {branch} does not: "
+                    f"{'; '.join(ahead)}. That is work to review, so open a pull request "
+                    f"for it and let the merge close the item."
+                )
+                refusal = {
+                    "step": 1,
+                    "reason": reason,
+                    "exit_code": EXIT_COMMITS_AHEAD,
+                }
+                steps.append(
+                    step(
+                        1,
+                        "no commit",
+                        read_commits,
+                        STATUS_REFUSED,
+                        reason,
+                        commits_ahead=ahead,
+                    )
+                )
+            else:
+                steps.append(
+                    step(
+                        1,
+                        "no commit",
+                        read_commits,
+                        STATUS_DONE,
+                        f"the branch is not ahead of {branch}",
+                    )
+                )
+
+    # --- 2. the worktree is clean. Uncommitted work has no reflog, so this is the
+    #        one unrecoverable case on this path as well.
+    check_tree = f"git -C {worktree} status --porcelain"
+    if refusal:
+        steps.append(
+            step(2, "worktree clean", check_tree, STATUS_BLOCKED, not_reached(refusal))
+        )
+    elif not worktree.exists():
+        steps.append(step(2, "worktree clean", check_tree, STATUS_SKIPPED, absent))
+    else:
+        try:
+            dirty = dirty_files(worktree)
+        except GitError as exc:
+            reason = f"the read of the worktree failed, so its tree is unproven: {exc}"
+            refusal = {"step": 2, "reason": reason, "exit_code": EXIT_ERROR}
+            steps.append(step(2, "worktree clean", check_tree, STATUS_REFUSED, reason))
+        else:
+            if dirty:
+                reason = (
+                    f"the worktree {worktree} holds uncommitted work: "
+                    f"{', '.join(dirty)}. Commit it or stash it first. Uncommitted "
+                    f"work has no reflog."
+                )
+                refusal = {
+                    "step": 2,
+                    "reason": reason,
+                    "exit_code": EXIT_WORKTREE_DIRTY,
+                }
+                steps.append(
+                    step(
+                        2,
+                        "worktree clean",
+                        check_tree,
+                        STATUS_REFUSED,
+                        reason,
+                        dirty_files=dirty,
+                    )
+                )
+            else:
+                steps.append(
+                    step(
+                        2,
+                        "worktree clean",
+                        check_tree,
+                        STATUS_DONE,
+                        "the tree is clean",
+                    )
+                )
+
+    # --- 3. the branch has no open pull request. Where one is open there is a review
+    #        to finish, and the close path is the way out.
+    head = current_branch(worktree) if worktree.exists() else ""
+    read_prs = " ".join(tracker.pr_for_branch_argv(head)) if head else "(no branch)"
+    if refusal:
+        steps.append(
+            step(3, "no pull request", read_prs, STATUS_BLOCKED, not_reached(refusal))
+        )
+    elif not worktree.exists():
+        steps.append(step(3, "no pull request", read_prs, STATUS_SKIPPED, absent))
+    elif not head:
+        reason = (
+            f"git cannot name the branch in {worktree}, so its pull requests are "
+            f"unproven"
+        )
+        refusal = {"step": 3, "reason": reason, "exit_code": EXIT_ERROR}
+        steps.append(step(3, "no pull request", read_prs, STATUS_REFUSED, reason))
+    else:
+        found = tracker.pull_request_for_branch(head)
+        state = (found.get("state") or "").upper()
+        if state in OPEN_STATES:
+            reason = (
+                f"the branch {head} already has pull request #{found['number']}, and it "
+                f"is open. So there is a review to finish, and the merge is the way to "
+                f"close this item."
+            )
+            refusal = {"step": 3, "reason": reason, "exit_code": EXIT_PR_OPEN}
+            steps.append(
+                step(
+                    3,
+                    "no pull request",
+                    read_prs,
+                    STATUS_REFUSED,
+                    reason,
+                    pull_request=found["number"],
+                )
+            )
+        else:
+            steps.append(
+                step(
+                    3,
+                    "no pull request",
+                    read_prs,
+                    STATUS_DONE,
+                    f"the branch {head} has no open pull request",
+                )
+            )
+
+    # --- 4. the label and the note. **No close, and no label added**: the item stays
+    #        open, and only a human writes a start label onto it.
+    parts = abandon_parts(args, tracker)
+    if refusal:
+        status, note = STATUS_BLOCKED, not_reached(refusal)
+    elif all(one["status"] in (STATUS_DONE, STATUS_SKIPPED) for one in parts):
+        status, note = (
+            STATUS_DONE,
+            "the label and the reason are already as they should be",
+        )
+    else:
+        status, note = (
+            STATUS_TODO,
+            "takes the work-state label off the item and records why. The item stays "
+            "open, and no label is added",
+        )
+    steps.append(
+        step(
+            4,
+            "tracker",
+            " && ".join(one["command"] for one in parts) or "(nothing to write)",
+            status,
+            note,
+            parts=parts,
+        )
+    )
+
+    # --- 5. remove the worktree, through the command the close runs.
+    steps.append(teardown_step(5, args, worktree, refusal))
 
     return steps, refusal
+
+
+def abandon_parts(args, tracker):
+    """The two writes an abandon makes: the label it removes, and the reason it posts.
+
+    **There is no close part and no added label.** An abandon moves no work state, so
+    this list holds neither, and the item is still open when the worktree is gone.
+    """
+    labels = tracker.issue(args.issue).get("labels") or []
+    return [label_part(args, tracker, labels), abandon_note_part(args, tracker)]
+
+
+def abandon_note_part(args, tracker):
+    """The one comment an abandon posts, and a repeat of it posts nothing.
+
+    The read of the comments is what makes the write repeatable, the same as the closing
+    reason in `note_part`. This comment is the only trace an abandon leaves on the item,
+    because the item keeps its state and its number.
+    """
+    argv = tracker.comment_argv(args.issue, args.abandon)
+    _, comments = tracker.item_facts(args.issue)
+    if any(args.abandon in (body or "") for body in comments):
+        return part("note", argv, STATUS_DONE, "the reason is already on the item")
+    return part(
+        "note",
+        argv,
+        STATUS_TODO,
+        "posts why this worktree went. The item stays open, so this comment is the "
+        "whole record of the abandon",
+    )
 
 
 def tracker_parts(args, tracker):
@@ -346,22 +634,7 @@ def tracker_parts(args, tracker):
     labels = issue.get("labels") or []
     closed = (issue.get("state") or "").upper() == "CLOSED"
 
-    label_argv = tracker.label_argv(args.issue, args.remove_label, args.add_label)
-    if not (args.remove_label or args.add_label):
-        label = part("label", label_argv, STATUS_SKIPPED, "there is no label to move")
-    elif not any(name in labels for name in args.remove_label) and all(
-        name in labels for name in args.add_label
-    ):
-        label = part("label", label_argv, STATUS_DONE, "the labels are already correct")
-    else:
-        label = part(
-            "label",
-            label_argv,
-            STATUS_TODO,
-            f"the item carries {', '.join(labels) or 'no work-state label'}",
-        )
-
-    parts = [label]
+    parts = [label_part(args, tracker, labels)]
     for name, argv in tracker.close_writes(args.issue, args.close_comment):
         parts.append(
             note_part(args, tracker, argv)
@@ -369,6 +642,28 @@ def tracker_parts(args, tracker):
             else close_part(args, argv, closed)
         )
     return parts
+
+
+def label_part(args, tracker, labels):
+    """The label write, and whether it still has anything to do.
+
+    Both paths ask for this one, because both move a label off an item and neither one
+    holds a label string of its own. An abandon reaches it with an empty `--add-label`,
+    which its own CLI check guarantees, so the same three cases below cover it.
+    """
+    argv = tracker.label_argv(args.issue, args.remove_label, args.add_label)
+    if not (args.remove_label or args.add_label):
+        return part("label", argv, STATUS_SKIPPED, "there is no label to move")
+    if not any(name in labels for name in args.remove_label) and all(
+        name in labels for name in args.add_label
+    ):
+        return part("label", argv, STATUS_DONE, "the labels are already correct")
+    return part(
+        "label",
+        argv,
+        STATUS_TODO,
+        f"the item carries {', '.join(labels) or 'no work-state label'}",
+    )
 
 
 def close_part(args, argv, closed):
@@ -419,10 +714,19 @@ def part(name, argv, status, note):
 
 
 def build(args, tracker):
-    """The whole plan, ready to read or to run."""
-    steps, refusal = build_plan(args, tracker)
+    """The whole plan, ready to read or to run.
+
+    `abandon` reads through `getattr`, because `scripts/worker_state.py` builds its own
+    namespace for a close and knows nothing about this path. An older caller then reads
+    as a caller that asked for a close, which is what it asked for.
+    """
+    abandon = getattr(args, "abandon", "")
+    steps, refusal = (
+        build_abandon_plan(args, tracker) if abandon else build_plan(args, tracker)
+    )
     return {
         "generated_by": "scripts.close_item",
+        "path": "abandon" if abandon else "close",
         "mode": "execute" if args.execute else "plan",
         "mutates": "the steps marked todo below" if args.execute else "nothing",
         "issue": args.issue,
@@ -467,13 +771,18 @@ class TeardownError(RuntimeError):
 
 
 def run_step(entry, tracker):
-    """Run one step and return the commands it ran."""
-    if entry["step"] == 5:
+    """Run one step and return the commands it ran.
+
+    **The runner is chosen by the step's name, and never by its number.** The abandon
+    path holds the same tracker step and the same teardown step under numbers of its own,
+    so a number would send its teardown to the runner of the close's pull.
+    """
+    if entry["name"] == "pull":
         proc = subprocess.run(entry["argv"], capture_output=True, text=True)
         if proc.returncode != 0:
             raise GitError(f"{entry['command']} failed: {proc.stderr.strip()}")
         return [entry["command"]]
-    if entry["step"] == 7:
+    if entry["name"] == "tracker":
         ran = []
         for item in entry["parts"]:
             if item["status"] != STATUS_TODO:
@@ -482,7 +791,7 @@ def run_step(entry, tracker):
             item["status"] = STATUS_DONE
             ran.append(item["command"])
         return ran
-    if entry["step"] == 8:
+    if entry["name"] == "teardown":
         # The command is a string the caller composed from its tool reference, so
         # a shell runs it. This is the only step that destroys anything, and it
         # is reached only behind --execute --teardown and every gate above.
@@ -500,8 +809,21 @@ def run_step(entry, tracker):
 # --- CLI --------------------------------------------------------------------
 
 
+class UsageExitParser(argparse.ArgumentParser):
+    """A parser whose usage errors exit 64, outside the outcome codes above.
+
+    A refusal is a refusal, so a flag with a typo must not land on one of those codes.
+    The default is 2, which is the code a close uses for an unmerged pull request.
+    """
+
+    def exit(self, status=0, message=None):
+        if message:
+            self._print_message(message, sys.stderr)
+        sys.exit(EXIT_USAGE if status else status)
+
+
 def main(argv=None):
-    parser = argparse.ArgumentParser(
+    parser = UsageExitParser(
         # The usage block prints the command that ran. So a reader copies a form
         # that resolves from their own working directory. The module form resolves
         # only at the plugin root
@@ -512,16 +834,18 @@ def main(argv=None):
             "The steps are the PR gate, the pull into the local default branch, the "
             "clean-tree gate, the tracker writes, and teardown. The default prints "
             "the plan as JSON and mutates nothing. --execute runs the plan and stops "
-            "at the first refusal. Teardown needs --execute and --teardown together."
+            "at the first refusal. Teardown needs --execute and --teardown together. "
+            "--abandon takes the other path: it proves the worktree holds nothing, "
+            "removes it, and leaves the work item open."
         ),
     )
     parser.add_argument("--issue", required=True, type=int, help="the work item number")
     parser.add_argument(
         "--pr",
-        required=True,
         type=int,
         help="the pull request that must be merged. Where a tracker numbers its merge "
-        "requests in a sequence of their own, this is that number and not the item's",
+        "requests in a sequence of their own, this is that number and not the item's. "
+        "Required for a close, and not permitted with --abandon",
     )
     parser.add_argument(
         "--repo",
@@ -594,6 +918,15 @@ def main(argv=None):
         "command of its own",
     )
     parser.add_argument(
+        "--abandon",
+        default="",
+        metavar="REASON",
+        help="take the abandon path instead of the close path, and record REASON as "
+        "the comment that says why. The abandon needs no pull request and no merge. It "
+        "refuses unless the branch is not ahead of the base branch, the tree is clean, "
+        "and the branch has no open pull request. The work item stays open",
+    )
+    parser.add_argument(
         "--execute",
         action="store_true",
         help="run the plan instead of printing it. The run stops at the first refusal",
@@ -613,6 +946,30 @@ def main(argv=None):
     )
     parser.add_argument("--indent", type=int, default=2)
     args = parser.parse_args(argv)
+
+    # The two paths ask for different flags, and a flag from the wrong one is a typo
+    # rather than a refusal. So each case below exits 64 and mutates nothing.
+    if args.abandon:
+        for flag, value in (
+            ("--pr", args.pr),
+            ("--add-label", args.add_label),
+            ("--close-comment", args.close_comment),
+        ):
+            if value:
+                parser.error(
+                    f"--abandon takes no {flag}. An abandon needs no pull request, it "
+                    f"adds no label, and it closes nothing"
+                )
+        if not args.worktree:
+            parser.error(
+                "--abandon needs --worktree, because the worktree is the thing it "
+                "removes"
+            )
+    elif args.pr is None:
+        parser.error(
+            "--pr is required, because a merged pull request is what authorises a "
+            "close. Use --abandon for a worktree that opened none"
+        )
 
     tracker = Tracker(
         args.tracker_cli, args.tracker_host, args.tracker_repo, args.gh_fixture
