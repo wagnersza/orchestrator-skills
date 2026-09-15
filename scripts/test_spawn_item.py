@@ -282,7 +282,13 @@ class SpawnItemTestCase(unittest.TestCase):
         self.assertTrue(self.sent.exists(), "the prompt was never sent")
 
     def test_a_wait_that_runs_out_refuses_the_same_way_and_names_the_wait(self):
-        """A wait is bounded. It runs out, and the refusal reads as it did before."""
+        """A wait is bounded. It runs out, and the refusal reads as it did before.
+
+        The elapsed seconds are not asserted, because they are a measurement and not a
+        promise. One probe on a loaded machine takes longer than the budget itself, so
+        a 1s budget reports `2s of 1s` there and `1s of 1s` on an idle one. The budget
+        is the fact this case owns, so the assertion reads the budget and the shape.
+        """
         self.worktree.mkdir()
 
         plan = self.spawn("--ready-timeout", "1", execute=True, expect=EXIT_REFUSED)
@@ -293,7 +299,7 @@ class SpawnItemTestCase(unittest.TestCase):
             plan["refused"]["reason"].startswith("not ready:"),
             plan["refused"]["reason"],
         )
-        self.assertIn("The gate waited 1s of 1s", plan["refused"]["reason"])
+        self.assertRegex(plan["refused"]["reason"], r"The gate waited \d+s of 1s")
         self.assertEqual(self.tracker_writes(), [])
         self.assertFalse(self.sent.exists())
 
