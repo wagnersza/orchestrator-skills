@@ -150,7 +150,7 @@ which of them a tick can reach:
 | `verdict-request-changes` | the newest one reads `request-changes`, inside the round bound |
 | `rounds-exhausted` | `--rounds` `Verdict:` comments, and the newest one asks for changes |
 | `dead` | no live agent process with its working directory inside the worktree |
-| `stalled` | a live process, and work product older than `--stall-after` |
+| `stalled` | a live process, and a spawn and work product both older than `--stall-after` |
 | `unreadable` | the tracker read failed, so no fact is available |
 
 A **Review round** count is the number of `Verdict:` comments on the work item. So
@@ -206,8 +206,12 @@ the worker's role:
   `--require-gate` names, at the current `HEAD`. A ticked box is a claim, and the
   record is the fact behind it (ADR 0036). In a review round, a comment on the work
   item carries a `Verdict:` line whose value is `approve` or `request-changes`.
-- **stalled** — in implementation, the newer of the checklist file's
-  write time and the branch's last commit time is older than `--stall-after`. This
+- **stalled** — in implementation, the stall window starts at the newest of three
+  facts, and it is older than `--stall-after`: the spawn's own write of the brief,
+  the checklist file's write time, and the branch's last commit time. **The spawn is
+  in that list so that a fresh worker is never stalled** (ADR 0063). A worktree
+  inherits the default branch's commit, which the worker never made, and that commit
+  is often older than the window at the moment of the spawn. This
   is the freshness of work product, not the liveness of a shell. In a review round
   the freshness fact is the newest `Verdict:` comment, and this seam reads no commit
   at all. A reviewer inherits the implementation's commit, so its fresh worktree
@@ -827,6 +831,51 @@ def newest_work_product(worktree, item):
     return max(facts)
 
 
+def prompt_path(worktree, item):
+    """Where the worker's own brief lives, beside its **Checklist**."""
+    return Path(worktree) / ORCHESTRATOR_DIR / f"prompt-{item}.md"
+
+
+def spawn_written(worktree, item):
+    """When this worker was spawned, or None where there is no brief to read.
+
+    `scripts/spawn_item.py` writes the brief once, at its own step, and no worker
+    rewrites it. So the write time of that file is when the worker started, and this
+    seam needs no clock of its own.
+    """
+    try:
+        return prompt_path(worktree, item).stat().st_mtime
+    except OSError:
+        return None
+
+
+def window_start(worktree, item):
+    """`(timestamp, what it was)` for when the stall window starts, or `(None, "")`.
+
+    **The window starts at the later of the spawn and the newest work product**, and
+    never at the work product alone (ADR 0063). A worktree is cut from the default
+    branch, so it inherits a commit the worker never made. That commit can be hours
+    old at the spawn, and no amount of work makes it younger. Measured from it alone,
+    a worker one minute into its first turn reads as `stalled` on its first tick.
+
+    So a fresh worker is never stalled, whatever it inherited. A real stall still
+    fires, because the window must pass since the spawn as well.
+
+    Where neither fact is readable there is nothing to date, so a stall cannot be
+    proven. That is the reviewer risk ADR 0018 accepted and ADR 0022 narrows.
+    """
+    facts = []
+    newest, source = newest_work_product(worktree, item)
+    if newest is not None:
+        facts.append((newest, source))
+    spawn = spawn_written(worktree, item)
+    if spawn is not None:
+        facts.append((spawn, f"the spawn {prompt_path(worktree, item).name}"))
+    if not facts:
+        return None, ""
+    return max(facts)
+
+
 # --- the computed Position --------------------------------------------------
 
 # The **Work-state label** family: one family, four values, and it never stacks. The
@@ -949,18 +998,17 @@ def transition(
         )
     pid, name, _ = found
 
-    newest, source = newest_work_product(worktree, item)
+    newest, source = window_start(worktree, item)
     if newest is not None:
         age = time.time() - newest
         if age > stall_after:
             return "stalled", (
-                f"pid {pid} ({name}) is alive, and the newest work product in "
-                f"{worktree} is {human(age)} old ({source}), against a stall window "
-                f"of {human(stall_after)}"
+                f"pid {pid} ({name}) is alive, and {source} in {worktree} is "
+                f"{human(age)} old, against a stall window of {human(stall_after)}"
             )
-        freshness = f"its work product is {human(age)} old"
+        freshness = f"{source} is {human(age)} old"
     else:
-        freshness = "it has no work product yet"
+        freshness = "it has neither a spawn time nor a work product yet"
 
     return None, (
         f"work item #{item} is in {current} with {waiting}, pid {pid} ({name}) is "
