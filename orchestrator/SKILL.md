@@ -258,16 +258,22 @@ This resolution is independent of the other two. Verb → skill stays
 
 Where the tracker config has a **`## Project board`** section, every work item is also a
 card. **The board is an input, and nothing writes it.** One question is asked of it: is
-this item's card in the start column. That is the second fact of a
-[ready queue](#what-next--pick-the-next-work) entry, beside the `ready-for-agent` label.
+this item's card in the start column. That is one row of the
+[ready queue](#what-next--pick-the-next-work) table, beside the `ready-for-agent` label.
 The two coordinates, the name of that column and the one read live in that section of
 `docs/agents/issue-tracker.md`; read them from there, never from memory. Rationale:
 [`docs/adr/0054-the-board-is-an-input-not-a-mirror.md`](docs/adr/0054-the-board-is-an-input-not-a-mirror.md)
 and
 [`docs/adr/0045-a-story-start-is-automatic-under-two-roofs.md`](docs/adr/0045-a-story-start-is-automatic-under-two-roofs.md).
 
-**A seam answers the two facts for one item**, so no session compares a column name by
-hand. It writes nothing and moves no card, and exit 0 means both facts hold:
+**A card arrives with its item, and a gate lists no board.** Ask the tracker for a labelled
+set and the card comes back in the same call, so the read is bounded by the work the
+maintainer approved. The whole-board list has one caller left, and that is
+[The board report](#the-board-report)
+([`docs/adr/0064-the-start-gate-reads-two-labelled-sets.md`](docs/adr/0064-the-start-gate-reads-two-labelled-sets.md)).
+
+**A seam answers the whole table for one item**, so no session compares a column name by
+hand. It writes nothing and moves no card, and exit 0 means the item may start:
 
 ```bash
 python3 <plugin root>/scripts/worker_state.py start --item <N> \
@@ -295,6 +301,27 @@ Three rules:
 - **A missing `## Project board` section means the board read asks nothing.** A repo with
   no board is a supported configuration, and the label alone is the whole gate. Never fail
   a spawn or a close over the board.
+
+### The board report
+
+**One command reads the whole board and names every gap between it and the labels.** A
+maintainer runs it, and no schedule does:
+
+```bash
+python3 <plugin root>/scripts/worker_state.py report --repo <owner>/<name> \
+  --board-project <the project number from the tracker file> \
+  --board-owner <the owner from the tracker file> \
+  --start-column '<the column name from the tracker file>'
+```
+
+It names four gaps: a card in the start column on an item with no `ready-for-agent` label, an
+item wearing that label whose card sits outside that column, an open item with no card, and
+a card whose work item is not open. It writes nothing and it moves no card.
+
+**Offer it when a queue read looks empty and the maintainer expected work to start.** A
+queue tick reads the two labelled sets, so it never sees the card of an item that wears no
+label. This verb is where a forgotten label is named
+([`docs/adr/0064-the-start-gate-reads-two-labelled-sets.md`](docs/adr/0064-the-start-gate-reads-two-labelled-sets.md)).
 
 ## Right model for the job
 
@@ -347,18 +374,28 @@ unattended loop.
 When the user asks **what next / what should I run / what's ready**: resolve the
 **ready queue** fresh (states change live, never cache).
 
-A work item is **ready** when it holds **two facts** and every item in its `## Blocked by`
-list is closed (closed = satisfied; only still-open deps block):
+**Read the item's kind first, then the fact that kind owns.** Every item in its
+`## Blocked by` list must also be closed (closed = satisfied; only still-open deps block):
 
-1. It carries the `ready-for-agent` label (from `issue-tracker.md`).
-2. Its board card sits in the start column, whose name that same file gives.
+| Item kind | What authorises it |
+|---|---|
+| `user-story` | its card sits in the start column. **No label, ever.** |
+| child of an authorised story | it wears `ready-for-agent`, and every `## Blocked by` edge is closed. **Its own column is not read.** |
+| standalone leaf | it wears `ready-for-agent`, **and** its own card sits in the start column. |
 
-**Both facts are necessary, and one fact on its own is not ready.** A card in the start
-column with no label is not ready, and a labelled item whose card sits in `Ready` is not
-ready either. So `Ready` is the maintainer's own lane, and no agent enters it. Where the
-tracker names no board, the label alone is the whole gate
-([Board status](#board-status)). Skip items already `in-progress` or in the review state —
-a worker owns them.
+The label comes from `issue-tracker.md`, and so does the name of the start column
+([Board status](#board-status)). Rationale:
+[`docs/adr/0062-a-story-card-authorises-its-run.md`](docs/adr/0062-a-story-card-authorises-its-run.md).
+
+**A story is a spec, and no worker implements one.** So one drag of the story card
+authorises the whole run, and every labelled child under it becomes startable. The label
+keeps its one meaning: a leaf a human approved.
+
+**On the standalone row both facts are necessary, and one fact on its own is not ready.** A
+card in the start column with no label is not ready, and a labelled item whose card sits in
+`Ready` is not ready either. So `Ready` is the maintainer's own lane, and no agent enters
+it. Where the tracker names no board, the label alone is the whole gate. Skip items already
+`in-progress` or in the review state — a worker owns them.
 
 Read the tracker CLI from `issue-tracker.md`, list open items, and for each read
 its `## Blocked by` / `## Parent` edges (the `to-tickets` template). A child that
@@ -368,14 +405,12 @@ start in parallel), then fill to at least 5 with the soonest-unblocked blocked
 items (fewest open deps first), noting what each waits on. Offer to spawn a worker
 for whichever the user picks.
 
-**One board read answers the second fact for every item.** It is the one call
-[Board status](#board-status) names, and it returns every card, so this pass makes it once
-and adds no second read. **This read writes nothing to the board.** There is no reconcile
-pass and no sync command, because the board is an input.
-
-**Report every item whose card sits in the start column with no label, capped at 5 rows.**
-A forgotten label otherwise reads as an empty queue, and nothing repairs the disagreement
-on its own. An item here is not an error and needs no comment.
+**Two labelled reads answer the card, and no board is listed.** A `user-story` and a
+`ready-for-agent` leaf are the only kinds a card can authorise, so ask for those two sets by
+label and each item's card arrives in the same call. The read is then bounded by the work
+the maintainer approved rather than by the size of the board
+([Board status](#board-status)). **These reads write nothing to the board.** There is no
+reconcile pass and no sync command, because the board is an input.
 
 **Report no item whose card sits outside the start column, whatever its label says.** The
 card is the narrow fact and the label is the wide one. So a groomed backlog carries the
@@ -383,6 +418,11 @@ label on most of its open items. Naming those made every read recite the backlog
 the one item the maintainer acts on. A labelled item parked before the start column is at
 rest, and the board already says so
 ([`docs/adr/0061-the-board-is-read-before-the-label.md`](docs/adr/0061-the-board-is-read-before-the-label.md)).
+
+**A forgotten label is named by the `report` verb and never by this read.** An item that
+wears no label is in neither labelled set, so this pass cannot see its card. Offer
+[The board report](#the-board-report) where a maintainer asks what is groomed or why an item
+never started.
 
 **Report every item at `to-review` beside the ready queue.** This pass already holds every
 open item's labels, so that list costs no second read. **No label records a merge ask.** The
@@ -412,9 +452,10 @@ python3 <plugin root>/scripts/worker_state.py queue --help
 argument surface are one home, that module docstring and its `--help`. **Never restate
 them here or in a report.** Read them when you need them.
 
-One tick reads every open work item, and it applies the two facts of the ready queue read
-to each one. It descends through any `user-story` parent to that parent's unblocked
-children. It counts the live **Story run**s and the live **Worker**s against the two roofs.
+One tick reads every open work item, plus the two labelled sets that carry the cards. Then
+it answers each item through the one table of the ready queue read above. It descends
+through any `user-story` parent to that parent's unblocked children. It counts the live
+**Story run**s and the live **Worker**s against the two roofs.
 Then it compares the declared **Touch set**s against every live worker, and starts **at
 most one** item. The spawn goes through `scripts/spawn_item.py`, so the tick composes no
 launch command.
@@ -432,6 +473,9 @@ launch command.
   closes**, story proof included. So a story with one child left still holds a slot.
 - **An overlap delays an item and cancels nothing.** The next tick with a free slot and no
   live overlap starts it. `parallel_check: off` compares nothing.
+- **A quiet tick names no forgotten label.** The tick reads the two labelled sets, so it
+  never sees the card of an unlabelled item. [The board report](#the-board-report) is where
+  that gap is named.
 
 **`work on N` stays the maintainer's own override, and it is a convenience rather than the
 mechanism** (["Work a #N"](#work-a-n--batch-spawn-its-unblocked-children),
