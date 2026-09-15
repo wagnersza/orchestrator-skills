@@ -1,14 +1,18 @@
 #!/usr/bin/env python3
-"""Answer what the **Worker watch** asks about one worker, in five subcommands.
+"""Answer what the **Worker watch** asks about one worker, in six subcommands.
 
 Three of them are the same question at a different moment. *Is a real agent at work in
 this worktree, and does that work need a decision now?* Readiness asks it before
 the first prompt. `phase` asks it and prints the answer. `tick` asks it and applies
 the answer. One seam answers all three, for every tool and every harness (ADR 0019).
 
-The other two ask the question that comes before all of them: *may this work item start
-at all?* `start` reads the fact one item's kind owns and prints the answer. `queue` reads
-it for every open item, and starts one (ADR 0045, narrowed by ADR 0062).
+Two more ask the question that comes before all of them: *may this work item start
+at all?* `start` reads the facts one item's kind owns and prints the answer. `queue` reads
+them for every open item, and starts one (ADR 0045, narrowed by ADR 0062 and ADR 0064).
+
+The sixth answers no question about a worker. `report` reads the whole board and names
+every gap between it and the labels. **It is the one whole-board read left, and a human
+runs it** (ADR 0064).
 
 **`ready`** — is a live agent process running with its working directory inside
 this worktree? Exit 0 ready, non-zero not:
@@ -30,8 +34,8 @@ question: *may this item start?* It writes nothing at all:
 | 0 | the fact this item's kind owns holds, so it may start |
 | 1 | a fact is missing — the printed line names which |
 
-**The gate reads the item's kind first, then asks the fact that kind owns** (ADR 0062,
-narrowing ADR 0045):
+**One table answers three rows, and it reads the item's kind first** (ADR 0062, narrowing
+ADR 0045). `start` and `queue` both call it, so the two agree on every row (ADR 0064):
 
 | Item kind | What authorises it |
 |---|---|
@@ -47,14 +51,19 @@ nothing either, so the column before the start column stays the maintainer's own
 
 **A missing fact is neither an error nor a refusal.** It is how a maintainer parks a
 groomed item, and a forgotten drag reads the same way. So the answer is a quiet code and
-a line that names which fact is missing. A queue report names every leaf card in the start
-column with no label, which is what keeps the disagreement visible. **It names no
-`user-story`**, because a story with no label is its correct resting state.
+a line that names which fact is missing. **A forgotten label is named by `report` and not
+by a tick** (ADR 0064): an item with no label is in neither labelled set, so a tick never
+sees its card.
+
+**A card arrives with its item, and no board is listed.** `start` reads the card of the one
+item it was handed. `queue` reads the two labelled sets, which are the only kinds a card can
+authorise. So the read is bounded by the work a maintainer approved rather than by the size
+of the board (ADR 0064).
 
 **With no board coordinates the label alone decides.** A tracker that names no board is a
 supported configuration, and its absence is never an error. The three coordinates are
 arguments, and the caller reads them from `docs/agents/issue-tracker.md`, so this seam
-holds no board of its own. **The board read needs `read:project` on the token and no write
+holds no board of its own. **The card read needs `read:project` on the token and no write
 scope**, because nothing here writes a card.
 
 **`queue`** — read the whole queue and start at most one work item. This is the whole
@@ -83,10 +92,11 @@ The tick reads in one order, and the order is the contract:
 |---|---|
 | 1 | one list read answers every open work item, its labels and its body |
 | 2 | the worker cap answers first, because it bounds every run at once |
-| 3 | the start gate answers each item by its kind, over one board read |
-| 4 | the candidates are the authorised leaves that nobody owns and nothing blocks |
-| 5 | `max_stories` delays a candidate that opens a new **Story run** |
-| 6 | the **Touch set** compare delays a candidate that overlaps a live **Worker** |
+| 3 | two labelled reads answer the card of every item that can start, and no board is listed |
+| 4 | one table answers each item by its kind, in two passes |
+| 5 | the candidates are the authorised items that nobody owns and nothing blocks |
+| 6 | `max_stories` delays a candidate that opens a new **Story run** |
+| 7 | the **Touch set** compare delays a candidate that overlaps a live **Worker** |
 
 **One item per tick, always.** A queue that holds ten startable items starts one. A tick
 that starts three is a tick that fills a disk while nobody watches. One item a minute is
@@ -119,6 +129,23 @@ quietly dropped from the queue (ADR 0046).
 **This subcommand writes no work-state label of its own.** The spawn is
 `--spawn-command`, and the seam behind it writes the one label at its own step, before
 the prompt reaches the worker. So a second tick cannot hand the same item out twice.
+
+**`report`** — read the whole board and name every gap between it and the labels. **A human
+runs this, and no schedule does** (ADR 0064):
+
+    python3 <plugin root>/scripts/worker_state.py report --repo OWNER/NAME \\
+        --board-project '<the number the tracker file gives>' \\
+        --board-owner '<the owner the tracker file gives>' \\
+        --start-column '<the column name the tracker file gives>'
+
+| Code | Meaning |
+|---|---|
+| 0 | the read answered, and the lines name the counts and each gap |
+| 1 | a read failed, and the one line names the cause |
+
+It names four gaps: a card in the start column on an item with no `ready-for-agent` label,
+an item wearing that label whose card sits outside that column, an open item with no card,
+and a card whose work item is not open. **It writes nothing and it moves no card.**
 
 **`phase`** — read three facts on disk and two on the tracker, and answer one
 question: *is a transition due for this work item?* This is the plan half of the
@@ -1439,14 +1466,14 @@ def claim(item, tracker):
     return EXIT_APPLIED, f"claim: applied: {swap_line(item, removed, added)}"
 
 
-# --- the start gate (ADR 0045, narrowed by ADR 0062) ------------------------
+# --- the start gate (ADR 0045, narrowed by ADR 0062 and ADR 0064) -----------
 
 # The three answers the start gate gives. `START` means the fact the item's kind owns
-# holds, so the item may start. That fact is the card for a `user-story`, and both facts
-# for a leaf. `ONE_FACT` is a leaf card in the start column with no label, which is a
-# forgotten label, and it is never an error. `NO_FACT` is every item whose card sits
-# outside that column. A groomed item rests there, and a parked one rests there too
-# (ADR 0061).
+# holds, so the item may start. That fact is the card for a `user-story`, the label for a
+# child of an authorised story, and both for a standalone leaf. `ONE_FACT` is a leaf card
+# in the start column with no label, which is a forgotten label, and it is never an error.
+# `NO_FACT` is every item whose card sits outside that column. A groomed item rests there,
+# and a parked one rests there too (ADR 0061).
 START = "start"
 ONE_FACT = "one-fact"
 NO_FACT = "no-fact"
@@ -1457,53 +1484,75 @@ NO_FACT = "no-fact"
 # same label is a nested spec, and the descent continues through it.
 USER_STORY = "user-story"
 
-# The phrase a failed board read puts in its detail line. A failed read counts no card, so
-# the gate answers `NO_FACT` and starts nothing. That answer is quiet by design, so the
-# queue report reads this phrase back to say the board went unread (ADR 0061).
-BOARD_UNREAD = "the board read failed"
+
+def board_column(board):
+    """The start column where the tracker names a whole board, and `""` where it does not.
+
+    **A tracker that names no board is a supported configuration**, and any one of the
+    three coordinates missing reads that way. So one derived value answers "is there a
+    column to compare", and the gate branches on that alone (ADR 0045).
+    """
+    project, owner, column = board
+    return column if project and owner and column else ""
 
 
-def start_gate(item, labels, tracker, project=0, owner="", column=""):
+def gate_cards(tracker, board):
+    """The `Status` name on the card of every item that can start, keyed by number.
+
+    **Two labelled reads, and no board list** (ADR 0064). A `user-story` and a
+    `ready-for-agent` leaf are the only kinds a card can authorise, so the adapter is asked
+    for those two sets by label and each item's card arrives in the same call. The read is
+    then bounded by the work a maintainer approved rather than by the size of the board.
+
+    A read that fails raises out of here, so a tick answers `unreadable` and never a quiet
+    line. A read that filled its page raises the same way.
+
+    With no board there is no card to read, so this answers an empty map and the label alone
+    decides.
+    """
+    if not board_column(board):
+        return {}
+    cards = {}
+    for label in (USER_STORY, READY_FOR_AGENT):
+        for record in tracker.labelled_items(label):
+            cards[record["number"]] = record["board"]
+    return cards
+
+
+def start_gate(item, labels, status, column="", story=0):
     """`(answer, detail)` for whether one work item may start: the fact its kind owns.
 
-    Three answers and no fourth: `START`, `ONE_FACT`, `NO_FACT`.
+    **One table answers the three rows of ADR 0062, and it reads the item's kind first**
+    (ADR 0064). `start --item N` and a queue tick both call this, with the same facts, so
+    the two can no longer disagree about one item.
 
-    **The gate reads the item's kind first, then asks the fact that kind owns** (ADR 0062).
-    A `user-story` is a spec, and no worker implements one. So its card in `column` is the
-    whole gate, and it needs no `ready-for-agent` label ever. A maintainer drags one story
-    card to authorise the whole run. The label then keeps its one meaning: a leaf a human
-    approved. **For a leaf both facts are still necessary** (ADR 0045), so the set of
-    standalone items that start does not move.
+    `status` is the `Status` name on this item's own card, and `story` is the authorised
+    `user-story` above it, or 0. Both arrive as arguments, so this function makes no read.
 
-    **The card is read first, and the label answers only for a card in `column`** (ADR
-    0061). The board is the narrower fact of the two, and a label outside `column` is the
-    ordinary resting state of a groomed backlog.
+    | Item kind | What authorises it |
+    |---|---|
+    | `user-story` | its card sits in `column`. **No label, ever.** |
+    | child of an authorised story | it wears `ready-for-agent`. **Its own column is not read.** |
+    | standalone leaf | it wears `ready-for-agent`, **and** its own card sits in `column`. |
 
-    - **`START`** — a `user-story` whose card sits in `column`, whatever its labels say, or
-      a leaf that carries the ready state with its card in `column`.
-    - **`ONE_FACT`** — a **leaf** whose card sits in `column` and that carries no label.
-      That is a forgotten label, and it is the one disagreement a maintainer repairs. This
-      is **never an error and never a refusal**. A queue report names every item here.
-      **A `user-story` never answers this.** A story with no label is its correct resting
-      state, so a report that named it printed noise on every tick.
-    - **`NO_FACT`** — its card sits outside `column`, whatever the label says. A groomed
-      item rests here, and so does one a maintainer parked with the label on. A parked
-      story authorises nothing from here. None of these needs reporting, because the board
-      already says where each one sits.
+    **A story is a spec, and no worker implements one.** So one drag of the story card
+    authorises the whole run, and the label keeps its one meaning: a leaf a human approved.
+    **On the standalone row the card is read first** (ADR 0061), because the board is the
+    narrower fact and a label outside `column` is the resting state of a groomed backlog.
 
-    **With no coordinates the label alone decides.** A tracker that names no board is a
-    supported configuration, so the board read asks nothing and its absence is never an
-    error. The label then answers `START` on its own, and one fact is the whole gate. A
-    story authorises nothing through a column that does not exist.
+    Three answers and no fourth:
 
-    **A board read that fails counts no card**, and it is no error either. Nothing starts
-    on a card this seam cannot read, whatever the label says, so the answer is `NO_FACT`
-    and the cause rides the detail line. A queue report reads `BOARD_UNREAD` back out of
-    that line, so one failed read still names itself on a quiet tick (ADR 0061).
+    - **`START`** — the fact this item's kind owns holds.
+    - **`ONE_FACT`** — a **standalone leaf** whose card sits in `column` and that carries no
+      label. That is a forgotten label, and it is the one disagreement a maintainer repairs.
+      This is **never an error and never a refusal**. A queue tick cannot reach it, because
+      an unlabelled item is in neither labelled set. `report` names it instead (ADR 0064).
+    - **`NO_FACT`** — every other shape: a parked story, an unlabelled child, and a leaf
+      whose card sits outside `column`. None of these needs reporting on a tick, because
+      the board already says where each one sits.
 
-    The board read goes through the same **Tracker adapter** the labels came from, so the
-    two reads can never name different repositories. It needs `read:project` on the token
-    and no write scope, because nothing writes a card (ADR 0054).
+    **With no column the label alone decides.** A story then authorises nothing through a
+    column that does not exist, and a labelled leaf starts on one fact.
     """
     labelled = READY_FOR_AGENT in labels
     wearing = (
@@ -1511,25 +1560,14 @@ def start_gate(item, labels, tracker, project=0, owner="", column=""):
         if labelled
         else f"work item #{item} carries no {READY_FOR_AGENT} label"
     )
-    if not (project and owner and column):
+    if not column:
         no_board = "the tracker names no board, so the label alone is the whole gate"
         if labelled:
             return START, f"{wearing}, and {no_board}"
         return NO_FACT, f"{wearing}, and {no_board}. So it starts nothing"
 
-    try:
-        status = tracker.board_status(item, project, owner)
-    except (TrackerError, OSError, json.JSONDecodeError) as exc:
-        # One line is printed, and the standard error of a failed command can hold many,
-        # so the cause collapses to one.
-        cause = " ".join(str(exc).split())
-        return NO_FACT, (
-            f"{wearing}, and {BOARD_UNREAD}, so no card is counted and this item "
-            f"starts nothing: {cause}"
-        )
-
     carded = status == column
-    sits = f"its card sits in the {column!r} column of project {project}"
+    sits = f"its card sits in the {column!r} column"
     elsewhere = (
         f"its card sits in {status!r} rather than {column!r}"
         if status
@@ -1542,6 +1580,11 @@ def start_gate(item, labels, tracker, project=0, owner="", column=""):
         if carded:
             return START, f"{spec}, and {sits}, so it authorises its own children"
         return NO_FACT, f"{spec}, and {elsewhere}, so it authorises nothing"
+    if story:
+        under = f"work item #{story} is an authorised {USER_STORY} above it"
+        if labelled:
+            return START, f"{wearing}, and {under}. Its own column is not read"
+        return NO_FACT, f"{wearing}, and {under}. So this child stays stopped"
     if not carded:
         return NO_FACT, f"{wearing}, and {elsewhere}"
     if labelled:
@@ -1556,18 +1599,44 @@ def start(item, tracker, project=0, owner="", column=""):
     owns holds, and every other answer is the quiet code. So a caller reads one bit, and
     the printed line names which fact is missing.
 
-    **A failed read of the item is quiet too, and it is never a start.** A read that failed
-    cannot say the item carries the ready state, so nothing starts on it.
+    **It reads the same table the tick reads, so the two agree on every row** (ADR 0064).
+    That costs three reads: the labels of this item, this item's own card, and the open
+    items for the story tree above it. This is a command a human runs, so no schedule pays
+    for them.
+
+    **The item's own card is one read and never a board list.** A human can name an item
+    that wears no label at all, and such an item is in neither labelled set.
+
+    **A failed read is quiet too, and it is never a start.** A read that failed cannot say
+    the item carries the ready state, so nothing starts on it.
+
+    The two story helpers live with the queue tick below, because the tick is their other
+    caller and one definition of an authorised story serves both.
     """
+    board = (project, owner, column)
     try:
         labels, _ = tracker.item_facts(item)
+        gate_column = board_column(board)
+        story = 0
+        status = tracker.item_card(item) if gate_column else ""
+        if gate_column:
+            items = tracker.open_items()
+            by_number = {one["number"]: one for one in items}
+            _, _, authorised = story_gates(
+                items,
+                gate_cards(tracker, board),
+                by_number,
+                children_of(items),
+                gate_column,
+            )
+            story = authorised_above(item, by_number, authorised)
     except (TrackerError, OSError, json.JSONDecodeError) as exc:
         cause = " ".join(str(exc).split())
         return EXIT_NOTHING, (
             f"unreadable: the labels on work item #{item} are unreadable, so this gate "
             f"reads no fact and nothing starts: {cause}"
         )
-    answer, detail = start_gate(item, labels, tracker, project, owner, column)
+    answer, detail = start_gate(item, labels, status, gate_column, story)
     return (EXIT_DUE if answer == START else EXIT_NOTHING), f"{answer}: {detail}"
 
 
@@ -1759,6 +1828,50 @@ def story_is_live(number, by_number, children):
     )
 
 
+def authorised_above(number, by_number, authorised):
+    """The nearest ancestor of one work item that authorises a run, or 0.
+
+    **A nested story is walked through, authorised or not** (ADR 0062). A story a
+    maintainer dragged authorises every labelled leaf under it at any depth, so the walk
+    stops at the first ancestor in `authorised` rather than at the first `user-story`.
+
+    `seen` guards a body that names an ancestor of its own, so a cycle in the `## Parent`
+    edges cannot become a cycle here.
+    """
+    seen = {number}
+    at = parent_of((by_number.get(number) or {}).get("body", ""))
+    while at and at not in seen:
+        seen.add(at)
+        if at in authorised:
+            return at
+        at = parent_of((by_number.get(at) or {}).get("body", ""))
+    return 0
+
+
+def story_gates(items, cards, by_number, children, column):
+    """The gate answer of every `user-story`, the live runs, and the authorised set.
+
+    Returns `(the gate answer per story, the live Story run numbers, the authorised ones)`.
+
+    **A story's own row reads no story above it**, so this pass runs before the rest of the
+    queue and its answers feed the child row (ADR 0064). A story authorises its children
+    where its own card sits in the start column, or where its **Story run** is already live.
+    A live run keeps authorising, because act one already happened for that story.
+    """
+    gates = {
+        item["number"]: start_gate(
+            item["number"], item["labels"], cards.get(item["number"], ""), column
+        )
+        for item in items
+        if USER_STORY in item["labels"]
+    }
+    live = {number for number in gates if story_is_live(number, by_number, children)}
+    authorised = {
+        number for number, (answer, _) in gates.items() if answer == START
+    } | live
+    return gates, live, authorised
+
+
 def startable(number, by_number, open_numbers):
     """Whether one open work item is a leaf this tick can start now.
 
@@ -1789,87 +1902,49 @@ def overlapping_worker(item, live, parallel_check):
     return 0
 
 
-def queue_report(gates):
-    """The parked items a queue read names, as one clause of the line a tick prints.
+def queue_gates(items, cards, by_number, children, column):
+    """The gate answer for every open work item, and the live **Story run**s.
 
-    A leaf whose card sits in the start column with no label is a forgotten label. It
-    otherwise reads as an empty queue, and nothing repairs the disagreement on its own. So
-    the count and the first numbers ride the line. **It is never an error and never a
-    comment**, and the cap is the one every other report takes (ADR 0045).
+    Returns `(the answer per item number, the live Story run numbers)`.
 
-    **A card outside the start column is not named here, whatever its label says** (ADR
-    0061). That is the resting state of a groomed backlog, so naming it made every tick
-    recite the backlog instead of the one item a maintainer acts on.
-
-    **A `user-story` is never named here either** (ADR 0062). A story with no label is its
-    correct resting state, and its card in the start column is the whole gate. So the gate
-    answers `START` for a story and never `ONE_FACT`. This function reads those answers, so
-    it needs no second read of the kind.
-
-    A failed board read answers `NO_FACT` for every item, so it names itself instead. One
-    clause says so, because a tick that cannot see the board otherwise prints the same
-    quiet line as a tick with nothing to do.
+    **One table answers all three rows, in two passes** (ADR 0064). The first pass answers
+    every `user-story`, because a story's row reads no story above it. The second pass
+    answers every other item, and it hands each one the authorised story above it. So a
+    child of an authorised story is answered by the same function `start --item N` calls,
+    and the two can no longer disagree.
     """
-    if any(BOARD_UNREAD in detail for _, detail in gates.values()):
-        return f". {BOARD_UNREAD}, so no card was counted on this tick"
-    parked = sorted(
-        number for number, (answer, _) in gates.items() if answer == ONE_FACT
-    )
-    if not parked:
-        return ""
-    named = ", ".join(f"#{number}" for number in parked[:REPORT_CAP])
-    return f". {len(parked)} item(s) sit in the start column with no label: {named}"
+    gates, live, authorised = story_gates(items, cards, by_number, children, column)
+    for number, item in by_number.items():
+        if number in gates:
+            continue
+        gates[number] = start_gate(
+            number,
+            item["labels"],
+            cards.get(number, ""),
+            column,
+            authorised_above(number, by_number, authorised),
+        )
+    return gates, live
 
 
-def queue_candidates(items, gates, by_number, children):
-    """Every work item this tick can start, lowest number first, and the live stories.
+def queue_candidates(gates, by_number):
+    """Every work item this tick can start, lowest number first.
 
-    Returns `(the candidate numbers, the live Story run numbers)`.
-
-    Two roads reach a candidate, and both end at a leaf:
-
-    - **A standalone leaf that holds both facts of a start gate is a candidate on its
-      own**, and that path does not change (ADR 0045).
-    - **A `user-story` parent whose card sits in the start column authorises its whole
-      run**, and it is never spawned for the work itself. The tick descends to its
-      children instead, and a descended child is a candidate where **it wears
-      `ready-for-agent`**. Its own card is never read, so the maintainer drags one story
-      card and no child card (ADR 0062).
+    A candidate is an item the gate answered `START` for that nobody owns and nothing
+    blocks. Both roads to a `START` are in the one table: a standalone leaf holding both
+    facts, and a labelled child of an authorised story (ADR 0064).
 
     **A child with no label stays stopped**, whatever its parent holds. That is how a
     maintainer parks one ticket under a running story, and the tick writes the label on no
     child. So the rule that only a human writes that label survives word for word, and it
-    now gates the descent too.
-
-    **A live Story run keeps authorising its children**, because act one already happened
-    for that story. Each of those children still needs its own label.
+    gates the descent too.
     """
-    live_stories = {
-        item["number"]
-        for item in items
-        if USER_STORY in item["labels"]
-        and story_is_live(item["number"], by_number, children)
-    }
-    authorised = {
-        item["number"]
-        for item in items
-        if USER_STORY in item["labels"]
-        and (gates[item["number"]][0] == START or item["number"] in live_stories)
-    }
-    from_stories = {
-        leaf
-        for story in authorised
-        for leaf in descendants(story, children)
-        if READY_FOR_AGENT in (by_number.get(leaf) or {}).get("labels", ())
-    }
     open_numbers = set(by_number)
-    candidates = [
+    return [
         number
         for number in sorted(open_numbers)
-        if (number in from_stories or gates[number][0] == START)
-        and startable(number, by_number, open_numbers)
+        if gates[number][0] == START and startable(number, by_number, open_numbers)
     ]
-    return candidates, live_stories
 
 
 def queue_plan(tracker, board, roofs, parallel_check=TOUCHES):
@@ -1884,15 +1959,21 @@ def queue_plan(tracker, board, roofs, parallel_check=TOUCHES):
 
     1. One list read answers every open work item, its labels and its body.
     2. The worker cap answers first, because it bounds every run at once.
-    3. The start gate answers each item by its kind, over one board read.
-    4. The candidates are the authorised leaves that nobody owns and nothing blocks: a
-       labelled child of an authorised story, or a standalone leaf holding both facts.
-    5. `max_stories` delays a candidate that opens a new **Story run**.
-    6. The **Touch set** compare delays a candidate that overlaps a live **Worker**.
+    3. Two labelled reads answer the card of every item that can start. **No board is
+       listed** (ADR 0064).
+    4. One table answers each item by its kind, in two passes.
+    5. The candidates are the items the table answered `START` for that nobody owns and
+       nothing blocks.
+    6. `max_stories` delays a candidate that opens a new **Story run**.
+    7. The **Touch set** compare delays a candidate that overlaps a live **Worker**.
 
-    **A delay at step 5 or step 6 cancels nothing.** The next tick with a free slot and
+    **A delay at step 6 or step 7 cancels nothing.** The next tick with a free slot and
     no live overlap starts that item, so no item is quietly dropped from the queue
     (ADR 0046).
+
+    **A read that failed raises out of here.** So a tick that cannot see the queue or the
+    cards answers `unreadable`, and it never prints the quiet line of a tick with nothing
+    to do.
     """
     max_stories, max_workers = roofs
     items = tracker.open_items()
@@ -1904,16 +1985,18 @@ def queue_plan(tracker, board, roofs, parallel_check=TOUCHES):
             f"nothing: {len(live)} live worker(s) against a worker cap of "
             f"{max_workers}, so this tick starts nothing"
         )
-    gates = {
-        item["number"]: start_gate(item["number"], item["labels"], tracker, *board)
-        for item in items
-    }
-    candidates, live_stories = queue_candidates(items, gates, by_number, children)
-    report = queue_report(gates)
+    gates, live_stories = queue_gates(
+        items,
+        gate_cards(tracker, board),
+        by_number,
+        children,
+        board_column(board),
+    )
+    candidates = queue_candidates(gates, by_number)
     if not candidates:
         return None, (
             f"nothing: none of the {len(items)} open work item(s) is startable on this "
-            f"tick{report}"
+            f"tick"
         )
     waiting = []
     for number in candidates:
@@ -1933,7 +2016,7 @@ def queue_plan(tracker, board, roofs, parallel_check=TOUCHES):
             f"{max_stories} story run(s) live"
         )
     delayed = ". ".join(waiting[:REPORT_CAP])
-    return None, f"nothing: every candidate waits — {delayed}{report}"
+    return None, f"nothing: every candidate waits — {delayed}"
 
 
 def role_for(body):
@@ -2026,6 +2109,104 @@ def queue(tracker, board, roofs, spawn_command, parallel_check=TOUCHES):
         )
         return EXIT_REFUSED, f"{line} — {refusal}"
     return EXIT_APPLIED, f"{line} — applied: the spawn ran: {command}"
+
+
+# --- the board report (ADR 0064) --------------------------------------------
+
+
+def gap_clause(what, numbers):
+    """One gap of a board report as one line, or nothing where the gap is empty.
+
+    The cap is the one every other report takes, and the count is the whole count. So a
+    reader sees how large the gap is even where the line names five of it.
+    """
+    if not numbers:
+        return []
+    named = ", ".join(f"#{number}" for number in sorted(numbers)[:REPORT_CAP])
+    return [f"{len(numbers)} {what}: {named}"]
+
+
+def board_report(tracker, board):
+    """`(exit code, the lines to print)`: the whole board, and every gap in it.
+
+    **This is the one whole-board read left, and a human runs it** (ADR 0064). No schedule
+    reaches it. The tick reads two labelled sets instead, so it cannot see an item that
+    wears no label at all, and this verb is where such an item is named.
+
+    Four gaps, and each one is a disagreement between the board and the labels:
+
+    - a card in the start column on an item with no `ready-for-agent` label, which is a
+      forgotten label
+    - an item wearing that label whose card sits outside the start column, which is a
+      groomed item at rest or a forgotten drag
+    - an open work item with no card at all
+    - a card whose work item is not open, which is a card the board's own workflow left
+      behind
+
+    **It writes nothing and it moves no card.** The board is an input, so a gap is a line a
+    maintainer reads and never a write this verb makes (ADR 0054).
+
+    Exit 0 means the read answered. A read that failed is the quiet code with one line, the
+    same as every other read in this seam.
+    """
+    project, owner, column = board
+    try:
+        items = tracker.open_items()
+        cards = tracker.board_cards(project, owner) if column and project else {}
+    except (TrackerError, OSError, json.JSONDecodeError) as exc:
+        cause = " ".join(str(exc).split())
+        return EXIT_NOTHING, (
+            f"unreadable: the board or the open work items are unreadable, so this "
+            f"report names no gap: {cause}"
+        )
+    by_number = {item["number"]: item for item in items}
+    if not column:
+        return EXIT_COMPLETE, "\n".join(
+            [
+                f"{len(items)} open work item(s), and the tracker names no board, so the "
+                f"{READY_FOR_AGENT} label is the whole gate",
+                *gap_clause(
+                    f"item(s) carry the {READY_FOR_AGENT} label",
+                    [
+                        number
+                        for number, item in by_number.items()
+                        if READY_FOR_AGENT in item["labels"]
+                    ],
+                ),
+            ]
+        )
+    lines = [
+        f"{len(cards)} live card(s) on project {project} of {owner!r}, "
+        f"{len(items)} open work item(s), and {column!r} is the start column"
+    ]
+    lines += gap_clause(
+        f"card(s) sit in {column!r} with no {READY_FOR_AGENT} label",
+        [
+            number
+            for number, status in cards.items()
+            if status == column
+            and number in by_number
+            and READY_FOR_AGENT not in by_number[number]["labels"]
+            and USER_STORY not in by_number[number]["labels"]
+        ],
+    )
+    lines += gap_clause(
+        f"item(s) carry the {READY_FOR_AGENT} label with a card outside {column!r}",
+        [
+            number
+            for number, item in by_number.items()
+            if READY_FOR_AGENT in item["labels"] and cards.get(number, "") != column
+        ],
+    )
+    lines += gap_clause(
+        "open item(s) have no card at all",
+        [one for one in by_number if one not in cards],
+    )
+    lines += gap_clause(
+        "card(s) belong to an item that is not open",
+        [one for one in cards if one not in by_number],
+    )
+    return EXIT_COMPLETE, "\n".join(lines)
 
 
 # --- the two subcommands over that one plan ---------------------------------
@@ -2285,7 +2466,9 @@ def main(argv=None):
             "may this work item start at all. It reads the item's kind first, then the "
             "fact that kind owns: the board card for a user-story, and both facts for a "
             "leaf. It writes nothing. The queue subcommand asks the same question of "
-            "every open item, and starts at most one of them. "
+            "every open item, through the same table, and starts at most one of them. "
+            "The report subcommand reads the whole board and names every gap between it "
+            "and the labels, which is the one whole-board read a human runs. "
             "The phase subcommand computes and writes nothing. The tick "
             "subcommand computes through the same code path and then applies the one "
             "transition it computed. A merged pull request is one of those transitions, "
@@ -2403,6 +2586,24 @@ def main(argv=None):
         "different classes. So this seam holds no spawn flag of its own and composes no "
         "launch command",
     )
+
+    reporter = subcommands.add_parser(
+        "report",
+        help="read the whole board and name every gap between it and the labels. Exit 0 "
+        "means the read answered. It writes nothing at all",
+        description=(
+            "The one whole-board read left, and a human runs it. No schedule reaches it. "
+            "A queue tick reads two labelled sets instead, so it cannot see an item that "
+            "wears no label at all, and this verb is where such an item is named. It "
+            "names four gaps: a card in the start column on an item with no "
+            "ready-for-agent label, an item wearing that label whose card sits outside "
+            "that column, an open item with no card, and a card whose item is not open. "
+            "It writes nothing and it moves no card, because the board is an input. Exit "
+            "0 means the read answered, and exit 1 means a read failed."
+        ),
+    )
+    add_tracker_arguments(reporter)
+    add_board_arguments(reporter)
 
     predicate = subcommands.add_parser(
         "phase",
@@ -2522,6 +2723,17 @@ def main(argv=None):
             (args.max_stories, args.max_workers),
             args.spawn_command,
             parallel_check=args.parallel_check,
+        )
+        print(line)
+        return code
+
+    # **`report` reads no worker either**, and it is the one subcommand a human runs by
+    # hand. So it takes none of the four worker flags and it returns before the validation
+    # that requires them.
+    if args.command == "report":
+        code, line = board_report(
+            tracker,
+            (args.board_project, args.board_owner, args.start_column),
         )
         print(line)
         return code
