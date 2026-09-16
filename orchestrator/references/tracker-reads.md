@@ -69,6 +69,25 @@ glab api --hostname <host> "projects/<owner>%2F<name>/issues?state=all&per_page=
 raise the cap or add `--paginate` to the `glab` read. `--paginate` prints one array per
 page, so `jq -s add` joins them first.
 
+## Check a list read against its own page
+
+**A list read that answers as many rows as it asked for has told you nothing.** The answer
+can be one page of a longer list. So no row on it can be counted, and a row that is absent
+from it is not absent from the tracker. A gate that reads such a page answers "no" to a
+question it never saw.
+
+**Compare the count against the cap, and stop where the two are equal.** Then raise the cap
+and read again:
+
+```bash
+rows=$(<the read> | jq 'length')
+[ "$rows" -lt <the cap> ] || { printf 'the read filled its page of %s rows\n' "$rows"; exit 1; }
+```
+
+`scripts/tracker.py` does this for every list read it makes, in `check_page`, and its
+message names the constant to raise
+([ADR 0064](../docs/adr/0064-the-start-gate-reads-two-labelled-sets.md)).
+
 ## Every open item with its blockers
 
 Every open item, its labels, and the items it waits on. This is the **Ready queue**
@@ -88,10 +107,9 @@ labels of this answer against one of three rows:
 | child of an authorised story | it wears `ready-for-agent`, and every `## Blocked by` edge is closed. **Its own column is not read.** |
 | standalone leaf | it wears `ready-for-agent`, **and** its own card sits in the start column. |
 
-The board read that answers the card is the per-repo one in
-[`../../docs/agents/issue-tracker.md`](../../docs/agents/issue-tracker.md), because the
-coordinates are per-repo data. Where that file names no board, the label alone is the whole
-gate ([`../docs/adr/0062-a-story-card-authorises-its-run.md`](../docs/adr/0062-a-story-card-authorises-its-run.md)).
+The card that answers the first and third row comes with the item, through the read in the
+next section. Where the tracker names no board, the label alone is the whole gate
+([`../docs/adr/0062-a-story-card-authorises-its-run.md`](../docs/adr/0062-a-story-card-authorises-its-run.md)).
 
 ```bash
 gh issue list --repo <owner>/<name> --state open --limit 200 \
@@ -111,6 +129,44 @@ glab api --hostname <host> "projects/<owner>%2F<name>/issues?state=opened&per_pa
 The numbers come from the `## Blocked by` section of the body. So a `#<n>` that the
 prose of that section mentions reads as an edge too. Where a count decides something,
 read the section itself.
+
+## Every open item wearing one label, with its board card
+
+Every open item that carries one label, and the `Status` name on each of those items' cards,
+in one command. This is the read the start gate makes. Where the flows need it: **"What
+next?"** and **The queue tick**.
+
+**Ask for the labelled set, and never for the whole board.** A `user-story` and a
+`ready-for-agent` leaf are the only kinds a card can authorise, so two reads of this shape
+answer every card a gate needs. The read is then bounded by the work the maintainer
+approved, and a board that grows changes nothing
+([ADR 0064](../docs/adr/0064-the-start-gate-reads-two-labelled-sets.md)).
+
+```bash
+gh issue list --repo <owner>/<name> --state open --label '<label>' --limit 200 \
+  --json number,title,labels,body,projectItems \
+  --jq '[.[] | {number, title, labels: [.labels[].name],
+                status: (.projectItems[0].status.name // "")}]'
+```
+
+```bash
+glab api --hostname <host> \
+  "projects/<owner>%2F<name>/issues?state=opened&per_page=100&labels=<label>" \
+  | jq '[.[] | {iid, title, labels}]'
+```
+
+**`projectItems` names each board by title and never by number.** So the two board
+coordinates cannot pick one card out of two, and the first card that carries a status is the
+answer. One board per repo is the shape
+[`../../docs/agents/issue-tracker.md`](../../docs/agents/issue-tracker.md) describes.
+
+**GitLab has no project board here**, so the `glab` form asks for no card and every card
+reads as an empty name. The label is then the whole gate there.
+
+**Which half ran.** The `gh` form ran against this repo, with `<label>` as `user-story`. It
+answered four items, and each one carried its own `Status` name. The `glab` form ran against
+no live GitLab project. Read it as the API shape that the other `glab api` reads in this file
+already prove.
 
 ## The count of comments that carry a literal
 

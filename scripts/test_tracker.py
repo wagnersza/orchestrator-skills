@@ -138,7 +138,7 @@ class TrackerTest(unittest.TestCase):
             one.issue(ITEM),
             {"state": "OPEN", "labels": ["in-progress"]},
         )
-        self.assertEqual(one.board_status(ITEM, 6, "someone"), "To do")
+        self.assertEqual(one.board_cards(6, "someone"), {ITEM: "To do"})
         self.assertEqual(
             one.pull_request(PR), {"state": "MERGED", "merge_commit": "a1b2c3d"}
         )
@@ -152,7 +152,7 @@ class TrackerTest(unittest.TestCase):
 
         self.assertEqual(one.item_facts(ITEM), ([], []))
         self.assertEqual(one.issue(ITEM), {"state": None, "labels": []})
-        self.assertEqual(one.board_status(ITEM, 6, "someone"), "")
+        self.assertEqual(one.board_cards(6, "someone"), {})
         self.assertEqual(one.pull_request(PR), {"state": None, "merge_commit": ""})
         self.assertEqual(
             one.pull_request_for_branch(BRANCH), {"number": 0, "state": ""}
@@ -476,7 +476,7 @@ class TrackerTest(unittest.TestCase):
 
         one = tracker.Tracker(cli=tracker.GLAB, host=HOST, repo=REPO)
 
-        self.assertEqual(one.board_status(ITEM, 6, "someone"), "In review")
+        self.assertEqual(one.board_cards(6, "someone"), {ITEM: "In review"})
         self.assertEqual(
             log.read_text().splitlines(),
             [
@@ -496,7 +496,7 @@ class TrackerTest(unittest.TestCase):
 
         one = tracker.Tracker()
 
-        self.assertEqual(one.board_status(past, 6, "someone"), f"lane {past}")
+        self.assertEqual(one.board_cards(6, "someone")[past], f"lane {past}")
         # One call, and the filter is what answered: an unfiltered read of this board is
         # truncated to the limit, and the card sits past it.
         ran = log.read_text().splitlines()
@@ -513,9 +513,10 @@ class TrackerTest(unittest.TestCase):
         )
 
         with self.assertRaises(tracker.TrackerError) as raised:
-            tracker.Tracker().board_status(ITEM, 6, "someone")
+            tracker.Tracker().board_cards(6, "someone")
 
-        self.assertIn("filled its limit", str(raised.exception))
+        self.assertIn("no row can be counted", str(raised.exception))
+        self.assertIn("Raise BOARD_LIMIT", str(raised.exception))
 
     def test_a_card_for_another_item_is_not_this_item_s_card(self):
         self.fake_cli(
@@ -525,19 +526,159 @@ class TrackerTest(unittest.TestCase):
             ),
         )
 
-        self.assertEqual(tracker.Tracker().board_status(ITEM, 6, "someone"), "")
+        cards = tracker.Tracker().board_cards(6, "someone")
+
+        self.assertEqual(cards, {99: "In review"})
+        self.assertEqual(cards.get(ITEM, ""), "")
 
     def test_the_adapter_holds_a_board_read_and_no_board_write(self):
         """The board is an input, so the two methods that only wrote a card are gone.
 
         `board_card` answered the id a write addresses, and `card_argv` was the write.
-        Neither one has a caller now (ADR 0054).
+        Neither one has a caller now (ADR 0054). `board_status` answered one item out of a
+        board list, and the gate reads the card with the item now (ADR 0064).
         """
         one = tracker.Tracker()
 
-        self.assertTrue(hasattr(one, "board_status"))
-        for name in ("board_card", "card_argv"):
+        self.assertTrue(hasattr(one, "board_cards"))
+        for name in ("board_card", "card_argv", "board_status"):
             self.assertFalse(hasattr(one, name), f"{name} is still on the adapter")
+
+    # --- a labelled set carries its own cards (ADR 0064)
+
+    def test_a_labelled_read_answers_the_set_and_each_card_in_one_call(self):
+        """The start gate needs the card of a `user-story` and of a labelled leaf, and of
+        no other item. So one command asks for the set by label and the card rides each
+        item. The board is never listed for this."""
+        log = self.fake_cli(
+            "gh",
+            answer=json.dumps(
+                [
+                    {
+                        "number": ITEM,
+                        "title": "a leaf",
+                        "labels": [{"name": "ready-for-agent"}],
+                        "body": "## Parent\n\n#7\n",
+                        "projectItems": [
+                            {"status": {"name": "To do"}, "title": "the board"}
+                        ],
+                    },
+                    {
+                        "number": 9,
+                        "title": "a carded draft",
+                        "labels": [{"name": "ready-for-agent"}],
+                        "body": "",
+                        "projectItems": [],
+                    },
+                ]
+            ),
+        )
+
+        found = tracker.Tracker(repo=REPO).labelled_items("ready-for-agent")
+
+        # Lowest number first, and every fact of the record shape plus the card.
+        self.assertEqual([one["number"] for one in found], [9, ITEM])
+        self.assertEqual(found[1]["board"], "To do")
+        self.assertEqual(found[1]["labels"], ["ready-for-agent"])
+        self.assertEqual(found[1]["title"], "a leaf")
+        self.assertIn("## Parent", found[1]["body"])
+        # An item with no card at all reads as an item with no card, and never as an error.
+        self.assertEqual(found[0]["board"], "")
+        self.assertEqual(
+            log.read_text().splitlines(),
+            [
+                f"issue list --state open --label ready-for-agent --limit "
+                f"{tracker.ITEM_LIMIT} --json {tracker.CARDED_FIELDS} --repo {REPO}"
+            ],
+        )
+
+    def test_a_labelled_set_that_fills_the_page_refuses_and_names_the_limit(self):
+        """A read that cannot answer must never answer "no". A set as large as the limit can
+        be one page of a longer set, so no item in it can be counted and no absent item is
+        absent. The refusal names the count, the limit and the constant to raise."""
+        self.fake_cli(
+            "gh",
+            answer=json.dumps(
+                [
+                    {"number": number, "title": "one", "labels": [], "body": ""}
+                    for number in range(tracker.ITEM_LIMIT)
+                ]
+            ),
+        )
+
+        with self.assertRaises(tracker.TrackerError) as raised:
+            tracker.Tracker(repo=REPO).labelled_items("ready-for-agent")
+
+        message = str(raised.exception)
+        self.assertIn(f"{tracker.ITEM_LIMIT} row(s)", message)
+        self.assertIn(f"limit of {tracker.ITEM_LIMIT}", message)
+        self.assertIn("Raise ITEM_LIMIT", message)
+
+    def test_an_open_items_read_that_fills_the_page_refuses_the_same_way(self):
+        """One helper checks every list read here, so the open items refuse on the same
+        rule as a labelled set. A queue that reads one page of a longer queue starts the
+        oldest item of that page and calls the rest closed."""
+        self.fake_cli(
+            "gh",
+            answer=json.dumps(
+                [
+                    {"number": number, "title": "one", "labels": [], "body": ""}
+                    for number in range(tracker.ITEM_LIMIT)
+                ]
+            ),
+        )
+
+        with self.assertRaises(tracker.TrackerError) as raised:
+            tracker.Tracker(repo=REPO).open_items()
+
+        self.assertIn("Raise ITEM_LIMIT", str(raised.exception))
+
+    def test_a_labelled_read_on_the_other_tracker_asks_for_no_card(self):
+        """A project board is one tracker's own surface. So the other tracker's read goes
+        through its API with a label filter, and every card reads as an empty name."""
+        log = self.fake_cli(
+            "glab",
+            answer=json.dumps(
+                [{"iid": ITEM, "title": "a leaf", "labels": ["user-story"]}]
+            ),
+        )
+
+        found = tracker.Tracker(cli=tracker.GLAB, host=HOST, repo=REPO).labelled_items(
+            "user-story"
+        )
+
+        self.assertEqual(found, [{**found[0], "board": ""}])
+        self.assertEqual(found[0]["number"], ITEM)
+        self.assertEqual(
+            log.read_text().splitlines(),
+            [
+                f"api projects/team%2Fthing/issues?state=opened"
+                f"&per_page={tracker.PAGE_SIZE}&labels=user-story --hostname {HOST}"
+            ],
+        )
+
+    def test_one_item_s_own_card_is_one_call_and_never_a_board_list(self):
+        """`start --item N` answers about an item that can wear no label at all, so its
+        card cannot arrive through a labelled set. One item read answers it, and a
+        whole-board list to read one card is the read ADR 0064 removed."""
+        log = self.fake_cli(
+            "gh",
+            answer=json.dumps(
+                {"projectItems": [{"status": {"name": "Ready"}, "title": "the board"}]}
+            ),
+        )
+
+        self.assertEqual(tracker.Tracker(repo=REPO).item_card(ITEM), "Ready")
+        self.assertEqual(
+            log.read_text().splitlines(),
+            [
+                f"issue view {ITEM} --json {tracker.CARD_FIELD} --repo {REPO}",
+            ],
+        )
+        # A fixture answers the same fact from the `board` key of that item's record.
+        path = self.write_fixture(items={str(ITEM): {"board": "To do"}})
+        self.assertEqual(tracker.Tracker(fixture=path).item_card(ITEM), "To do")
+        self.assertEqual(tracker.Tracker(fixture=path).item_card(99), "")
 
     def test_a_board_read_with_no_board_configured_answers_an_empty_name(self):
         """A tracker file that names no board is a supported configuration.
@@ -548,7 +689,7 @@ class TrackerTest(unittest.TestCase):
         """
         path = self.write_fixture(items={str(ITEM): {"state": "OPEN"}})
 
-        self.assertEqual(tracker.Tracker(fixture=path).board_status(ITEM, "", ""), "")
+        self.assertEqual(tracker.Tracker(fixture=path).board_cards("", ""), {})
 
     def test_the_comment_argv_differs_by_tracker(self):
         self.assertEqual(
