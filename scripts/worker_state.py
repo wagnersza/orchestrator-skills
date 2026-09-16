@@ -1701,13 +1701,38 @@ def parse_edges(body, heading):
     return [int(number) for number in EDGE.findall(heading_block(body, heading))]
 
 
-def parent_of(body):
-    """The `## Parent` work item of one body, or 0 where the body names none.
+def parent_edges(item):
+    """Every parent one work item names, the native link first, with no duplicates.
 
-    The edge is the `## Parent` line of the child, per the `to-tickets` template. A body
-    that names more than one takes the first, because one child has one parent.
+    **The Parent edge has two representations, and this unions them rather than preferring
+    one** (ADR 0065). The native parent link is the tracker's own, and it is
+    what a maintainer sees as a tree. The `## Parent` line is the prose the `to-tickets`
+    template writes, and it is the form every tracker holds.
+
+    A child that carries both counts once, because the union is keyed on the number.
+    Where the two disagree, both parents keep the child, so a wrong edge shows up as an
+    extra child and never as a missing one. A tracker with no parent link answers 0 for
+    the native half, so the prose line is the whole edge there.
     """
-    edges = parse_edges(body, PARENT_HEADING)
+    found: list[int] = []
+    for number in [
+        int(item.get("parent") or 0),
+        *parse_edges(item.get("body", ""), PARENT_HEADING),
+    ]:
+        if number and number not in found:
+            found.append(number)
+    return found
+
+
+def parent_of(item):
+    """The parent work item of one item, or 0 where it names none.
+
+    **The native link leads, because `parent_edges` puts it first.** So a child linked
+    only in the tracker UI still finds the story above it. An item that names more than
+    one parent takes the first, because one child has one parent, and the whole union is
+    what `children_of` reads.
+    """
+    edges = parent_edges(item)
     return edges[0] if edges else 0
 
 
@@ -1751,12 +1776,16 @@ def skill_for(labels):
 def children_of(items):
     """Every open work item's children, keyed by the parent's number.
 
-    One list read answers the whole tree, so the descent makes no read per item.
+    One list read answers the whole tree, so the descent makes no read per item. That read
+    carries both halves of the **Parent edge**, so this needs no command of its own.
+
+    **The two edges are unioned per item** (ADR 0065). A child that carries both counts
+    once under that parent. A child whose two edges disagree is filed under each parent, so
+    a wrong edge shows up as an extra child and never as a missing one.
     """
     found: dict[int, list[int]] = {}
     for item in items:
-        parent = parent_of(item["body"])
-        if parent:
+        for parent in parent_edges(item):
             found.setdefault(parent, []).append(item["number"])
     return found
 
@@ -1788,13 +1817,13 @@ def story_above(number, by_number):
     **Story slot**.
     """
     seen = {number}
-    at = parent_of((by_number.get(number) or {}).get("body", ""))
+    at = parent_of(by_number.get(number) or {})
     while at and at not in seen:
         seen.add(at)
         item = by_number.get(at) or {}
         if USER_STORY in item.get("labels", ()):
             return at
-        at = parent_of(item.get("body", ""))
+        at = parent_of(item)
     return 0
 
 
@@ -1839,12 +1868,12 @@ def authorised_above(number, by_number, authorised):
     edges cannot become a cycle here.
     """
     seen = {number}
-    at = parent_of((by_number.get(number) or {}).get("body", ""))
+    at = parent_of(by_number.get(number) or {})
     while at and at not in seen:
         seen.add(at)
         if at in authorised:
             return at
-        at = parent_of((by_number.get(at) or {}).get("body", ""))
+        at = parent_of(by_number.get(at) or {})
     return 0
 
 

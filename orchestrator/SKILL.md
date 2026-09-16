@@ -184,6 +184,24 @@ body it files. No external template is edited, and none is forked
 ([ADR 0028](docs/adr/0028-drop-the-fork-and-pin-dial.md),
 [ADR 0046](docs/adr/0046-parallel-spawn-is-gated-on-a-declared-touch-set.md)).
 
+**An inline skill that files a child of a parent writes the parent link too.** The write is
+one command, and `docs/agents/issue-tracker.md` holds it under **The parent edge**:
+
+```bash
+gh issue edit <child> --parent <parent> --body "<body, carrying its ## Parent block>"
+```
+
+**One command sets the native link and sends the body, so it cannot write only one edge.**
+The rule is per item and immediate: create the item, write its link, then move to the next
+one. So no child is ever briefly an orphan. **A nested `user-story` child is linked to its
+own parent**, so a spec inside a spec still forms one tree.
+
+**A failed link write is reported and is not a stop.** Name the child and the parent, then
+carry on. The `## Parent` line already carries the meaning, so write no `needs-human` label
+for it. **The parent is otherwise untouched**, so the `to-tickets` rule of never modifying a
+parent still holds. Rationale:
+[`docs/adr/0065-the-parent-edge-is-two-representations.md`](docs/adr/0065-the-parent-edge-is-two-representations.md).
+
 **One dispatch row per item-writing phrase family.** Each row is a pointer to the
 skill that answers it, and it restates none of that skill's rules. Read
 [`references/skill-routing.md`](references/skill-routing.md) for the full alias list.
@@ -398,7 +416,9 @@ it. Where the tracker names no board, the label alone is the whole gate. Skip it
 `in-progress` or in the review state — a worker owns them.
 
 Read the tracker CLI from `issue-tracker.md`, list open items, and for each read
-its `## Blocked by` / `## Parent` edges (the `to-tickets` template). A child that
+its `## Blocked by` edge and its **Parent edge**. The parent edge is the union of the
+native parent link and the `## Parent` line, so a child linked either way is found
+([`references/tracker-reads.md`](references/tracker-reads.md)). A child that
 itself carries the `user-story` label is a **nested spec** — descend into its
 children, never spawn it directly. Present **all ready items first** (they can
 start in parallel), then fill to at least 5 with the soonest-unblocked blocked
@@ -1356,8 +1376,10 @@ parent's own **Close transaction** removes it.
 
 **A failed proof stops the parent close.** The worker posts the finding on the parent as its
 evidence note, and it ticks no last box. So a real defect is not a stalled worker. This
-session then files each failure through `/to-tickets`, and it leaves the parent open at
-`in-progress`. It runs **no** layer 5 story gate, and it reports the pending human
+session then files each failure through `/to-tickets`, and it links each one to the story
+that failed, so the failure is traceable to the proof
+([Resolve the verb before you act](#resolve-the-verb-before-you-act)). It leaves the parent
+open at `in-progress`. It runs **no** layer 5 story gate, and it reports the pending human
 decision ([Reporting to the user](#reporting-to-the-user)). `gates-unproven`, `stalled` and
 `dead` keep the answers they already have
 ([On the tick](#on-the-tick--what-it-wrote-and-what-is-left-for-you)).
@@ -1407,6 +1429,11 @@ the rating label in the list, and `docs/agents/issue-tracker.md` defines both fa
 first two ratings each reach the tracker, so each one carries the pair and both labels. The
 third files nothing, so it carries none. **Neither family moves a board card**, because
 nothing moves one ([Board status](#board-status)).
+
+**A `rating:strong` candidate is also linked to the story the gate read**, so the refactor
+sits under its origin. That is the parent link, written with the one command this skill
+already names ([Resolve the verb before you act](#resolve-the-verb-before-you-act)). A
+`rating:worth-exploring` candidate goes to the backlog under no story, so it takes no link.
 
 The skill ends by asking which candidate to explore. This triage is the answer, so no
 grilling loop runs here.

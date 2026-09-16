@@ -691,6 +691,152 @@ class TrackerTest(unittest.TestCase):
 
         self.assertEqual(tracker.Tracker(fixture=path).board_cards("", ""), {})
 
+    # --- both halves of the Parent edge ride one record (ADR 0065)
+
+    def test_an_open_items_read_carries_both_halves_of_the_parent_edge(self):
+        """The descent unions the native parent link with the `## Parent` line, so one list
+        read has to answer both. The native link rides the item, which is why the union
+        costs no second command."""
+        log = self.fake_cli(
+            "gh",
+            answer=json.dumps(
+                [
+                    {
+                        "number": ITEM,
+                        "title": "a child of both edges",
+                        "labels": [],
+                        "body": "## Parent\n\n#7\n",
+                        "parent": {"number": 7, "state": "OPEN"},
+                    },
+                    {
+                        "number": 9,
+                        "title": "a child of the native link alone",
+                        "labels": [],
+                        "body": "",
+                        "parent": {"number": 7, "state": "OPEN"},
+                    },
+                    {
+                        "number": 11,
+                        "title": "an item with no parent at all",
+                        "labels": [],
+                        "body": "",
+                        "parent": None,
+                    },
+                ]
+            ),
+        )
+
+        found = tracker.Tracker(repo=REPO).open_items()
+
+        self.assertEqual([one["number"] for one in found], [9, 11, ITEM])
+        # The native link arrives as a number, whichever half the item carries.
+        self.assertEqual([one["parent"] for one in found], [7, 0, 7])
+        self.assertIn("## Parent", found[2]["body"])
+        # A null parent is an item with no native link, and never an error.
+        self.assertEqual(found[1]["parent"], 0)
+        # The read asks for that field, so the field name cannot drift from the record.
+        self.assertIn(tracker.PARENT_FIELD, tracker.ITEM_FIELDS)
+        self.assertEqual(
+            log.read_text().splitlines(),
+            [
+                f"issue list --state open --limit {tracker.ITEM_LIMIT} "
+                f"--json {tracker.ITEM_FIELDS} --repo {REPO}"
+            ],
+        )
+
+    def test_a_fixture_holds_the_native_parent_link_as_a_plain_number(self):
+        """A fixture stands in for every read, so it holds the native link too. It is a
+        number there rather than the object the tracker answers, because a test author
+        writes the fact and not the wire shape."""
+        path = self.write_fixture(
+            items={
+                str(ITEM): {"title": "a native child", "parent": 7},
+                "9": {"title": "a prose child", "body": "## Parent\n\n#7\n"},
+                "11": {"title": "an orphan"},
+            }
+        )
+
+        found = tracker.Tracker(fixture=path).open_items()
+
+        self.assertEqual([one["number"] for one in found], [9, 11, ITEM])
+        self.assertEqual([one["parent"] for one in found], [0, 0, 7])
+        # An absent key reads as an item with no native link, the same as every other key.
+        self.assertEqual(found[1]["parent"], 0)
+
+    def test_the_other_tracker_answers_no_native_parent_link(self):
+        """This tracker has no parent link between two issues, so the native half is always
+        0 there and the `## Parent` line is the whole edge. The read asks for no field of
+        one, and that absence is never an error."""
+        self.fake_cli(
+            "glab",
+            answer=json.dumps(
+                [{"iid": ITEM, "title": "a leaf", "description": "## Parent\n\n#7\n"}]
+            ),
+        )
+
+        found = tracker.Tracker(cli=tracker.GLAB, host=HOST, repo=REPO).open_items()
+
+        self.assertEqual(found[0]["parent"], 0)
+        self.assertIn("## Parent", found[0]["body"])
+
+    def test_one_command_writes_both_halves_of_the_parent_edge(self):
+        """The whole point of the write: one command sets the native parent link and sends
+        the body that carries the `## Parent` line, so it cannot land only one edge. A body
+        filed without the block gains it here."""
+        argv = tracker.Tracker(repo=REPO).parent_link_argv(ITEM, 7, "what to build\n")
+
+        self.assertEqual(
+            argv,
+            [
+                "gh",
+                "issue",
+                "edit",
+                str(ITEM),
+                "--parent",
+                "7",
+                "--body",
+                "## Parent\n\n#7\n\nwhat to build\n",
+                "--repo",
+                REPO,
+            ],
+        )
+
+    def test_a_body_that_already_carries_the_block_is_left_alone(self):
+        """The external `to-tickets` template writes the block, so the common case must not
+        duplicate it. The command still sets the native link, so both edges land either
+        way."""
+        body = "## Parent\n\n#7\n\nwhat to build\n"
+
+        argv = tracker.Tracker(repo=REPO).parent_link_argv(ITEM, 7, body)
+
+        self.assertEqual(argv[argv.index("--body") + 1], body)
+        self.assertEqual(argv[argv.index("--parent") + 1], "7")
+        # The writer's own pattern is the reader's, so a block it adds is a block the
+        # descent finds.
+        self.assertTrue(tracker.PARENT_MATCH.search(tracker.parent_body("", 7)))
+
+    def test_the_parent_link_write_on_the_other_tracker_sets_the_body_alone(self):
+        """That tracker has no parent link between two issues, so the `## Parent` line is the
+        whole edge there and the command names no native link. This claims no parity."""
+        argv = tracker.Tracker(cli=tracker.GLAB, host=HOST, repo=REPO).parent_link_argv(
+            ITEM, 7, "what to build\n"
+        )
+
+        self.assertEqual(
+            argv,
+            [
+                "glab",
+                "issue",
+                "update",
+                str(ITEM),
+                "--description",
+                "## Parent\n\n#7\n\nwhat to build\n",
+                "-R",
+                f"{HOST}/{REPO}",
+            ],
+        )
+        self.assertNotIn("--parent", argv)
+
     def test_the_comment_argv_differs_by_tracker(self):
         self.assertEqual(
             tracker.Tracker(repo=REPO).comment_argv(ITEM, "a line"),
