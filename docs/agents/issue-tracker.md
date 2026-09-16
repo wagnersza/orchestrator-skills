@@ -19,6 +19,61 @@ surface every skill uses, and a flow read gets no second copy here.
 
 Infer the repo from `git remote -v` — `gh` does this automatically when run inside a clone.
 
+## The parent edge
+
+**A child carries its parent in two representations, and one command writes both.** The
+native parent link is a sub-issue on the parent, and it is the one a human sees as a tree.
+The `## Parent` line in the child body is the portable one, because it is the only form
+that works on every tracker. Rationale:
+[`orchestrator/docs/adr/0065-the-parent-edge-is-two-representations.md`](../../orchestrator/docs/adr/0065-the-parent-edge-is-two-representations.md).
+
+```bash
+gh issue edit <child> --parent <parent> --body "<body, carrying its ## Parent block>"
+```
+
+**One command, so it cannot write only one edge.** `--parent` sets the native link and
+`--body` carries the `## Parent` block, so there is no window in which the child is half
+linked. `Tracker.parent_link_argv` in `scripts/tracker.py` builds this argv, and it adds the
+`## Parent` block to a body that holds none. The body is a required argument there, because
+the command replaces the body.
+
+**This flag takes the parent's `#number`, and no database id.** That is what makes it the
+command to use. The REST route, `POST repos/<owner>/<name>/issues/<parent>/sub_issues`, needs
+the child's numeric database id from `gh api repos/<owner>/<name>/issues/<n> --jq .id`, which
+is neither the `#number` nor the `node_id`. It is the same trap the dependencies line below
+warns about, and the `--parent` flag has no part in it.
+
+**Run it once per child, at the create.** A second run on a child that already carries the
+native link fails, and the whole command fails with it, so the body write does not land
+either. The error names the cause:
+
+```
+GraphQL: Failed to add sub-issue #<child> to parent #<parent>. Issue may not contain duplicate sub-issues (addSubIssue)
+```
+
+**A failed link write is reported and is not a stop.** The session names the child and the
+parent, then carries on. The `## Parent` line already carries the meaning, so no
+`needs-human` label is written for it.
+
+**The child read unions the two, and it prefers neither.** One list read carries both edges:
+
+```bash
+gh issue list --state all --limit 200 --json number,state,title,body,parent \
+  --jq '[.[] | select((.parent.number == <N>) or ((.body // "") | test("(?m)^## Parent\\s+#<N>\\b"))) | {number, state, title}]'
+```
+
+**The union is by work item number, and a child that carries both counts once.** Where the
+two disagree, the child stays in the answer, so a wrong edge shows up as an extra child and
+never as a missing one. A preference order hides that disagreement. A child a maintainer
+linked by hand in the UI is a real child here, and that is the case a body scan alone missed.
+The full recipe, with the GitLab read beside it, is in
+[`orchestrator/references/tracker-reads.md`](../../orchestrator/references/tracker-reads.md).
+
+**GitLab has no parent link between two issues, and this claims no parity.** Its issue links
+endpoint offers `relates_to`, `blocks` and `is_blocked_by` only, and its real hierarchy is an
+epic or a work item, which is a different object. So there the `## Parent` line is the whole
+edge, the write sets the description alone, and the native half of the union is always empty.
+
 ## Work-state labels
 
 The states a work item moves through while an agent owns it. **One family, four values,

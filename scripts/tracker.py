@@ -60,6 +60,7 @@ tracker writes a run made.
 """
 
 import json
+import re
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -97,6 +98,13 @@ STATUS_FIELD = "status"
 # unions the two (ADR 0065). One tracker answers this field, and the other has no parent
 # link between two issues at all.
 PARENT_FIELD = "parent"
+
+# The `## Parent` block, in the two forms this module needs. `PARENT_BLOCK` is the heading
+# a write adds, and `PARENT_MATCH` is deliberately the same pattern the reader in
+# `scripts/worker_state.py` holds. So a block this module writes is a block that seam finds
+# (ADR 0065).
+PARENT_BLOCK = "## Parent"
+PARENT_MATCH = re.compile(r"^##\s*Parent\s*$", re.MULTILINE)
 
 # The five fields a queue read asks of each work item, plus the card field the start gate
 # reads with them. The board is never listed for this, so the card rides the item
@@ -198,6 +206,19 @@ def parent_number(entry):
     answers 0 the same way (ADR 0065).
     """
     return int((entry.get(PARENT_FIELD) or {}).get("number") or 0)
+
+
+def parent_body(body, parent):
+    """One child body carrying its `## Parent` block, added where the body holds none.
+
+    **This is what lets one command write both halves of the Parent edge** (ADR 0065). The
+    external `to-tickets` template already writes the block, so the common case answers the
+    body unchanged and nothing is duplicated. A body filed without the block gains it here,
+    so the write cannot land the native link alone.
+    """
+    if PARENT_MATCH.search(body or ""):
+        return body or ""
+    return f"{PARENT_BLOCK}\n\n#{int(parent or 0)}\n\n{body or ''}".rstrip() + "\n"
 
 
 def item_record(number, title, labels, body, parent=0):
@@ -767,6 +788,48 @@ class Tracker:
         for name in add:
             flags += ["--add-label", name]
         return [GH, "issue", "edit", str(item), *flags, *self._repo_flag()]
+
+    def parent_link_argv(self, item, parent, body):
+        """The argv that writes both halves of the **Parent edge** on one child work item.
+
+        **One command, so it cannot write only one edge** (ADR 0065). It sets the native
+        parent link, and it sends the body that carries the `## Parent` line. `parent_body`
+        adds that block where the body holds none, so neither half can be left behind.
+
+        **The body is a required argument, because the command replaces the body.** A caller
+        writes the link right after it filed the child, so it already holds the body and
+        reads nothing first. A caller with no body erases one, which is why this argument
+        takes no default.
+
+        **This runs once per child, at the create.** A second run fails, because the tracker
+        refuses a duplicate sub-issue, and the body write fails with it. A caller reports that
+        failure and carries on, because the `## Parent` line already carries the meaning.
+
+        The other tracker has no parent link between two issues. So there this writes the
+        description alone, the `## Parent` line is the whole edge, and this claims no parity.
+        """
+        text = parent_body(body, parent)
+        if self.cli == GLAB:
+            return [
+                GLAB,
+                "issue",
+                "update",
+                str(item),
+                "--description",
+                text,
+                *self._repo_flag(),
+            ]
+        return [
+            GH,
+            "issue",
+            "edit",
+            str(item),
+            "--parent",
+            str(parent),
+            "--body",
+            text,
+            *self._repo_flag(),
+        ]
 
     def close_argv(self, item, comment=""):
         """The argv that closes one work item, with the reason where the CLI takes one.

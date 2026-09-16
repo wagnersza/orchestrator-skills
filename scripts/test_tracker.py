@@ -779,6 +779,64 @@ class TrackerTest(unittest.TestCase):
         self.assertEqual(found[0]["parent"], 0)
         self.assertIn("## Parent", found[0]["body"])
 
+    def test_one_command_writes_both_halves_of_the_parent_edge(self):
+        """The whole point of the write: one command sets the native parent link and sends
+        the body that carries the `## Parent` line, so it cannot land only one edge. A body
+        filed without the block gains it here."""
+        argv = tracker.Tracker(repo=REPO).parent_link_argv(ITEM, 7, "what to build\n")
+
+        self.assertEqual(
+            argv,
+            [
+                "gh",
+                "issue",
+                "edit",
+                str(ITEM),
+                "--parent",
+                "7",
+                "--body",
+                "## Parent\n\n#7\n\nwhat to build\n",
+                "--repo",
+                REPO,
+            ],
+        )
+
+    def test_a_body_that_already_carries_the_block_is_left_alone(self):
+        """The external `to-tickets` template writes the block, so the common case must not
+        duplicate it. The command still sets the native link, so both edges land either
+        way."""
+        body = "## Parent\n\n#7\n\nwhat to build\n"
+
+        argv = tracker.Tracker(repo=REPO).parent_link_argv(ITEM, 7, body)
+
+        self.assertEqual(argv[argv.index("--body") + 1], body)
+        self.assertEqual(argv[argv.index("--parent") + 1], "7")
+        # The writer's own pattern is the reader's, so a block it adds is a block the
+        # descent finds.
+        self.assertTrue(tracker.PARENT_MATCH.search(tracker.parent_body("", 7)))
+
+    def test_the_parent_link_write_on_the_other_tracker_sets_the_body_alone(self):
+        """That tracker has no parent link between two issues, so the `## Parent` line is the
+        whole edge there and the command names no native link. This claims no parity."""
+        argv = tracker.Tracker(cli=tracker.GLAB, host=HOST, repo=REPO).parent_link_argv(
+            ITEM, 7, "what to build\n"
+        )
+
+        self.assertEqual(
+            argv,
+            [
+                "glab",
+                "issue",
+                "update",
+                str(ITEM),
+                "--description",
+                "## Parent\n\n#7\n\nwhat to build\n",
+                "-R",
+                f"{HOST}/{REPO}",
+            ],
+        )
+        self.assertNotIn("--parent", argv)
+
     def test_the_comment_argv_differs_by_tracker(self):
         self.assertEqual(
             tracker.Tracker(repo=REPO).comment_argv(ITEM, "a line"),

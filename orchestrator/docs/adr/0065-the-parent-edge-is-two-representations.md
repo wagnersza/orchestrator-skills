@@ -95,6 +95,11 @@ half of the edge is already adapter code and two halves of one contract in two h
 - **The write rewrites the child body.** `parent_link_argv` sends `--body`, so a caller
   passes the body it holds. The body is a required argument for that reason. A caller with
   no body erases one.
+- **The write runs once per child, and a second run fails.** The tracker refuses a
+  duplicate sub-issue, and the whole command fails with it, so the body write does not land
+  either. That is the write of a create path, and it is the only path that calls it. A
+  session that re-runs it reports the failure and carries on, because the text edge already
+  carries the meaning.
 - **A GitLab run sees no change.** The native half of the union is empty there and the write
   edits the description alone, so the edge behaves exactly as it did before this ADR.
 - **No backfill.** #178, #200 and #201 already carry their native links, and every other
