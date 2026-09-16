@@ -51,19 +51,35 @@ ones, because the open ones do not say which child closed last. Where the flows 
 **Close a task** (the parent close), **The layer 5 story gate**, **Merge the queue**
 step 7, **Resolve the item shape before you pick a flow**, and **"Work a #N"**.
 
-The edge is the `## Parent` line of the child, per the `to-tickets` template
-([`../CONTEXT.md`](../CONTEXT.md), **Work item**).
+**The edge has two representations, and this read unions them.** They are the native parent
+link, and the `## Parent` line of the child that the `to-tickets` template writes
+([`../CONTEXT.md`](../CONTEXT.md), **Parent edge**;
+[`../docs/adr/0065-the-parent-edge-is-two-representations.md`](../docs/adr/0065-the-parent-edge-is-two-representations.md)).
 
 ```bash
 gh issue list --repo <owner>/<name> --state all --limit 200 \
-  --json number,state,title,body \
-  --jq '[.[] | select(.body | test("(?m)^## Parent\\s+#<N>\\b")) | {number, state, title}]'
+  --json number,state,title,body,parent \
+  --jq '[.[] | select((.parent.number == <N>) or ((.body // "") | test("(?m)^## Parent\\s+#<N>\\b"))) | {number, state, title}]'
 ```
 
 ```bash
 glab api --hostname <host> "projects/<owner>%2F<name>/issues?state=all&per_page=100" \
   | jq '[.[] | select((.description // "") | test("(?m)^## Parent\\s+#<N>\\b")) | {iid, state, title}]'
 ```
+
+**The union is by work item number, and a child that carries both counts once.** One list
+read carries both edges, so there is no second command and no second answer to merge.
+Where the two disagree, the child stays in the answer, so a wrong edge shows up as an extra
+child and never as a missing one. This read prefers neither edge, because a preference order
+hides that disagreement.
+
+**A child linked only in the tracker UI is a real child here.** That is the case the body
+scan alone missed, and it is why the union exists.
+
+**GitLab has no parent link between two issues**, so the second read scans the description
+alone and claims no parity. Its issue links endpoint offers `relates_to`, `blocks` and
+`is_blocked_by` only, and its real hierarchy is an epic or a work item, which is a different
+object.
 
 `--limit` and `per_page` each cap the page. For a project with more items than the cap,
 raise the cap or add `--paginate` to the `glab` read. `--paginate` prints one array per

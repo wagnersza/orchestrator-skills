@@ -34,6 +34,7 @@ item and one per pull request:
     {"items": {"54": {"state": "OPEN",
                       "title": "The queue subcommand",
                       "body": "## Parent\n\n#178\n",
+                      "parent": 178,
                       "labels": ["in-progress"],
                       "comments": ["Verdict: approve", "an earlier note"],
                       "board": "To do"}},
@@ -45,10 +46,13 @@ item and one per pull request:
 answers, and no caller writes it back (ADR 0054). `head` is the branch that pull
 request was opened from, and it is what a caller matches to find the pull request for
 a branch. `title` and `body` are what a queue read asks for, and the body is where the
-`## Parent`, `## Blocked by` and `## Touches` edges live. Every key is optional. An
-item that is absent from a key reads as an item with none of that fact, and a key that
-is absent reads the same way. **A record with no `state` reads as open**, because a
-fixture that lists one item is a fixture about a live queue.
+`## Parent`, `## Blocked by` and `## Touches` edges live. `parent` is the native
+parent link, which is the other half of the **Parent edge**, and a fixture holds it as
+a plain work item number (ADR 0065). The record above carries both halves, and a
+fixture can hold either one alone. Every key is optional. An item that is absent from
+a key reads as an item with none of that fact, and a key that is absent reads the same
+way. **A record with no `state` reads as open**, because a fixture that lists one item
+is a fixture about a live queue.
 
 In fixture mode a write runs nothing. It appends its command to
 `<fixture path>.writes`, one per line. That file is what a test reads to see which
@@ -88,10 +92,16 @@ PAGE_SIZE = 100
 CARD_FIELD = "projectItems"
 STATUS_FIELD = "status"
 
-# The four fields a queue read asks of each work item, plus the card field the start gate
+# The field that carries a work item's native parent link, which is one half of the
+# **Parent edge**. The `## Parent` line in the body is the other half, and the descent
+# unions the two (ADR 0065). One tracker answers this field, and the other has no parent
+# link between two issues at all.
+PARENT_FIELD = "parent"
+
+# The five fields a queue read asks of each work item, plus the card field the start gate
 # reads with them. The board is never listed for this, so the card rides the item
-# (ADR 0064).
-ITEM_FIELDS = "number,title,labels,body"
+# (ADR 0064). The parent rides it too, so the union read costs no second command.
+ITEM_FIELDS = f"number,title,labels,body,{PARENT_FIELD}"
 CARDED_FIELDS = f"{ITEM_FIELDS},{CARD_FIELD}"
 
 # The two spellings of an open work item. One tracker answers `OPEN` and the other
@@ -180,18 +190,34 @@ def label_names(labels):
     ]
 
 
-def item_record(number, title, labels, body):
+def parent_number(entry):
+    """The work item number of one native parent link, or 0 where the entry holds none.
+
+    The link arrives as an object with a number on it, and an item with no parent answers
+    a null. So one reader covers both, and a tracker that has no parent link at all
+    answers 0 the same way (ADR 0065).
+    """
+    return int((entry.get(PARENT_FIELD) or {}).get("number") or 0)
+
+
+def item_record(number, title, labels, body, parent=0):
     """One work item in the shape a queue read answers, whatever tracker it came from.
 
-    Four facts, and a queue tick reads no fifth: the number, the title a worktree name
-    is built from, the labels the start gate reads, and the body that carries the
-    `## Parent`, `## Blocked by` and `## Touches` edges.
+    Five facts, and a queue tick reads no sixth: the number, the title a worktree name
+    is built from, the labels the start gate reads, the body that carries the
+    `## Parent`, `## Blocked by` and `## Touches` edges, and the native parent link.
+
+    **Both halves of the Parent edge ride one record.** The body carries the
+    `## Parent` line and `parent` carries the native link, so the descent unions the two
+    with no second read (ADR 0065). A tracker with no parent link between two issues
+    answers 0 there.
     """
     return {
         "number": int(number or 0),
         "title": str(title or ""),
         "labels": label_names(labels),
         "body": str(body or ""),
+        PARENT_FIELD: int(parent or 0),
     }
 
 
@@ -343,7 +369,9 @@ class Tracker:
 
         **The widest list read, and a queue tick makes it once a minute.** The body comes
         with it, because the `## Parent`, `## Blocked by` and `## Touches` edges live
-        there and a second read per item costs one command per item. It asks for no card:
+        there and a second read per item costs one command per item. The native parent
+        link comes with it for the same reason, so the union of the two parent edges
+        needs no command of its own (ADR 0065). It asks for no card:
         the tick needs the card of the items that can start, and `labelled_items` answers
         those with the item (ADR 0064).
 
@@ -361,6 +389,7 @@ class Tracker:
                     record.get("title"),
                     record.get("labels"),
                     record.get("body"),
+                    record.get(PARENT_FIELD),
                 )
                 for number, record in (self.fixture.get("items") or {}).items()
                 if str(record.get("state") or OPEN_STATES[0]).upper() in OPEN_STATES
@@ -372,13 +401,14 @@ class Tracker:
         return sorted(found, key=lambda item: item["number"])
 
     def _gh_open_items(self):
-        """The open items from `gh`, which answers all four fields in one command."""
+        """The open items from `gh`, which answers all five fields in one command."""
         return [
             item_record(
                 entry.get("number"),
                 entry.get("title"),
                 entry.get("labels"),
                 entry.get("body"),
+                parent_number(entry),
             )
             for entry in check_page(
                 read_json(self._gh_list_argv(ITEM_FIELDS), "[]") or [],
@@ -416,6 +446,9 @@ class Tracker:
         So this read goes through `glab api`, and the project path is part of the URL.
         That path is why the repository is required here, the same as it is for the two
         other `glab api` reads above. The body arrives under its own name there.
+
+        **This tracker has no parent link between two issues**, so the record's native
+        parent is 0 and the `## Parent` line is the whole edge (ADR 0065).
         """
         return [
             item_record(
@@ -467,6 +500,7 @@ class Tracker:
                         record.get("title"),
                         record.get("labels"),
                         record.get("body"),
+                        record.get(PARENT_FIELD),
                     ),
                     "board": str(record.get("board") or ""),
                 }
@@ -476,7 +510,8 @@ class Tracker:
             ]
         elif self.cli == GLAB:
             # No project board on this tracker, so the card is an empty string and the
-            # read asks for no field of one.
+            # read asks for no field of one. No parent link either, so the native half of
+            # the **Parent edge** is 0 (ADR 0065).
             found = [
                 {
                     **item_record(
@@ -501,6 +536,7 @@ class Tracker:
                         entry.get("title"),
                         entry.get("labels"),
                         entry.get("body"),
+                        parent_number(entry),
                     ),
                     "board": card_status(entry),
                 }

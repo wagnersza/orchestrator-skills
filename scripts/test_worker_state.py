@@ -2984,6 +2984,44 @@ class WorkerStateTestCase(unittest.TestCase):
         self.assertIn(f"work item #{NESTED_LEAF} is the one item", line)
         self.assertEqual(self.spawned(), [NESTED_LEAF])
 
+    # --- the two representations of the Parent edge (ADR 0065) ---------------
+
+    def test_a_child_linked_only_in_the_tracker_ui_is_still_descended_to(self):
+        """The native parent link is one half of the **Parent edge**, and the descent unions
+        the two. So a child a maintainer linked by hand, with no `## Parent` line in its
+        body at all, is a real child of that story and the tick reaches it."""
+        items = story_queue()
+        items.pop(str(STANDALONE))
+        items.pop(str(LEAF_TWO))
+        items[str(LEAF_ONE)]["body"] = body(touches=["scripts/one.py"])
+        items[str(LEAF_ONE)]["parent"] = STORY
+        self.write_queue(items)
+
+        line = self.queue_cli()
+
+        self.assertIn(f"work item #{LEAF_ONE} is the one item", line)
+        self.assertEqual(self.spawned(), [LEAF_ONE])
+
+    def test_the_two_parent_edges_union_and_a_child_that_carries_both_counts_once(self):
+        """The union is keyed on the work item number, so a child that carries both
+        representations counts once. Where the two disagree, both parents keep the child, so
+        a wrong edge shows up as an extra child and never as a missing one."""
+        both = {"number": 9, "body": body(parent=STORY), "parent": STORY}
+        split = {"number": 11, "body": body(parent=LEAF_ONE), "parent": STORY}
+
+        self.assertEqual(worker_state.parent_edges(both), [STORY])
+        self.assertEqual(worker_state.parent_edges(split), [STORY, LEAF_ONE])
+        # The upward walk takes one parent, and the native link leads.
+        self.assertEqual(worker_state.parent_of(split), STORY)
+        # An item with neither edge names no parent, and an absent key is not an error.
+        self.assertEqual(worker_state.parent_edges({"body": ""}), [])
+        self.assertEqual(worker_state.parent_of({}), 0)
+        # A disagreeing child is filed under each parent, once under each.
+        self.assertEqual(
+            worker_state.children_of([both, split]),
+            {STORY: [9, 11], LEAF_ONE: [11]},
+        )
+
     # --- the three rows of the gate table (ADR 0062) -------------------------
 
     def test_a_story_card_authorises_the_whole_run_with_no_label_on_the_story(self):
