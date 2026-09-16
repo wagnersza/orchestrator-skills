@@ -214,8 +214,12 @@ _Avoid_: issue tracker, board (when the layer is meant).
 _Avoid_: tracker client, tracker wrapper, tracker layer (each one suggests a stack this deliberately is not), CLI abstraction.
 
 **Work item**:
-One tracked unit of work (a ticket / issue) a worker implements. Carries `## Blocked by` and `## Parent` edges per the `to-tickets` template.
+One tracked unit of work (a ticket / issue) a worker implements. Carries a `## Blocked by` edge per the `to-tickets` template, and a **Parent edge** in the two representations that entry names.
 _Avoid_: ticket, issue, task (pick one — prefer work item).
+
+**Parent edge**:
+The link from a child **Work item** up to its parent, in **two representations**. The **native parent link** is the tracker's own, a sub-issue on the parent on GitHub. It is the one a human sees as a tree. The **`## Parent` line** is the prose the external `to-tickets` template writes. It is the portable one, because it is the only form that works on every tracker. Three facts hold. **One adapter command writes both at the moment the child gains a parent**, so it cannot write only one. **A missing native link is not a stop**: the session names the child and the parent and carries on, and no `needs-human` label is written for it. **The child read unions the two and prefers neither**, keyed on the item number. So a child that carries both counts once. A link a maintainer made by hand in the tracker UI also counts as a real edge. GitLab has no parent link between two issues, so there the prose line is the whole edge and the native half of the union is always empty. This repo's own issue titles say **wave** for what this glossary calls a **Story run**, so the two words are one thing. Rationale: [`docs/adr/0065-the-parent-edge-is-two-representations.md`](docs/adr/0065-the-parent-edge-is-two-representations.md).
+_Avoid_: sub-issue (that names one tracker's spelling of the native half), parent pointer, parent reference, hierarchy, epic (that is a different object on GitLab).
 
 **Ready queue**:
 The set of work items a worker can start now — labelled `ready-for-agent` with every `## Blocked by` edge closed. The orchestrator resolves this over whatever tracker `docs/agents/issue-tracker.md` names.
