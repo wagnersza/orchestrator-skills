@@ -111,7 +111,6 @@ GATE_CONFIG = """# Orchestrator config
 tool:     orca
 harness:  claude
 gates:
-  profile: lite
   langs:   [python]
   quick:   "make quick"
   full:    "make full"
@@ -127,7 +126,6 @@ MATRICES = (MATRIX, MATRIX_INFRA)
 
 # What the `gates:` block owes, one tuple per mapping.
 GATES_KEYS = (
-    "profile",
     "langs",
     "quick",
     "full",
@@ -540,7 +538,6 @@ class GatesBlockTestCase(unittest.TestCase):
         "```yaml\n"
         'evidence:   "make deep green + real-data proof"\n'
         "gates:\n"
-        "  profile: strict         # strict | lite\n"
         "  langs:   python\n"
         '  quick:   "make quick"\n'
         '  full:    "make full"\n'
@@ -617,7 +614,7 @@ class GatesBlockTestCase(unittest.TestCase):
         )
 
         self.assertEqual(len(reported), 1, reported)
-        self.assertIn("orchestrator.template.md:10", reported[0])
+        self.assertIn("orchestrator.template.md:9", reported[0])
         self.assertIn("`deep`", reported[0])
         self.assertIn("notes document no drop for it", reported[0])
 
