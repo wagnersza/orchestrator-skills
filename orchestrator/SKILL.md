@@ -222,7 +222,7 @@ invocation goes into the spawn prompt, so the worker's first act inside its own
 worktree is to enter the skill. [Spawn a worker](#spawn-a-worker-implement-x)
 preflights the skill and splices it. This section only resolves which skill it is. A
 worked trace of both lanes, end to end, is
-[`references/examples/routed-run.md`](references/examples/routed-run.md).
+[`references/examples/run.md`](references/examples/run.md).
 
 **A queue question is not a verb.** A bare `/orchestrator`, and *what next* / *what
 should I run* / *what's ready*, resolve to no skill and route nowhere. Answer them

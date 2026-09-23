@@ -453,7 +453,7 @@ Take these in order; each leads with a recommendation.
    a `conservative` profile, a review loop converges toward `balanced` pricing.
 6. **Project recipe** — `setup_cmd`, `run_recipe` + `ports`, `db_gate` (blank if
    no database), `evidence` bar. Pre-fill from what exploration found and let the
-   user correct. Offer to clone `references/examples/fullstack-app.md` as a
+   user correct. Offer to clone the config half of `references/examples/run.md` as a
    starting point if the repo resembles it.
 7. **Gate profile** — `strict` or `lite`. Recommend **strict**: it runs all four gate
    layers, so a machine finds each fault before a human reads the diff. **`lite` drops
