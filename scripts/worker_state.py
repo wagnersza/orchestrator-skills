@@ -63,8 +63,9 @@ of the board (ADR 0064).
 **With no board coordinates the label alone decides.** A tracker that names no board is a
 supported configuration, and its absence is never an error. The three coordinates are
 arguments, and the caller reads them from `docs/agents/issue-tracker.md`, so this seam
-holds no board of its own. **The card read needs `read:project` on the token and no write
-scope**, because nothing here writes a card.
+holds no board of its own. **`start`, `queue` and `report` read a card and write none**, so
+`read:project` on the token answers all three. `tick` writes one, so it needs the `project`
+scope (ADR 0067).
 
 **`queue`** — read the whole queue and start at most one work item. This is the whole
 body of a **Repo automation** tick, and it is the one subcommand that spawns:
@@ -320,11 +321,20 @@ the ready state for the in-progress state on one work item, and computes nothing
 runs and no session assembles a label command of its own:
 
     python3 <plugin root>/scripts/worker_state.py tick --claim --item 62 \\
-        --repo OWNER/NAME
+        --repo OWNER/NAME \\
+        --board-project '<the number the tracker file gives>' \\
+        --board-owner '<the owner the tracker file gives>'
 
 A claim reads `needs-human` first, the same as every other path here, and it refuses
 where the item wears it. It reads no worktree and no process, so it needs none of the
 worker flags. Every other form of `tick` still requires all four.
+
+**The card moves with the label, at two of the three moments** (ADR 0067). A claim writes
+`In progress`, and the tick that writes `to-review` writes `In review`. The close writes
+`Done` itself, after its teardown. So `tick` takes the two board coordinates and no start
+column: the start column is the maintainer's own lane, and no tick writes it. **A failed
+card write is reported in the printed line and it stops nothing**, because the board is a
+mirror and the label is the live state.
 
 **`needs-human` is a transition with a comment.** The writer puts the label on the item
 and posts one comment saying what the seam saw. A label with no reason leaves the
@@ -332,7 +342,8 @@ maintainer to reconstruct one. Only the maintainer removes the label. A close th
 run writes it, and so does a stall that already spent its one retry.
 
 **What this seam refuses to do.** It composes no prompt, kills no process, moves no card
-and merges nothing. **The merge stays the maintainer's own act**, and this seam only reads
+into a lane the maintainer owns, and merges nothing. `Backlog`, `Ready` and the start column
+stay theirs. **The merge stays the maintainer's own act**, and this seam only reads
 its result. It holds no state that changes an answer, and it writes no file anywhere, so a
 restart after each re-prompt is free.
 
@@ -369,10 +380,19 @@ from typing import Any
 # there (ADR 0034).
 try:
     from . import close_item
-    from .tracker import GH, GLAB, Tracker, TrackerError
+    from .tracker import (
+        COLUMN_IN_PROGRESS,
+        COLUMN_IN_REVIEW,
+        GH,
+        GLAB,
+        Tracker,
+        TrackerError,
+    )
 except ImportError:  # the type checker reads the package form above
     import close_item  # type: ignore[no-redef, import-not-found]
     from tracker import (  # type: ignore[no-redef, import-not-found]
+        COLUMN_IN_PROGRESS,
+        COLUMN_IN_REVIEW,
         GH,
         GLAB,
         Tracker,
@@ -1173,6 +1193,33 @@ def plan(item, worktree, pattern, stall_after, tracker, required=()):
 
 # --- the transition writer --------------------------------------------------
 
+# The column each **Work-state label** moves the card to. **The board is a mirror, so the
+# card and the label move in the same tick** (ADR 0067). A label that is absent from this
+# map moves no card: `needs-human` is a stop rather than a lane, `ready-for-agent` is the
+# maintainer's own drag, and the close writes `Done` itself, after its teardown.
+CARD_COLUMNS = {TO_REVIEW: COLUMN_IN_REVIEW}
+
+
+def card_line(tracker, item, column, board):
+    """Write one work item's card, and answer the clause the caller's line carries.
+
+    **A failed card write is reported and it stops nothing** (ADR 0067). The board is a
+    mirror of the work, and the work is what the label and the worktree carry. So a board
+    that cannot be written leaves a stale card and nothing else: the claim still writes its
+    label, and the transition still lands.
+
+    `board` is `(project, owner)`. With either one missing, or with no column to write,
+    there is no card to move and the clause is empty. That is the same supported
+    configuration the start gate already reads as "the label alone decides".
+    """
+    project, owner = board
+    try:
+        wrote = tracker.card_write(item, column, project, owner)
+    except (TrackerError, OSError, json.JSONDecodeError) as exc:
+        cause = " ".join(str(exc).split())
+        return f", and the card write to {column!r} failed: {cause}"
+    return f", and {wrote}" if wrote else ""
+
 
 def write_transition(tracker, item, labels, add, comment=""):
     """Swap the **Work-state label**s on one work item, and answer what it wrote.
@@ -1259,7 +1306,7 @@ def re_prompt(item, worktree, tracker, answer):
     )
 
 
-def close_transaction(item, worktree, tracker, answer, close_flags):
+def close_transaction(item, worktree, tracker, answer, close_flags, board=(0, "")):
     """Run steps 4 to 8 of a **Close transaction**, and answer how the run went.
 
     **The close runs in this process.** This function imports `scripts/close_item.py` and
@@ -1284,6 +1331,10 @@ def close_transaction(item, worktree, tracker, answer, close_flags):
     `git fetch origin <branch>:<branch>` there exits 128 with `refusing to fetch into
     branch`, because the sibling checkout holds that branch. So the checkout is where the
     merge lands, and it is never this worktree.
+
+    `board` is `(project, owner)`, and it rides into that seam's own namespace. **The close
+    writes `Done` itself, after its teardown**, so this function writes no card of its own
+    (ADR 0067).
     """
     checkout, default_branch, teardown_command = close_flags
     missing = [
@@ -1313,6 +1364,8 @@ def close_transaction(item, worktree, tracker, answer, close_flags):
         teardown_command=teardown_command,
         teardown=True,
         execute=True,
+        board_project=board[0],
+        board_owner=board[1],
     )
     try:
         closing = close_item.build(args, tracker)
@@ -1349,7 +1402,7 @@ def close_transaction(item, worktree, tracker, answer, close_flags):
     return EXIT_APPLIED, f"{answer['line']} — applied: the close ran: {ran}"
 
 
-def claim(item, tracker):
+def claim(item, tracker, board=(0, "")):
     """The `--claim` answer: the ready state swapped for the in-progress state.
 
     The one named transition this seam reaches from the CLI, so an **Orchestrator**
@@ -1358,6 +1411,11 @@ def claim(item, tracker):
 
     `needs-human` answers first here too, so a claim can never restart an item the machine
     was asked to leave alone.
+
+    **The card moves to `In progress` here, and the label follows it** (ADR 0067). The card
+    write comes after the `needs-human` read and before the label, so a paused item's card
+    never moves and a card in the start column always means no worker has taken the item.
+    `board` is `(project, owner)`, and with either one missing no card moves.
     """
     try:
         labels, _ = tracker.item_facts(item)
@@ -1372,8 +1430,9 @@ def claim(item, tracker):
             f"refused: work item #{item} carries the {NEEDS_HUMAN} label, so no claim "
             f"runs until the maintainer clears it"
         )
+    card = card_line(tracker, item, COLUMN_IN_PROGRESS, board)
     removed, added = write_transition(tracker, item, labels, IN_PROGRESS)
-    return EXIT_APPLIED, f"claim: applied: {swap_line(item, removed, added)}"
+    return EXIT_APPLIED, f"claim: applied: {swap_line(item, removed, added)}{card}"
 
 
 # --- the start gate (ADR 0045, narrowed by ADR 0062 and ADR 0064) -----------
@@ -2082,8 +2141,9 @@ def board_report(tracker, board):
     - a card whose work item is not open, which is a card the board's own workflow left
       behind
 
-    **It writes nothing and it moves no card.** The board is an input, so a gap is a line a
-    maintainer reads and never a write this verb makes (ADR 0054).
+    **It writes nothing and it moves no card.** A gap here is a disagreement a human reads
+    and judges, so this verb reports it and never repairs it. The three writes a seam does
+    make happen at the moment the work moves, and none of them is a repair pass (ADR 0067).
 
     Exit 0 means the read answered. A read that failed is the quiet code with one line, the
     same as every other read in this seam.
@@ -2175,6 +2235,7 @@ def tick(
     tracker,
     required=(),
     close_flags=("", "main", ""),
+    board=(0, ""),
 ):
     """The `tick` answer: `(exit code, the one line to print)`.
 
@@ -2198,6 +2259,11 @@ def tick(
     3. A tracker read that failed.
 
     Each one keeps its printed line, so a maintainer reads which it was.
+
+    **The card moves with the label, in this same tick** (ADR 0067). `CARD_COLUMNS` maps the
+    label the transition writes to the column the card moves to, and the finish is the one
+    transition in that map. A refusal moves no card, and neither does a re-prompt. The close
+    writes its own column, after its teardown.
     """
     answer = plan(item, worktree, pattern, stall_after, tracker, required=required)
     if answer["disposition"] == GONE:
@@ -2205,7 +2271,7 @@ def tick(
     if answer["disposition"] == QUIET:
         return EXIT_NOTHING, answer["line"]
     if answer["disposition"] == CLOSE:
-        return close_transaction(item, worktree, tracker, answer, close_flags)
+        return close_transaction(item, worktree, tracker, answer, close_flags, board)
     if answer["disposition"] == RETRY:
         return re_prompt(item, worktree, tracker, answer)
     if answer["disposition"] == HUMAN:
@@ -2216,8 +2282,9 @@ def tick(
             f"{answer['outcome']}, so work item #{item} stays where it is"
         )
     removed, added = write_transition(tracker, item, answer["labels"], answer["add"])
+    card = card_line(tracker, item, CARD_COLUMNS.get(answer["add"], ""), board)
     return EXIT_APPLIED, (
-        f"{answer['line']} — applied: {swap_line(item, removed, added)}"
+        f"{answer['line']} — applied: {swap_line(item, removed, added)}{card}"
     )
 
 
@@ -2274,13 +2341,18 @@ def add_tracker_arguments(parser):
     )
 
 
-def add_board_arguments(parser):
-    """The three coordinates that name one board, added to one subcommand.
+def add_board_arguments(parser, column=True):
+    """The coordinates that name one board, added to one subcommand.
 
     `start` reads one card and `queue` reads one per open item, so both take all three.
     Written once, so the two can never drift apart on the board they read. With any one of
     them missing the label alone decides, which is a supported configuration and never an
     error (ADR 0045).
+
+    `column` is False for `tick`, which writes a card and reads none. The start column is
+    the maintainer's own lane and no tick writes it, so a tick that took that flag would
+    take a flag it cannot use (ADR 0067). The two coordinates below are written once for
+    every subcommand, so a reader and a writer can never name two different boards.
     """
     parser.add_argument(
         "--board-project",
@@ -2289,23 +2361,25 @@ def add_board_arguments(parser):
         metavar="NUMBER",
         help="the project number of the board that holds the card. The caller reads it "
         "from the Project board section of docs/agents/issue-tracker.md, so this seam "
-        "holds no board of its own. With this flag missing the label alone decides",
+        "holds no board of its own. With this flag missing no card is read and none is "
+        "written",
     )
     parser.add_argument(
         "--board-owner",
         default="",
         metavar="OWNER",
         help="the owner the board belongs to, from the same section. With this flag "
-        "missing the label alone decides",
+        "missing no card is read and none is written",
     )
-    parser.add_argument(
-        "--start-column",
-        default="",
-        metavar="NAME",
-        help="the name of the start column, from the same section. It is a name and "
-        "never an option id, because nothing writes a card. With this flag missing the "
-        "label alone decides",
-    )
+    if column:
+        parser.add_argument(
+            "--start-column",
+            default="",
+            metavar="NAME",
+            help="the name of the start column, from the same section. It is a name and "
+            "never an option id: a write resolves the id from the name at run time. With "
+            "this flag missing the label alone decides",
+        )
 
 
 def add_tick_arguments(parser, worker_required=True):
@@ -2371,8 +2445,10 @@ def main(argv=None):
             "The phase subcommand computes and writes nothing. The tick "
             "subcommand computes through the same code path and then applies the one "
             "transition it computed. A merged pull request is one of those transitions, "
-            "and it closes the item. It composes no prompt, kills no process, moves no "
-            "card and merges nothing. One subcommand spawns, and it runs the spawn "
+            "and it closes the item. The tick also writes the board card that goes with "
+            "the label it wrote, and a failed card write stops nothing. It composes no "
+            "prompt, kills no process, moves no card into a lane the maintainer owns "
+            "and merges nothing. One subcommand spawns, and it runs the spawn "
             "command its caller passed rather than a command of its own."
         ),
     )
@@ -2497,7 +2573,8 @@ def main(argv=None):
             "names four gaps: a card in the start column on an item with no "
             "ready-for-agent label, an item wearing that label whose card sits outside "
             "that column, an open item with no card, and a card whose item is not open. "
-            "It writes nothing and it moves no card, because the board is an input. Exit "
+            "It writes nothing and it moves no card: a gap is a disagreement a human reads "
+            "and judges, so this verb reports it and never repairs it. Exit "
             "0 means the read answered, and exit 1 means a read failed."
         ),
     )
@@ -2540,16 +2617,25 @@ def main(argv=None):
             "Exit 1 is a quiet tick and exit 3 is a worktree that is gone. No path "
             "exits 0, so every run records as skipped and the automation's own prompt "
             "and provider never load. No agent runs on a tick. At most one transition "
-            "lands per run."
+            "lands per run. "
+            "The board card moves with the label: a claim writes In progress, and the "
+            "tick that writes to-review writes In review. The close writes Done itself, "
+            "after its teardown. So this subcommand takes the two board coordinates and "
+            "no start column, because the start column is the maintainer's own lane. A "
+            "failed card write is reported in the line and it stops nothing. The card "
+            "write needs the project scope on the token."
         ),
     )
     add_tick_arguments(applier, worker_required=False)
+    add_board_arguments(applier, column=False)
     applier.add_argument(
         "--claim",
         action="store_true",
         help="apply one named transition instead of computing: swap the ready state "
         "for the in-progress state on --item. This is the spawn claim, so a session "
         "runs the same writer a tick runs and assembles no label command of its own. "
+        "It moves the card to In progress first, so a card in the start column always "
+        "means no worker has taken the item. "
         "It reads no worktree and no process, so it needs none of the four flags that "
         "name a worker",
     )
@@ -2669,7 +2755,7 @@ def main(argv=None):
     required = tuple(args.require_gate or ())
 
     if claiming:
-        code, line = claim(args.item, tracker)
+        code, line = claim(args.item, tracker, (args.board_project, args.board_owner))
         print(line)
         return code
 
@@ -2698,6 +2784,7 @@ def main(argv=None):
             tracker,
             required=required,
             close_flags=(args.checkout, args.default_branch, args.teardown_command),
+            board=(args.board_project, args.board_owner),
         )
     print(line)
     return code
