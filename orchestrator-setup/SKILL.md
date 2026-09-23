@@ -529,8 +529,8 @@ Scope — only the chosen pieces apply:
   the detection and the install cannot disagree about when a tool is required. The gate
   profile then narrows that set, and it never widens it — see the install loop below.
 - **tool:** the one in config (`orca` / `cmux` / `herdr`).
-- **harness(es):** the impl harness, **and** the review harness if
-  `review.enabled` — a cross-vendor review setup (e.g. impl `claude`/opus-5,
+- **harness(es):** the impl harness, **and** the review harness where this repo will
+  run a `review N` — a cross-vendor review setup (e.g. impl `claude`/opus-5,
   review `codex`/gpt-5.6) needs **both** CLIs installed and authenticated.
 - **optional, per recipe:** a DB CLI like `sqlite3` (if `db_gate` set), node/npm
   or uv (if `setup_cmd` needs them).

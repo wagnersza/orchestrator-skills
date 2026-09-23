@@ -41,7 +41,7 @@ Three rules keep it from becoming noise:
 
 - **The comment is rewritten in place, and never posted twice.** It is found by a fixed first
   line, `<!-- orchestrator:merge-order -->`, and that literal is shared by the writer and the
-  search. A tick runs once a minute, so a second post is sixty comments an hour.
+  search. A maintainer who asks twice in one sitting gets one comment either way.
 - **A plan of one item writes nothing.** An order of one is not an order.
 - **The session writes it, and the seam does not.** `scripts/merge_train.py` still prints
   JSON and comments nowhere, which is the contract below.

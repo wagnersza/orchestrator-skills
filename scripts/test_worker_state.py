@@ -2437,14 +2437,13 @@ class WorkerStateTestCase(unittest.TestCase):
 
     def test_the_start_gate_reads_no_worker_and_takes_no_worker_flag(self):
         """It answers whether an item may start, which is the question before there is a
-        worker to read. So the four flags that name a worker are usage errors here, and
+        worker to read. So the three flags that name a worker are usage errors here, and
         `--item` plus the tracker flags are the whole surface."""
         self.write_fixture(labels=[READY_FOR_AGENT])
 
         for flag, value in (
             ("--worktree", str(self.worktree)),
             ("--process", PROCESS_PATTERN),
-            ("--rounds", "3"),
             ("--stall-after", "30m"),
         ):
             self.run_seam(
@@ -3489,7 +3488,7 @@ class WorkerStateTestCase(unittest.TestCase):
 
     def test_the_queue_tick_reads_no_worker_and_a_bad_roof_is_a_usage_error(self):
         """It answers which item starts next, which is the question before there is a
-        worker to read. So the four flags that name a worker are usage errors here. A roof
+        worker to read. So the three flags that name a worker are usage errors here. A roof
         under 1 starts nothing at all, so it is a usage error too, and never a quiet tick
         that nobody sees."""
         self.write_queue(story_queue())
@@ -3497,7 +3496,6 @@ class WorkerStateTestCase(unittest.TestCase):
         for flag, value in (
             ("--worktree", str(self.worktree)),
             ("--process", PROCESS_PATTERN),
-            ("--rounds", "3"),
             ("--stall-after", "30m"),
         ):
             self.queue_cli(flag, value, expect=EXIT_USAGE, lines=0)
