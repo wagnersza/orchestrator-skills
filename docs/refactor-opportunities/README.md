@@ -9,7 +9,7 @@ The session then saves a copy here, as a docs-only commit
 five layers are in
 [`../../orchestrator/references/quality-gates.md`](../../orchestrator/references/quality-gates.md),
 and the flow is
-[The layer 5 story gate](../../orchestrator/SKILL.md#the-layer-5-story-gate).
+[The layer 5 story gate](../../orchestrator/references/story-flows.md#the-layer-5-story-gate).
 
 ## What each file is
 
