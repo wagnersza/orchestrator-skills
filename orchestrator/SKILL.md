@@ -48,9 +48,8 @@ writes `In progress`, the tick that writes `to-review` writes `In review`, and t
 writes `Done` after the teardown. **Write no card yourself** — each write rides in the seam
 that owns that moment, and a failed write is reported and stops nothing. `Backlog`, `Ready`
 and the start column stay the maintainer's lanes, so the drag is still what authorises a
-start. The **Board status** entry in [`CONTEXT.md`](CONTEXT.md) holds the rule, and
-[`docs/adr/0067-the-board-is-a-mirror-at-three-moments.md`](docs/adr/0067-the-board-is-a-mirror-at-three-moments.md)
-holds the rationale.
+start. The rule is the **Board status** entry in [`CONTEXT.md`](CONTEXT.md), and the
+rationale is [ADR 0067](docs/adr/0067-the-board-is-a-mirror-at-three-moments.md).
 
 ## Spawn a worker
 
