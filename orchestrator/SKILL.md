@@ -754,9 +754,11 @@ the item. Check reuse before booting; tear down after evidence — per the recip
 
 ### Start the tick — one Item automation per worker
 
-**A spawn with no tick is incomplete.** The last step of every spawn creates an **Item
-automation** (op 11). One per worker, implementation and review alike. The **Tool** owns
-the schedule, so it outlives this session, a restart of the harness and a reboot. It
+**An implementation spawn with no tick is incomplete.** Its last step creates an **Item
+automation** (op 11), one per item. **A review spawn creates none**, because a reviewer
+reaches no transition ([Adversarial review is a verb](#adversarial-review-is-a-verb)). The
+**Tool** owns the schedule, so it outlives this session, a restart of the harness and a
+reboot. It
 ticks once a minute. A batch of five siblings gets five automations, one each.
 Definitions: the **Item automation** and **Position** entries in
 [`CONTEXT.md`](CONTEXT.md). Rationale:
@@ -917,7 +919,7 @@ Until the item that removes that gap lands, **read the item's labels before you 
 any question about a worker**
 ([`references/tracker-reads.md`](references/tracker-reads.md)).
 
-**Three outcomes carry a label the tick wrote, and it is one swap in one call.** The
+**One outcome carries a label the tick wrote, and it is one swap in one call.** The
 work-state family has four values and it never stacks. So the tick removes every value it
 found and adds the new one in the same command. **It moves no card**, because the board is
 an input ([Board status](#board-status)). That write is also what stops a repeat fire on the
@@ -934,8 +936,8 @@ posts one `Re-prompt:` comment and moves nothing. The second writes `needs-human
 the maintainer clears that label
 ([`docs/adr/0058-one-re-prompt-then-a-human.md`](docs/adr/0058-one-re-prompt-then-a-human.md)).
 
-**Four outcomes carry nothing at all**, and the tick exits 2 on each of them. The item stays
-where it is, and the row below is the whole of what is left to do.
+**Three outcomes carry nothing at all**, and the tick exits 2 on each of them. The item
+stays where it is, and the row below is the whole of what is left to do.
 
 | Outcome | What the tick already wrote | What is left for you |
 |---|---|---|
@@ -1447,8 +1449,8 @@ it. Shape output for acting on, not for completeness:
   `#57 story proof · evidence note on #57 · spec PR #64.` The parent number is
   the fact a fresh session cannot infer, because the item that reached the finish was the
   last child ([The story proof](#the-story-proof)).
-- **Both counts come from the tracker, so restate both.**
-  [On the tick](#on-the-tick--what-it-wrote-and-what-is-left-for-you) says how to read each one.
+- **The retry count comes from the tracker, so restate it.**
+  [On the tick](#on-the-tick--what-it-wrote-and-what-is-left-for-you) says how to read it.
   `#38 stalled in implementation ·
   checklist 4/7 · retry 1 of 1. Context reset, re-prompted with the unticked steps.` On the
   second stall the tick already wrote `needs-human`, so name the label and stop:
