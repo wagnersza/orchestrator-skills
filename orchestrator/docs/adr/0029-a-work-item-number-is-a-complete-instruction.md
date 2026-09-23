@@ -49,7 +49,7 @@ Three parts, and each one removes a question the maintainer had to answer.
 
 - **A wrong classification is visible in one line.** The spawn report already names
   the routed skill, the role, the model and the effort per child
-  ([Reporting to the user](../../SKILL.md#reporting-to-the-user)). A batch that needed
+  ([Reporting to the user](../../references/reporting.md#reporting-to-the-user)). A batch that needed
   one worker shows as five spawn lines.
 - **The tracker read is the one hard stop.** A failed read cannot say whether an item
   is a parent. The session reports the failed read and spawns nothing, because a guess
