@@ -36,7 +36,7 @@ item and one per pull request:
                       "body": "## Parent\n\n#178\n",
                       "parent": 178,
                       "labels": ["in-progress"],
-                      "comments": ["Verdict: approve", "an earlier note"],
+                      "comments": ["Re-prompt: 0 of 10 boxes", "an earlier note"],
                       "board": "To do"}},
      "pull_requests": {"48": {"state": "MERGED",
                               "merge_commit": "a1b2c3d",

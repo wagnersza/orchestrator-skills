@@ -154,7 +154,7 @@ seam, and it writes nothing at all:
     python3 <plugin root>/scripts/worker_state.py phase --item 62 \\
         --worktree /path/to/worktree \\
         --process '<the pattern the harness reference gives>' \\
-        --rounds 3 --stall-after 30m --repo OWNER/NAME \\
+        --stall-after 30m --repo OWNER/NAME \\
         --require-gate '<one command per required layer, from the Config>'
 
 | Code | Meaning |
@@ -173,25 +173,23 @@ which of them a tick can reach:
 | `implementation-complete` | every box in the **Checklist** is ticked, and the **Gate record** proves every required layer green at `HEAD` |
 | `gates-unproven` | the checklist reads complete, and the gate record does not prove it |
 | `merged` | the pull request whose head is this worktree's branch reads `MERGED` |
-| `verdict-approve` | the newest `Verdict:` comment reads `approve` |
-| `verdict-request-changes` | the newest one reads `request-changes`, inside the round bound |
-| `rounds-exhausted` | `--rounds` `Verdict:` comments, and the newest one asks for changes |
 | `dead` | no live agent process with its working directory inside the worktree |
 | `stalled` | a live process, and a spawn and work product both older than `--stall-after` |
 | `unreadable` | the tracker read failed, so no fact is available |
 
-A **Review round** count is the number of `Verdict:` comments on the work item. So
-nothing stores a counter, and `--rounds` is the whole bound.
+**No outcome here reads a reviewer's opinion.** An **Adversarial review** is a verb the
+maintainer asks for, and the reviewer posts one comment for a human to read. A judgement
+has no exit code, so it can never be the input of a deterministic gate (ADR 0066).
 
-**A re-prompt count is the number of `Re-prompt:` comments on the same item.** It takes that
-same shape, so nothing stores it either, and a restart reads the number a maintainer reads.
-The bound is one and it is not an argument: a bound a caller can raise is a climb, and no
-rung is a fact a machine can read (ADR 0058).
+**A re-prompt count is the number of `Re-prompt:` comments on the work item.** Nothing
+stores it, so a restart reads the number a maintainer reads. The bound is one and it is not
+an argument: a bound a caller can raise is a climb, and no rung is a fact a machine can
+read (ADR 0058).
 
-**This tick computes the position, and it reads no label of its own to do that.**
-`position_of` answers where the item sits in its run, from the work-state label, the
-`Verdict:` comment list and the last write to the **Checklist**. The rule has one home,
-the Position entry of `orchestrator/CONTEXT.md`, and this module restates no part of it.
+**This tick computes the position, and it reads one label to do that.** `position_of`
+answers where the item sits in its run, from the **Work-state label**s alone. The rule has
+one home, the Position entry of `orchestrator/CONTEXT.md`, and this module restates no part
+of it.
 
 **A position of human review reads one fact more: the pull request for this worktree's
 branch.** A `MERGED` pull request is the `merged` outcome, and it is a whole **Close
@@ -200,8 +198,8 @@ all is a quiet tick too. So the maintainer merges on the tracker, and no verb ca
 words (ADR 0057).
 
 **`needs-human` answers before every fact except the tracker read.** The tick reads that
-label and exits quiet, whatever the checklist, the verdicts and the process say. Only the
-maintainer removes that label, so a paused item costs one cheap read a minute.
+label and exits quiet, whatever the checklist and the process say. Only the maintainer
+removes that label, so a paused item costs one cheap read a minute.
 
 `unreadable` is the one outcome no **Position** gates, because a read that
 failed cannot say where the item sits. It is an outcome and not a silence:
@@ -224,28 +222,20 @@ push and no script rejects a commit. The item stops before review instead, and t
 session re-prompts the worker (ADR 0036).
 
 The two signals are work product, so neither can report success for a dead worker
-(ADR 0018). The item's **Position** names which one a tick reads, so no flag carries
-the worker's role:
+(ADR 0018). Every worker a tick watches is an implementation worker, so no flag carries
+a role:
 
-- **complete** — in implementation, every box in
-  `.orchestrator/checklist-<item>.md` is ticked, **and** the **Gate record** in
-  `.orchestrator/gates-<item>.jsonl` holds a green line for every layer
+- **complete** — every box in `.orchestrator/checklist-<item>.md` is ticked, **and** the
+  **Gate record** in `.orchestrator/gates-<item>.jsonl` holds a green line for every layer
   `--require-gate` names, at the current `HEAD`. A ticked box is a claim, and the
-  record is the fact behind it (ADR 0036). In a review round, a comment on the work
-  item carries a `Verdict:` line whose value is `approve` or `request-changes`.
-- **stalled** — in implementation, the stall window starts at the newest of three
+  record is the fact behind it (ADR 0036).
+- **stalled** — the stall window starts at the newest of three
   facts, and it is older than `--stall-after`: the spawn's own write of the brief,
   the checklist file's write time, and the branch's last commit time. **The spawn is
   in that list so that a fresh worker is never stalled** (ADR 0063). A worktree
   inherits the default branch's commit, which the worker never made, and that commit
   is often older than the window at the moment of the spawn. This
-  is the freshness of work product, not the liveness of a shell. In a review round
-  the freshness fact is the newest `Verdict:` comment, and this seam reads no commit
-  at all. A reviewer inherits the implementation's commit, so its fresh worktree
-  starts life with work product that is already stale. A verdict that exists fires
-  its own outcome above. So a review tick that reaches the stall check has no
-  verdict, and no stall can be proven. `dead` is the reviewer's signal instead, and
-  it needs no window.
+  is the freshness of work product, not the liveness of a shell.
 
 **The tracker CLI is an argument.** `--tracker-cli` picks which command reads the
 labels and the comments. `--tracker-host` names the server where the tracker is
@@ -289,9 +279,7 @@ every other row of the table above writes nothing:
 
 | Outcome | What the tick writes |
 |---|---|
-| `implementation-complete` | the review state, in one label swap. It holds where `--review` says the policy is on |
-| `verdict-approve` | the review state, in one label swap |
-| `rounds-exhausted` | the review state, in one label swap |
+| `implementation-complete` | the review state, in one label swap |
 | `merged` | steps 4 to 8 of a **Close transaction**, through `scripts/close_item.py` in this process |
 | `stalled` | one `Re-prompt:` comment under the bound, and `needs-human` at it |
 | every other outcome | nothing, so the item stays where it is, and the code is 2 |
@@ -303,10 +291,10 @@ writes `needs-human` and re-prompts nothing. So no rung is climbed and no model 
 terminal it cannot see (ADR 0058). `dead` keeps its own answer, because nothing listens
 there and a re-prompt cannot reach a process that is gone.
 
-**The finish is the one row that can hold its write.** A **Review round** comes next where
-`--review` says the policy is on. A worker still owns the item there, so the review state
-would read as a lie. The hold prints why, and the item stays where it is. The round's own
-verdict writes the review state when the loop concludes.
+**The finish has one behaviour, and nothing holds its write.** A ticked checklist with a
+green **Gate record** hands the item to a human, whatever else the project configures. An
+**Adversarial review** is a verb outside this loop, so no policy flag reaches this seam
+(ADR 0066).
 
 **One function owns every work-state label swap in this seam**, and it runs in the
 process that already read the labels. So no second read can disagree with the first, and
@@ -421,11 +409,6 @@ EXIT_NOTHING = 1
 # `phase` gives them, so one code has one meaning in both subcommands.
 EXIT_REFUSED = 2
 EXIT_APPLIED = 4
-
-# The literal the review prompt writes and this seam reads. It is quoted in both
-# places, so a writing pass leaves it byte-identical (ADR 0018).
-VERDICT_VALUES = ("approve", "request-changes")
-VERDICT = re.compile(r"Verdict:\**\s*`?(" + "|".join(VERDICT_VALUES) + r")\b")
 
 # The literal this seam writes on a re-prompt and counts back on the next stall. It is
 # quoted here and in `orchestrator/CONTEXT.md`, so a writing pass leaves it byte-identical
@@ -615,21 +598,12 @@ def unticked(path):
     ]
 
 
-def verdicts_in(bodies):
-    """Every `approve` or `request-changes` the comments carry, oldest first.
-
-    The length is the **Review round** number, because one round posts one verdict.
-    So the count is read from the tracker and nothing stores a counter (ADR 0022).
-    """
-    return [match.group(1) for body in bodies if (match := VERDICT.search(body or ""))]
-
-
 def re_prompts_in(bodies):
     """How many `Re-prompt:` comments the work item carries.
 
-    The re-prompt count, in the shape the **Review round** count already takes. It is
-    scoped to the item and to nothing else, so no re-spawn resets it and a restart reads
-    the number a maintainer reads. Nothing stores it (ADR 0058).
+    The re-prompt count. It is scoped to the item and to nothing else, so no re-spawn
+    resets it and a restart reads the number a maintainer reads. Nothing stores it
+    (ADR 0058).
 
     **The literal has to open a line**, which is where this seam writes it. So a review note
     or a maintainer's comment that quotes the literal spends no retry.
@@ -834,15 +808,8 @@ def newest_work_product(worktree, item):
 
     Two facts, and the newer one wins: the checklist file's write time and the
     branch's last commit time. Where neither is readable there is nothing to
-    date, so a stall cannot be proven. That is the reviewer risk ADR 0018
-    accepted and ADR 0022 narrows. A healthy reviewer that produces no work
-    product still does not read as stalled. A dead one is reported by its absent
-    process instead.
-
-    **Only implementation reaches this function.** A review round always has a verdict
-    behind it, because that verdict is what computes the position. The verdict fires its
-    own outcome first. So a reviewer that has posted none is in implementation here, and
-    the commit it inherited is what dates its work.
+    date, so a stall cannot be proven. A worker that produces no work product at all is
+    reported by its absent process instead, which is the `dead` outcome.
     """
     facts = []
     path = checklist_path(worktree, item)
@@ -889,7 +856,7 @@ def window_start(worktree, item):
     fires, because the window must pass since the spawn as well.
 
     Where neither fact is readable there is nothing to date, so a stall cannot be
-    proven. That is the reviewer risk ADR 0018 accepted and ADR 0022 narrows.
+    proven. The `dead` outcome answers that worker instead, and it needs no window.
     """
     facts = []
     newest, source = newest_work_product(worktree, item)
@@ -923,51 +890,28 @@ NEEDS_HUMAN = "needs-human"
 WORK_STATES = (READY_FOR_AGENT, IN_PROGRESS, TO_REVIEW, NEEDS_HUMAN)
 
 
-# The three values of a **Position**. The concept has one home, the Position entry of
+# The two values of a **Position**. The concept has one home, the Position entry of
 # `orchestrator/CONTEXT.md`, and this seam restates no part of the rule.
 HUMAN_REVIEW = "human-review"
-REVIEW_ROUND = "review-round"
 IMPLEMENTATION = "implementation"
 
 
-def checklist_written(worktree, item):
-    """When the **Checklist** was last written, or None where there is no file.
+def position_of(labels):
+    """The **Position** of one work item, computed from facts and cached nowhere.
 
-    One of the three facts a **Position** reads. The tick already reads the same file
-    for the **Completion signal**, so a position needs no fact of its own.
+    Two values, and the rule has one home: the Position entry of
+    `orchestrator/CONTEXT.md`. The fact is the one a tick already read, and it is the
+    **Work-state label**s on the item.
+
+    **The review-round value retired with the round it named.** It was computed from a
+    reviewer's comment, and no seam reads one now. A reviewer's opinion has no exit code,
+    so an **Adversarial review** is a verb a maintainer asks for rather than a position
+    the loop can reach (ADR 0066).
     """
-    try:
-        return checklist_path(worktree, item).stat().st_mtime
-    except OSError:
-        return None
+    return HUMAN_REVIEW if TO_REVIEW in labels else IMPLEMENTATION
 
 
-def position_of(labels, bodies, written, verdict_written=None):
-    """The **Position** of one work item, computed from facts and read from no label.
-
-    Three values, and the rule has one home: the Position entry of
-    `orchestrator/CONTEXT.md`. The facts are the ones a tick already read: the
-    **Work-state label**s and the `Verdict:` comment list. `written` is the third one,
-    and it is when the **Checklist** file was last written.
-
-    `verdict_written` is when the newest `Verdict:` comment arrived. The **Tracker
-    adapter** answers comment bodies and no dates, so a tick passes nothing here and a
-    verdict that exists reads as a review round. Where a caller does date the verdict, a
-    checklist written after it means the fix round started, so the position is
-    implementation again.
-    """
-    if TO_REVIEW in labels:
-        return HUMAN_REVIEW
-    if not verdicts_in(bodies):
-        return IMPLEMENTATION
-    if verdict_written is None or written is None or verdict_written > written:
-        return REVIEW_ROUND
-    return IMPLEMENTATION
-
-
-def transition(
-    item, worktree, current, bodies, rounds, pattern, stall_after, required=()
-):
+def transition(item, worktree, current, pattern, stall_after, required=()):
     """`(outcome, detail)` for the transition this tick is due, or `(None, detail)`.
 
     `current` is the computed **Position**, and human review never reaches here. The
@@ -980,29 +924,9 @@ def transition(
     reads complete. So `gates-unproven` fires in place of the finish it cannot prove,
     and it competes with neither of the other two (ADR 0036).
 
-    **A review round always answers.** `position_of` reads that position off a
-    `Verdict:` comment, so the comment list here can never be empty. One of the three
-    verdict outcomes always fires. That is why only implementation reads the checklist,
-    the process and the stall window that follow.
+    **Implementation is the one position that reaches here.** Human review is answered
+    before this call, and no third position exists (ADR 0066).
     """
-    if current == REVIEW_ROUND:
-        values = verdicts_in(bodies)
-        number = len(values)
-        if values[-1] == "approve":
-            return "verdict-approve", (
-                f"a comment on work item #{item} carries Verdict: approve on "
-                f"round {number} of {rounds}"
-            )
-        if number >= rounds:
-            return "rounds-exhausted", (
-                f"work item #{item} carries {number} Verdict: comments against a "
-                f"round bound of {rounds}, and the newest one asks for changes"
-            )
-        return "verdict-request-changes", (
-            f"a comment on work item #{item} carries Verdict: request-changes on "
-            f"round {number} of {rounds}"
-        )
-
     path = checklist_path(worktree, item)
     ticked, total = boxes(path)
     if total and ticked == total:
@@ -1044,18 +968,14 @@ def transition(
 
 
 # The outcome that reads a **Completion signal** of a ticked **Checklist**. It is the one
-# outcome whose transition can hold, so it is named rather than repeated.
+# outcome that ends in a label swap, so it is named rather than repeated.
 FINISH = "implementation-complete"
 
 # The transition each outcome carries: the **Work-state label** the item ends on. An
 # outcome that is absent from this map writes nothing, and the item stays where it is.
-# Three outcomes hand the work to a human, and every other one says something about the
+# One outcome hands the work to a human, and every other one says something about the
 # worker or about the tracker read rather than about the item.
-APPLIES = {
-    FINISH: TO_REVIEW,
-    "verdict-approve": TO_REVIEW,
-    "rounds-exhausted": TO_REVIEW,
-}
+APPLIES = {FINISH: TO_REVIEW}
 
 # The outcome that reads a merged pull request on the item's own branch. It is the one
 # outcome whose transition is a whole **Close transaction** rather than a label swap.
@@ -1184,9 +1104,7 @@ def stall_answer(item, detail, bodies, labels):
     )
 
 
-def plan(
-    item, worktree, pattern, rounds, stall_after, tracker, required=(), review=False
-):
+def plan(item, worktree, pattern, stall_after, tracker, required=()):
     """What this tick would do, computed and applied by nothing.
 
     **This is the one code path both subcommands read.** `phase` prints the line and
@@ -1236,25 +1154,17 @@ def plan(
             f"reads no further and only the maintainer clears it",
         )
 
-    current = position_of(labels, bodies, checklist_written(worktree, item))
+    current = position_of(labels)
     if current == HUMAN_REVIEW:
         return in_human_review(item, worktree, tracker, labels)
 
     outcome, detail = transition(
-        item, worktree, current, bodies, rounds, pattern, stall_after, required=required
+        item, worktree, current, pattern, stall_after, required=required
     )
     if not outcome:
         return decision(QUIET, "", f"nothing: {detail}")
     if outcome == STALLED:
         return stall_answer(item, detail, bodies, labels)
-    if outcome == FINISH and review:
-        return decision(
-            REFUSED,
-            outcome,
-            f"{outcome}: {detail}, and the review policy is on, so a Review round comes "
-            f"before the review state",
-            labels=labels,
-        )
     add = APPLIES.get(outcome, "")
     if not add:
         return decision(REFUSED, outcome, f"{outcome}: {detail}", labels=labels)
@@ -2241,9 +2151,7 @@ def board_report(tracker, board):
 # --- the two subcommands over that one plan ---------------------------------
 
 
-def phase(
-    item, worktree, pattern, rounds, stall_after, tracker, required=(), review=False
-):
+def phase(item, worktree, pattern, stall_after, tracker, required=()):
     """The `phase` answer: `(exit code, the one line to print)`.
 
     The plan half of the seam, so it writes nothing at all: no tracker command and no
@@ -2251,16 +2159,7 @@ def phase(
     it. So a caller reads one bit and a maintainer dry-runs one item against a live
     tracker.
     """
-    answer = plan(
-        item,
-        worktree,
-        pattern,
-        rounds,
-        stall_after,
-        tracker,
-        required=required,
-        review=review,
-    )
+    answer = plan(item, worktree, pattern, stall_after, tracker, required=required)
     if answer["disposition"] == GONE:
         return EXIT_GONE, answer["line"]
     if answer["disposition"] == QUIET:
@@ -2272,11 +2171,9 @@ def tick(
     item,
     worktree,
     pattern,
-    rounds,
     stall_after,
     tracker,
     required=(),
-    review=False,
     close_flags=("", "main", ""),
 ):
     """The `tick` answer: `(exit code, the one line to print)`.
@@ -2293,26 +2190,16 @@ def tick(
     one `Re-prompt:` comment and no label. At the bound it is `needs-human`, and the code is
     the refusal because a seam that asks for a human refused to act (ADR 0058).
 
-    An outcome with no transition is a refusal, and the item stays where it is. Four facts
-    reach that branch:
+    An outcome with no transition is a refusal, and the item stays where it is. Three
+    facts reach that branch:
 
     1. A **Gate record** that is not green at `HEAD`.
     2. A dead worker, which no re-prompt can reach.
-    3. A fix round, which is still the same worker's own work.
-    4. A tracker read that failed.
+    3. A tracker read that failed.
 
     Each one keeps its printed line, so a maintainer reads which it was.
     """
-    answer = plan(
-        item,
-        worktree,
-        pattern,
-        rounds,
-        stall_after,
-        tracker,
-        required=required,
-        review=review,
-    )
+    answer = plan(item, worktree, pattern, stall_after, tracker, required=required)
     if answer["disposition"] == GONE:
         return EXIT_GONE, answer["line"]
     if answer["disposition"] == QUIET:
@@ -2360,8 +2247,7 @@ def add_tracker_arguments(parser):
     parser.add_argument(
         "--repo",
         default="",
-        help="the tracker repository the labels and the verdict comments sit on, as "
-        "OWNER/NAME",
+        help="the tracker repository the labels and the comments sit on, as OWNER/NAME",
     )
     parser.add_argument(
         "--tracker-cli",
@@ -2382,7 +2268,7 @@ def add_tracker_arguments(parser):
     )
     parser.add_argument(
         "--gh-fixture",
-        help="JSON that stands in for any tracker read, so a verdict and a position "
+        help="JSON that stands in for any tracker read, so a label and a position "
         "need no network and no login (used by the tests). It keeps this name "
         "because scripts/close_item.py reads the same file in the same format",
     )
@@ -2429,7 +2315,7 @@ def add_tick_arguments(parser, worker_required=True):
     once, so the two can never drift apart.
 
     `worker_required` is False for `tick`, because `tick --claim` names one transition
-    and reads no worker at all. Every other form of `tick` still needs the four, and
+    and reads no worker at all. Every other form of `tick` still needs the three, and
     `main` is where that check lives. So a flag with a typo still exits 64.
     """
     parser.add_argument("--item", required=True, type=int, help="the work item number")
@@ -2444,14 +2330,6 @@ def add_tick_arguments(parser, worker_required=True):
         "fires when no process that matches it works inside the worktree. The caller "
         "reads it from references/harnesses/<harness>.md, so this seam names no "
         "harness",
-    )
-    parser.add_argument(
-        "--rounds",
-        required=worker_required,
-        type=int,
-        metavar="N",
-        help="the Review round bound, which the caller resolves from `review.rounds` "
-        "in the Config. There is no default, so the bound is never hardcoded here",
     )
     parser.add_argument(
         "--stall-after",
@@ -2470,14 +2348,6 @@ def add_tick_arguments(parser, worker_required=True):
         "Repeat the flag once per required layer. The caller resolves the list from the "
         "gates: block of the Config, so this seam names no command of its own. With no "
         "--require-gate nothing is required, and gates-unproven can never fire",
-    )
-    parser.add_argument(
-        "--review",
-        action="store_true",
-        help="the review policy is on, which the caller resolves from `review.enabled` "
-        "in the Config. A finish then holds the swap to the review state, because a "
-        "Review round comes first and a worker still owns the item. With no --review a "
-        "finish reaches the review state, which is the policy every other flag assumes",
     )
 
 
@@ -2642,7 +2512,6 @@ def main(argv=None):
             "The plan half of the seam, and the dry run of a tick. Exit 0 means a "
             "transition is due, and the printed line names which one: "
             "implementation-complete, gates-unproven, merged, "
-            "verdict-approve, verdict-request-changes, rounds-exhausted, "
             "dead, stalled, unreadable. "
             "Exit 1 means nothing to do, so the run records as skipped at no token "
             "cost. Exit 3 means the worktree is gone. It writes no tracker command and "
@@ -2769,8 +2638,8 @@ def main(argv=None):
 
     # `phase` and `tick` are the last two subcommands, and they read one plan, so one
     # validation serves both. **A claim reads no worker.** It names one transition and
-    # applies it, so `tick --claim` is the one form that can leave the four worker flags
-    # out. Every other form still needs all four, and a missing one is a usage error
+    # applies it, so `tick --claim` is the one form that can leave the three worker flags
+    # out. Every other form still needs all three, and a missing one is a usage error
     # rather than a quiet tick.
     claiming = args.command == "tick" and args.claim
     stall_after = None
@@ -2780,7 +2649,6 @@ def main(argv=None):
             for flag, value in (
                 ("--worktree", args.worktree),
                 ("--process", args.process),
-                ("--rounds", args.rounds),
                 ("--stall-after", args.stall_after),
             )
             if value is None
@@ -2790,8 +2658,6 @@ def main(argv=None):
                 f"{', '.join(missing)}: a tick that computes reads a worker, so every "
                 f"one of those flags is required without --claim"
             )
-        if args.rounds < 1:
-            parser.error(f"--rounds must be a bound of 1 or more, not {args.rounds}")
         try:
             stall_after = parse_duration(args.stall_after)
         except ValueError as exc:
@@ -2819,22 +2685,18 @@ def main(argv=None):
             args.item,
             args.worktree,
             args.process,
-            args.rounds,
             stall_after,
             tracker,
             required=required,
-            review=args.review,
         )
     else:
         code, line = tick(
             args.item,
             args.worktree,
             args.process,
-            args.rounds,
             stall_after,
             tracker,
             required=required,
-            review=args.review,
             close_flags=(args.checkout, args.default_branch, args.teardown_command),
         )
     print(line)
