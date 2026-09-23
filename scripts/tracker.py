@@ -18,6 +18,11 @@ else. So `labelled_items` reads one of those sets by label and the card comes ba
 same command. `board_cards` is the whole-board list, and the `report` verb is its one caller
 (ADR 0064).
 
+**The board is also written, at three moments, through one method.** `card_write` moves one
+item's card to one column, and a caller names that column rather than an id. The spawn claim
+writes `In progress`, the tick that writes `to-review` writes `In review`, and the close
+writes `Done` after its teardown (ADR 0067).
+
 **Every list read here refuses rather than truncate.** A page that comes back full can be
 one page of a longer list, so no row on it can be counted and no absent row is absent.
 `check_page` raises `TrackerError` on that count, and it names the constant to raise. A
@@ -42,8 +47,9 @@ item and one per pull request:
                               "merge_commit": "a1b2c3d",
                               "head": "someone/54-a-branch"}}}
 
-`board` is the `Status` option name on that item's card. It is the one fact a card
-answers, and no caller writes it back (ADR 0054). `head` is the branch that pull
+`board` is the `Status` option name on that item's card. It is the one fact a card read
+answers, and a fixture holds it for a read alone: a card write in fixture mode records its
+command and leaves this key as it found it (ADR 0067). `head` is the branch that pull
 request was opened from, and it is what a caller matches to find the pull request for
 a branch. `title` and `body` are what a queue read asks for, and the body is where the
 `## Parent`, `## Blocked by` and `## Touches` edges live. `parent` is the native
@@ -92,6 +98,19 @@ PAGE_SIZE = 100
 # only that tracker's reads name either of them.
 CARD_FIELD = "projectItems"
 STATUS_FIELD = "status"
+
+# The same single-select field as `STATUS_FIELD`, spelled the way a field list answers it.
+# An item read answers the field in lower case and a field list answers it capitalised, so
+# a card write names this constant and a card read names the one above.
+STATUS_FIELD_NAME = "Status"
+
+# The three columns a seam writes, one per moment of the work (ADR 0067). The spawn claim
+# writes the first, the tick that writes `to-review` writes the second, and the close writes
+# the third after its teardown. The start column and the two lanes before it are the
+# maintainer's own, and nothing here writes one.
+COLUMN_IN_PROGRESS = "In progress"
+COLUMN_IN_REVIEW = "In review"
+COLUMN_DONE = "Done"
 
 # The field that carries a work item's native parent link, which is one half of the
 # **Parent edge**. The `## Parent` line in the body is the other half, and the descent
@@ -657,8 +676,8 @@ class Tracker:
     def board_cards(self, project, owner):
         """Every card on one board as `{work item number: Status name}`, read once.
 
-        **This is the one question the board answers, and nothing writes it back**
-        (ADR 0054). **The `report` verb is its one caller** (ADR 0064). No gate reads it:
+        **This is the whole-board read, and the `report` verb is its one caller**
+        (ADR 0064). `card_write` makes an unfiltered read of its own. No gate reads it:
         a gate needs the card of an item that can start, and `labelled_items` answers that
         with the item.
 
@@ -705,6 +724,171 @@ class Tracker:
                 },
             )
         return self._cards[1]
+
+    def card_write(self, item, column, project, owner):
+        """Move one work item's card to `column`, and answer the clause a caller prints.
+
+        **The board is a mirror, and a seam writes the card at the moment the work moves**
+        (ADR 0067). This is that write, and it sits beside the card read above because the
+        two are one concept. Three callers reach it: the spawn claim, the tick that writes
+        `to-review`, and the close after its teardown.
+
+        **A caller holds the column name, and this resolves every id the write needs.** So
+        no configuration file holds a `Status` field id or an option id, and a renamed column
+        is one edit. The resolution costs three reads: the project's own id, the field list
+        that carries the option ids, and the card list that carries this item's card id.
+
+        **It is safe to call twice with the same column.** The card list already answers the
+        `Status` name, so a card that sits in the target column costs the reads and no write.
+        That is what makes the `Done` write safe beside the board's own
+        **item closed to Done** workflow, which writes the same column for most items.
+
+        **Three cases answer without raising**, because each one is a supported
+        configuration: a tracker with no project board, an item with no card, and a column
+        name the board does not hold. A command that fails raises `TrackerError`, the way
+        every other write here does, and the caller reports it.
+
+        **In fixture mode the write is recorded and no id is resolved.** A fixture holds no
+        project id and no option id, so the recorded line names the item and the column
+        rather than the four ids the live command carries. That line is what a test reads.
+        """
+        if self.cli != GH or not (column and project and owner):
+            return ""
+        if self.path is not None:
+            self.write(
+                [
+                    GH,
+                    "project",
+                    "item-edit",
+                    "--item",
+                    str(item),
+                    "--project",
+                    str(project),
+                    "--owner",
+                    owner,
+                    "--status",
+                    column,
+                ]
+            )
+            return f"the card of work item #{item} moved to {column!r}"
+        card_id, status = self._card_ids(project, owner).get(int(item), ("", ""))
+        if not card_id:
+            return (
+                f"work item #{item} has no card on project {project}, so nothing moved"
+            )
+        if status == column:
+            return f"the card of work item #{item} already sits in {column!r}"
+        field_id, option_id = self._status_option(project, owner, column)
+        if not option_id:
+            return (
+                f"the board has no {column!r} column, so the card of work item #{item} "
+                f"did not move"
+            )
+        self.write(
+            [
+                GH,
+                "project",
+                "item-edit",
+                "--id",
+                card_id,
+                "--project-id",
+                self._project_id(project, owner),
+                "--field-id",
+                field_id,
+                "--single-select-option-id",
+                option_id,
+            ]
+        )
+        was = status or "no column"
+        return f"the card of work item #{item} moved from {was!r} to {column!r}"
+
+    def _card_ids(self, project, owner):
+        """Every card on one board as `{work item number: (card id, Status name)}`.
+
+        **This read carries no filter, and `board_cards` does.** A write needs the id of the
+        card it moves, and the filtered read leaves out every card in `Done`. A repeat write
+        of `Done` would then read as an item with no card, so the repeat would be silent
+        rather than safe (ADR 0067).
+
+        A read that fills its own page refuses, through `check_page`, for the reason every
+        other list read here refuses: a card past the page is invisible, and a caller must
+        never read that as a missing card.
+
+        A card with no work item behind it is a draft card. It carries no number, and it is
+        left out.
+        """
+        data = read_json(
+            [
+                GH,
+                "project",
+                "item-list",
+                str(project),
+                "--owner",
+                owner,
+                "--format",
+                "json",
+                "--limit",
+                str(BOARD_LIMIT),
+            ]
+        )
+        rows = check_page(list(data.get("items") or []), BOARD_LIMIT, "BOARD_LIMIT")
+        return {
+            int((entry.get("content") or {}).get("number") or 0): (
+                str(entry.get("id") or ""),
+                str(entry.get("status") or ""),
+            )
+            for entry in rows
+            if (entry.get("content") or {}).get("number")
+        }
+
+    def _status_option(self, project, owner, column):
+        """`(field id, option id)` for one column name, or a pair of empty strings.
+
+        **A write needs the option id, and a caller holds the name** (ADR 0067). So the
+        resolution lives here and no caller learns an id. A board with no `Status` field,
+        and a name that field does not offer, both answer the empty pair.
+        """
+        data = read_json(
+            [
+                GH,
+                "project",
+                "field-list",
+                str(project),
+                "--owner",
+                owner,
+                "--format",
+                "json",
+            ]
+        )
+        for field in data.get("fields") or []:
+            if (field.get("name") or "") != STATUS_FIELD_NAME:
+                continue
+            for option in field.get("options") or []:
+                if (option.get("name") or "") == column:
+                    return str(field.get("id") or ""), str(option.get("id") or "")
+        return "", ""
+
+    def _project_id(self, project, owner):
+        """The board's own id, which the card write names beside the field id.
+
+        The project number and the owner address a board for a human. The write takes the
+        board's id instead, and this is the one read that answers it.
+        """
+        return str(
+            read_json(
+                [
+                    GH,
+                    "project",
+                    "view",
+                    str(project),
+                    "--owner",
+                    owner,
+                    "--format",
+                    "json",
+                ]
+            ).get("id")
+            or ""
+        )
 
     # --- the argv a seam runs or prints
 
@@ -872,8 +1056,8 @@ class Tracker:
         close = ("close", self.close_argv(item, comment))
         return [("note", note), close] if note else [close]
 
-    # There is no card write here. The board is an input, so this adapter holds one
-    # board read and no board write (ADR 0054).
+    # The card write is `card_write`, and it sits beside the card read rather than here,
+    # because a read and a write of one surface are one concept (ADR 0067).
 
     def comment_argv(self, item, body):
         """The argv that posts one comment on a work item.
@@ -918,7 +1102,8 @@ class Tracker:
         never runs there.
 
         **One caller, and it walks the answer in Python.** A `--jq` filter here was a
-        second parser of the same recipe, and it served the card write alone (ADR 0054).
+        second parser of the same recipe (ADR 0054). `_card_ids` builds the unfiltered form
+        of this argv, because a card write must see a card in `Done` too (ADR 0067).
         """
         return [
             GH,
