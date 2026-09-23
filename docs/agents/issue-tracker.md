@@ -89,12 +89,22 @@ The orchestrator reads these from here; its own config never redefines them.
 | stopped | `needs-human` | A seam refused. **The one label that stops every tick.** |
 | done | *(closed)* | PR merged and the issue closed. |
 
-**A seam writes every value in this table, and no session writes one by hand.** The tick of
-an **Item automation** applies the transition it computed, in the process that read the
-labels. The removals and the addition are one command, so nothing can stack. The
-orchestrator's spawn claim runs that same writer under one named transition, and the close
-seam writes the last value as one step of its own transaction. Rationale:
+**A seam writes every value in this table, and no session moves an item from one value to
+another by hand.** The tick of an **Item automation** applies the transition it computed, in
+the process that read the labels. The removals and the addition are one command, so nothing
+can stack. The orchestrator's spawn claim runs that same writer under one named transition,
+and the close seam writes the last value as one step of its own transaction. Rationale:
 [`orchestrator/docs/adr/0056-the-tick-applies-the-transition-it-computed.md`](../../orchestrator/docs/adr/0056-the-tick-applies-the-transition-it-computed.md).
+
+**`ready-for-agent` has one other writer, and it writes it on create.** An inline
+item-writing flow (`/to-tickets`, `/to-spec`, `/triage`) writes that label on each item it
+files, beside the `## Touches` block and the parent edge it already writes. The label means
+the item is fully specified, and the flow that wrote the specification is the one that knows
+it. **The drag into the start column stays the maintainer's, and it stays the
+authorisation**, so the label alone still starts nothing. A `user-story` parent takes no
+work-state label at all. `hooks/refuse.py` exempts a create for this reason, and it still
+denies every `edit`. Rationale:
+[`orchestrator/docs/adr/0068-an-item-writing-flow-writes-the-start-label.md`](../../orchestrator/docs/adr/0068-an-item-writing-flow-writes-the-start-label.md).
 
 **`needs-human` carries one comment that says what the seam saw, and only the maintainer
 removes it.** Every tick reads it first and stays quiet, whatever the other facts say. So a
@@ -108,8 +118,8 @@ records why the family that cached the same answer is gone.
 
 Triage roles (`needs-triage`, `needs-info`, `ready-for-human`, `wontfix`) are a
 separate vocabulary — see `triage-labels.md`. The layer 5 story gate writes two more, and
-both stack — see [Story gate labels](#story-gate-labels). The project board is an input
-and nothing writes it — see [Project board](#project-board).
+both stack — see [Story gate labels](#story-gate-labels). The project board mirrors the
+work, and a seam writes the card at three moments — see [Project board](#project-board).
 
 Labels beyond GitHub's defaults don't exist in this repo yet. Create on first use:
 
@@ -150,8 +160,9 @@ it.
 
 The gate files no item for a candidate it drops, so nothing wears either family.
 
-**Neither family reaches the board.** Nothing writes a card at all, so no label of any
-family moves one. That is one statement for both families.
+**Neither family reaches the board.** The three card writes happen at the three moments of
+the work, and no label of either family moves a card. That is one statement for both
+families.
 
 Create on first use:
 
@@ -163,10 +174,10 @@ gh label create rating:worth-exploring --color D4C5F9 --description "The layer 5
 
 ## Project board
 
-This repo's issues are also cards on a GitHub Projects v2 board. **The board is an input,
-and nothing writes it.** One question is asked of it: is this item's card in the start
-column. **What that answer authorises depends on the item's kind.** Three rows, and an item
-matches one:
+This repo's issues are also cards on a GitHub Projects v2 board. **The board is read in one
+column and written in three, and the two sets do not overlap.** One question is asked of it:
+is this item's card in the start column. **What that answer authorises depends on the item's
+kind.** Three rows, and an item matches one:
 
 | Item kind | What authorises it |
 |---|---|
@@ -183,16 +194,26 @@ and
 which narrows
 [`orchestrator/docs/adr/0045-a-story-start-is-automatic-under-two-roofs.md`](../../orchestrator/docs/adr/0045-a-story-start-is-automatic-under-two-roofs.md).
 
-Two coordinates, and the name of the start column:
+Two coordinates, the name of the start column, and the three columns a seam writes:
 
 | What | Value |
 |------|-------|
 | Project | <https://github.com/users/wagnersza/projects/6> — `--owner wagnersza`, number `6` |
 | Start column | `To do`, between `Ready` and `In progress` |
+| The spawn claim writes | `In progress` |
+| The finish writes | `In review` |
+| The close writes | `Done`, after the teardown |
 
-**This file records the start column by name, and never as an option id.** An option id is
-the address a card write needs, and nothing writes a card. So the name is the whole
-coordinate, and the reader compares it to the `Status` name the board answers.
+**This file records every column by name, and never as an option id.** A write needs the
+option id, and the seam resolves that id from the name at run time: the project's own id,
+the `Status` field id, and the option id of the name. So the name is the whole coordinate
+here, a reader compares it to the `Status` name the board answers, and a renamed column is
+one edit in this file. Rationale:
+[`orchestrator/docs/adr/0067-the-board-is-a-mirror-at-three-moments.md`](../../orchestrator/docs/adr/0067-the-board-is-a-mirror-at-three-moments.md).
+
+**`Backlog`, `Ready` and the start column are the maintainer's own lanes, and nothing
+writes one.** The three writes above and the one read never touch the same column, so a card
+the loop wrote and the maintainer drags back stays where they put it.
 
 **A `To do` card is not promoted to the `ready-for-agent` label.** No pass reads one fact
 and writes the other, in either direction, and that holds for a story card too. The two
@@ -200,6 +221,11 @@ facts stay separate. That is what keeps `Ready` the maintainer's own lane. An it
 to `Ready` gains no label, and a labelled standalone leaf left in `Ready` starts nothing. A
 labelled child of an authorised story does start there, because a child's own column is
 never read.
+
+**A filed item carries the label already.** An inline item-writing flow writes
+`ready-for-agent` as it files the item, per the **Work-state labels** section above. So a
+standalone leaf waits in `Backlog` for one drag, and a child of a story the maintainer
+already dragged is startable as soon as it is filed.
 
 ### The one filtered call
 
@@ -232,21 +258,26 @@ and that sentence does not cover it: it reads as unreadable, and never as a miss
 card in `Done` is outside the filter, so it reads as an item with no card. No gate acts on
 either one, because `Done` is not the start column.
 
-The token needs the `read:project` scope (`gh auth refresh -s read:project`). **There is
-no write scope, because there is no write.**
+The token needs the `project` scope (`gh auth refresh -s project`). That scope covers the
+read and the three writes. **A token with `read:project` alone answers every read and fails
+every card write**, and a failed card write is reported and stops nothing, so the symptom is
+a stale card rather than a stopped loop.
 
-**A closed item reaches `Done` through the board's own built-in workflow.** GitHub Projects
-ships an **item closed to Done** workflow, and the maintainer enables it in the project
-settings. Nothing in this repo can switch it on, because that switch is not in the API.
-`/orchestrator-setup` reads whether it is on and says so.
+**A closed item also reaches `Done` through the board's own built-in workflow.** GitHub
+Projects ships an **item closed to Done** workflow, and the maintainer enables it in the
+project settings. Nothing in this repo can switch it on, because that switch is not in the
+API. `/orchestrator-setup` reads whether it is on and says so. **Keep it on**: it and the
+close's own write are safe beside each other, because the seam reads the card before it
+writes and moves nothing that already sits in `Done`.
 
-**A drag is intent, in every column.** No pass writes a card, so a card stays where the
-maintainer put it. A take-back is the maintainer removing `ready-for-agent`, or writing
-`needs-human` with a comment that says why.
+**A drag is intent, in every column.** No pass reads a card and writes it back, so a card
+stays where the maintainer put it. The three writes above happen at the moment the work
+moves, and none of them is a repair pass. A take-back is the maintainer removing
+`ready-for-agent`, or writing `needs-human` with a comment that says why.
 
 **A repo with no board leaves this section out entirely.** The board read then asks
-nothing, the `ready-for-agent` label alone is the whole gate, and that absence is never an
-error.
+nothing, no card write is even attempted, the `ready-for-agent` label alone is the whole
+gate, and that absence is never an error.
 
 ## Pull requests as a triage surface
 
