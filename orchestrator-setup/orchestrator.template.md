@@ -32,7 +32,6 @@ models:
     model:  gpt-5.6-terra
     effort: high
 
-# --- adversarial review (optional) ---
 # --- adversarial review ---
 # It is a verb: `review N` spawns the reviewer, and no tick reaches one. There is no
 # switch and no round bound (ADR 0066). The pair comes from models.review above, and
@@ -67,7 +66,6 @@ evidence:   "make deep green + real-data proof"  # the evidence bar
 # The layer model and every language gate matrix are in references/quality-gates.md.
 # Config is the source of truth for a threshold.
 gates:
-  profile: strict         # strict | lite — `lite` drops layer 4
   langs:   python         # the language families that setup found, comma-separated
   quick:   "make quick"   # layers 1 + 2 — format, lint, types, tests, complexity
   full:    "make full"    # layer 3 — coverage, import boundaries, secrets
@@ -141,9 +139,6 @@ gates:
   each language family and the default for each number are in
   `references/quality-gates.md`. The rationale is
   `orchestrator/docs/adr/0032-quality-gates-are-a-layered-contract.md`.
-  - **profile** is `strict` or `lite`. `strict` runs all four layers. `lite` drops
-    layer 4, so a small repo needs no mutation runner and no SAST. `lite` drops the
-    layer 4 box even when `deep` holds a command.
   - **langs** lists the language families that setup found, comma-separated. `python`
     and `typescript` each have a gate matrix today, and each other family is a work
     item of its own. The marker for `typescript` is a `tsconfig.json`. One hit turns

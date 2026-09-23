@@ -1,6 +1,6 @@
 ---
 name: orchestrator-setup
-description: Zero-touch install, update, and config for the orchestrator skill — always updates the plugin and every dependency skill to the latest version first, then either reconciles an existing config (the default when one exists) or installs every missing dependency and writes a fresh per-project config after asking you to pick the workspace tool (orca/cmux/herdr), harness (claude/codex/pi/copilot/cursor) + models per role, adversarial-review policy, project recipe, and gate profile. Use when the user says "set up the orchestrator", "configure orchestration for this repo", "orchestrator setup", "update the orchestrator", "update the orchestrator skills/plugin", "get the latest orchestrator", "re-run orchestrator setup", points Claude at a repo to get it orchestration-ready, or the orchestrator reports its config is missing or stale.
+description: Zero-touch install, update, and config for the orchestrator skill — always updates the plugin and every dependency skill to the latest version first, then either reconciles an existing config (the default when one exists) or installs every missing dependency and writes a fresh per-project config after asking you to pick the workspace tool (orca/cmux/herdr), harness (claude/codex/pi/copilot/cursor) + models per role, and project recipe. Use when the user says "set up the orchestrator", "configure orchestration for this repo", "orchestrator setup", "update the orchestrator", "update the orchestrator skills/plugin", "get the latest orchestrator", "re-run orchestrator setup", points Claude at a repo to get it orchestration-ready, or the orchestrator reports its config is missing or stale.
 disable-model-invocation: true
 ---
 
@@ -9,7 +9,7 @@ disable-model-invocation: true
 Take a repo from nothing to ready-to-orchestrate with **zero human touch beyond
 answering the option prompts**. Point Claude at the repo, run this skill, and it
 **installs every missing dependency itself** and writes the full config — the
-human only picks options (tool / harness / model / review / recipe / gate profile). No manual
+human only picks options (tool / harness / model / recipe). No manual
 install commands, no hand-edited files.
 
 Two modes, decided in step 0:
@@ -27,9 +27,8 @@ Same posture as `/setup-matt-pocock-skills`: **explore, ask one thing at a time
 check-only setup: this one **runs the install commands**, it doesn't just print
 them.
 
-The vocabulary (Tool, Harness, Model, Vendor, Yolo mode, Adversarial review,
-Project recipe, Gate, Layer) is defined in the orchestrator skill's `CONTEXT.md` —
-use those terms.
+The vocabulary (Tool, Harness, Model, Vendor, Yolo mode, Project recipe, Gate,
+Layer) is defined in the orchestrator skill's `CONTEXT.md` — use those terms.
 
 ## 0. Update everything, then pick a mode
 
@@ -166,8 +165,8 @@ choices the user already made. Confirm before doing anything more:
 >
 > 1. **Update only** (recommended) — keep the config as-is; just reconcile it
 >    against the new version and report anything that needs attention.
-> 2. **Change some choices** — say which (tool / harness / models / review /
->    recipe / gate profile); everything else stays.
+> 2. **Change some choices** — say which (tool / harness / models / recipe);
+>    everything else stays.
 > 3. **Full re-setup** — re-interview from scratch and overwrite the config.
 
 **Default to 1.** Only run the full interview (step 3) if the user explicitly asks
@@ -188,8 +187,8 @@ For option 1, skip the interview entirely. Do this instead:
    gate applies. A repo configured before these dependencies existed has no
    install of them, so this path must install them for an existing user, not
    merely report them missing. **It includes the gate tools of each language
-   family too, at the `strict` default.** Run step 1a first: this path asks no
-   interview question, so nothing else names a family.
+   family too.** Run step 1a first: this path asks no interview question, so
+   nothing else names a family.
 2. **Reconcile the existing config against the current template**
    ([orchestrator.template.md](orchestrator.template.md)) and
    `references/models.md` — report, don't silently rewrite:
@@ -198,7 +197,7 @@ For option 1, skip the interview entirely. Do this instead:
      defaults.
    - **A missing `gates:` block**, on a config written before the gates existed.
      Offer to add it with the defaults of the template, plus the families step 1a
-     found and `profile: strict`. **Ask no interview question here.** So a
+     found. **Ask no interview question here.** So a
      maintainer who answered the questions last month keeps every answer, and
      still gains the block. Where the user takes the block, run step 5a too, so the
      repo gains the gate files with it. Where the user declines it, the gate tools
@@ -222,7 +221,7 @@ For option 1, skip the interview entirely. Do this instead:
    list back first: where `orchestrator-queue` already exists, report it and create no
    second one.
 4. **Apply only what the user approves**, one edit at a time. An update must never
-   drop a hand-edited recipe field or flip a review policy on its own.
+   drop a hand-edited recipe field on its own.
 5. **Report** as a short table: what updated, what the config needs, what's fine.
    Then stop — don't continue into steps 1–3.
 
@@ -444,31 +443,11 @@ Take these in order; each leads with a recommendation.
      hard ones, depending which way it's set.
 4. **Yolo** — on (required). State the actual flag from the harness reference so
    the user sees what "unattended" means for their harness.
-5. **Adversarial review** — off by default. If on, the chosen profile already
-   supplies `models.review`; just confirm it rather than re-asking. Either way
-   **assert its vendor differs** from the impl roles' (look both up in
-   `references/models.md`) and refuse a same-vendor pair. Confirm the round cap
-   (default 3). Mention the cost shape: review roughly **doubles** the per-item
-   spend when it runs, and each fix round steps the impl worker up a rung — so on
-   a `conservative` profile, a review loop converges toward `balanced` pricing.
-6. **Project recipe** — `setup_cmd`, `run_recipe` + `ports`, `db_gate` (blank if
+5. **Project recipe** — `setup_cmd`, `run_recipe` + `ports`, `db_gate` (blank if
    no database), `evidence` bar. Pre-fill from what exploration found and let the
    user correct. Offer to clone the config half of `references/examples/run.md` as a
    starting point if the repo resembles it.
-7. **Gate profile** — `strict` or `lite`. Recommend **strict**: it runs all four gate
-   layers, so a machine finds each fault before a human reads the diff. **`lite` drops
-   layer 4**, which is the mutation score, the SAST scan and the dependency CVE scan. So a
-   `lite` repo needs no mutation runner and no SAST tool, and step 4 skips those rows. It
-   also drops the layer 4 box from the checklist, even where `deep` holds a command. Take
-   `lite` for a small repo, or where layer 4 costs more minutes than the repo is worth.
-   The answer goes to `gates.profile` in the config
-   ([orchestrator.template.md](orchestrator.template.md)). The layers themselves are in
-   [`references/quality-gates.md`](../orchestrator/references/quality-gates.md), and the
-   rationale is
-   [ADR 0032](../orchestrator/docs/adr/0032-quality-gates-are-a-layered-contract.md).
-   **The families are not a question here.** Step 1a detected them, and they go to
-   `gates.langs`.
-8. **Live story cap** — `max_stories`. Recommend **2**: it bounds how many Story runs are
+6. **Live story cap** — `max_stories`. Recommend **2**: it bounds how many Story runs are
    live at once, and a run holds its Story slot until the parent closes, story proof
    included.
    Take **1** for a repo where one story at a time is enough. **The second roof is not a
@@ -478,7 +457,7 @@ Take these in order; each leads with a recommendation.
    workers and never 8. The answer goes to `max_stories` in the config
    ([orchestrator.template.md](orchestrator.template.md)). The rule itself is
    [ADR 0045](../orchestrator/docs/adr/0045-a-story-start-is-automatic-under-two-roofs.md).
-9. **Parallel check** — `touches` or `off`. Recommend **touches**: the queue tick
+7. **Parallel check** — `touches` or `off`. Recommend **touches**: the queue tick
    compares two candidates' `## Touches` blocks with `fnmatch`, and spawns them
    together only where the blocks are disjoint. **An item with no block runs alone**
    under `touches`, because silence reads as risk and not as safety. Take `off` for a
@@ -489,8 +468,8 @@ Take these in order; each leads with a recommendation.
    **A wrong block is never a question here.** The block is a declaration and not a
    constraint. So no gate reads a diff against it, and this step asks only which
    value the dial takes.
-10. **repo** — the absolute path to the main checkout (stays on the default
-    branch).
+8. **repo** — the absolute path to the main checkout (stays on the default
+   branch).
 
 ## 4. Install the dependencies (zero-touch)
 
@@ -526,12 +505,9 @@ Scope — only the chosen pieces apply:
   family is on, its table is part of the required set — a repo where step 1a turned on
   both `python` and `typescript` installs both tables. Where no family is on, no row of
   either applies and setup checks nothing. **This is the same condition step 1a used**, so
-  the detection and the install cannot disagree about when a tool is required. The gate
-  profile then narrows that set, and it never widens it — see the install loop below.
+  the detection and the install cannot disagree about when a tool is required.
 - **tool:** the one in config (`orca` / `cmux` / `herdr`).
-- **harness(es):** the impl harness, **and** the review harness where this repo will
-  run a `review N` — a cross-vendor review setup (e.g. impl `claude`/opus-5,
-  review `codex`/gpt-5.6) needs **both** CLIs installed and authenticated.
+- **harness:** the impl harness in config.
 - **optional, per recipe:** a DB CLI like `sqlite3` (if `db_gate` set), node/npm
   or uv (if `setup_cmd` needs them).
 
@@ -584,10 +560,6 @@ it by running the command from `requirements.md`:
     install command says which: `uv add --dev` writes into the project, and
     `uv tool install` or `brew install` writes onto the machine. Activate that environment
     before the check. A check that runs outside it reports a present tool as missing.
-  - **The profile drops a layer, and a dropped layer drops its rows.** On `lite`, skip
-    every row whose gate sits in layer 4 of the matrix. The `Layer` column names them, so
-    no list of tools stands here to go stale. Those rows read **not needed by this
-    profile** in the table below, and never missing. On `strict`, every row applies.
   - **A row that needs a credential is never installed.** If a row needs an API key, a
     license or a login, report it as **needs the user**, with the exact remaining action.
     A credential cannot arrive unattended, and a config that names such a tool present is
@@ -643,11 +615,10 @@ recipe names no browser-evidence need, both rows read **not needed by this recip
 rather than a gap. Nothing was checked, and nothing is missing.
 
 Give the gate tools **one row each**, on the same present / installed / needs-the-user
-terms. Name the language family and the marker that turned it on above the rows. Name the
-gate profile beside it. Then the table says which family setup found, which profile the
-user chose, and which tools are now present. Where no family is on, write one line in
-place of the rows: no family is on, so no gate tool applies. Nothing was checked, and
-nothing is missing.
+terms. Name the language family and the marker that turned it on above the rows. Then
+the table says which family setup found and which tools are now present. Where no
+family is on, write one line in place of the rows: no family is on, so no gate tool
+applies. Nothing was checked, and nothing is missing.
 
 ## 5. Confirm and write
 
@@ -663,7 +634,7 @@ writing. Then:
   ```markdown
   ### Orchestrator
 
-  Runs <harness> workers via <tool> — <heavy.model>@<heavy.effort> for heavy items, <medium.model>@<medium.effort> for medium, <light.model>@<light.effort> for light[, cross-vendor review with <review.model>]. See `docs/agents/orchestrator.md`.
+  Runs <harness> workers via <tool> — <heavy.model>@<heavy.effort> for heavy items, <medium.model>@<medium.effort> for medium, <light.model>@<light.effort> for light. See `docs/agents/orchestrator.md`.
   ```
 
 - Ensure `.orchestrator/` is gitignored (the worker checklist files live there):
@@ -689,13 +660,11 @@ family that landed. Where `gates.langs` is blank, write no gate file and say so 
 line. That repo has no gate tool either, from the same condition step 4 read. It is a
 supported configuration and not a gap.
 
-**The `lite` profile drops layer 4.** A comment marks the layer 4 block of the Makefile
-template on each side. On `lite`, delete that block. Leave `gates.deep` blank, and the
-blank field then drops the layer 4 box from the checklist
+**Write every layer, including layer 4.** Keep the Makefile's layer 4 block and write
+`make deep` into `gates.deep`. There is no profile question to answer here. A maintainer
+who wants fewer layers blanks `gates.deep` by hand afterward, and a blank command is what
+drops the layer 4 box from the checklist
 ([`references/checklist.template.md`](../orchestrator/references/checklist.template.md)).
-The script keeps its `deep` case, because no target and no config field reaches it. So a
-later move to `strict` needs the Makefile block back, and nothing else. On `strict`, keep
-the block. Write `make deep` into `gates.deep`.
 
 **Each threshold goes to the file that reads it.** Config is the source of truth for a
 threshold. Write the number the config holds, and never a second number:
