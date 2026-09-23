@@ -359,8 +359,9 @@ class LinkTestCase(unittest.TestCase):
         self.assert_resolves(REPO_ROOT)
 
     def test_the_internal_anchors_in_the_orchestrator_skill_all_resolve(self):
-        """The trap a whitespace-collapsing checker falls into. The file holds 16
-        distinct internal anchors today, and four of them carry two hyphens in a
+        """The trap a whitespace-collapsing checker falls into. The file holds 3
+        distinct internal anchors today, since the wave-5 rewrite moved most of the
+        body into reference files, and one of them still carries two hyphens in a
         row. The test asserts that every one resolves, so a new link is covered
         with no edit here."""
         skill = REPO_ROOT / "orchestrator" / "SKILL.md"
@@ -372,8 +373,8 @@ class LinkTestCase(unittest.TestCase):
         }
         doubled = {raw for raw in internal if "--" in raw}
 
-        self.assertGreaterEqual(len(internal), 16, sorted(internal))
-        self.assertGreaterEqual(len(doubled), 4, sorted(doubled))
+        self.assertGreaterEqual(len(internal), 3, sorted(internal))
+        self.assertGreaterEqual(len(doubled), 1, sorted(doubled))
         self.assertEqual(
             [message for message in self.reported(REPO_ROOT) if "SKILL.md" in message],
             [],

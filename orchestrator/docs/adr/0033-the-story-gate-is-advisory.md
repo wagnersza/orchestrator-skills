@@ -8,7 +8,7 @@ A fifth layer reads that shape. It runs once per user story, on the close of the
 child, and it runs `/improve-codebase-architecture` in the main checkout. The layer model
 is [`orchestrator/references/quality-gates.md`](../../references/quality-gates.md), and
 the trigger is the story-gate section of
-[`orchestrator/SKILL.md`](../../SKILL.md#the-layer-5-story-gate).
+[`orchestrator/references/story-flows.md`](../../references/story-flows.md#the-layer-5-story-gate).
 
 ## The decision
 

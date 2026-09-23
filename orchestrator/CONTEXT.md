@@ -372,8 +372,9 @@ teardown. **A branch that conflicts is parked, and the train keeps moving**: the
 reports the conflicting paths on the work item and carries on with the next branch. Nothing
 unattended decides what a merged file means. **No tick calls a train.** The whole run exists
 for one case: a maintainer who wants ten branches ordered and test-merged before they merge
-any of them. The three ordering steps, the park rule and the seam's contract:
-[`references/merge-train.md`](references/merge-train.md). Rationale, the rejected
+any of them. The three ordering steps, the park rule and the seam's contract are one home
+now, the module docstring of [`scripts/merge_train.py`](../scripts/merge_train.py).
+Rationale, the rejected
 alternatives and the accepted risk:
 [`docs/adr/0037-the-merge-queue-is-an-ordered-train.md`](docs/adr/0037-the-merge-queue-is-an-ordered-train.md),
 narrowed by [`docs/adr/0057-the-merge-is-the-second-act.md`](docs/adr/0057-the-merge-is-the-second-act.md)

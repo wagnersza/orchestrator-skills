@@ -351,7 +351,7 @@ class MergeTrainTestCase(unittest.TestCase):
 
         for flag in ("--repo", "--default-branch", "--item", "NUMBER:BRANCH"):
             self.assertIn(flag, offered)
-        self.assertIn("merge-train.md", proc.stdout)
+        self.assertIn("ordering rule", proc.stdout)
         # The description says the flag does not exist. The list of flags is where a
         # usable flag appears, and `--execute` is not in that list.
         self.assertNotIn("--execute", offered)
@@ -369,14 +369,14 @@ class MergeTrainTestCase(unittest.TestCase):
         self.assertTrue(roots)
         self.assertEqual(roots - set(sys.stdlib_module_names), set())
 
-    def test_the_docstring_names_the_reference_file_and_restates_no_rule(self):
-        """A rule with two homes drifts, so the ordering rule keeps the one it has."""
+    def test_the_docstring_holds_the_ordering_rule_the_park_rule_and_the_contract(self):
+        """The reference file is gone, so this docstring is the one home for the rule."""
         docstring = ast.get_docstring(ast.parse(SEAM.read_text())) or ""
 
-        self.assertIn("orchestrator/references/merge-train.md", docstring)
+        self.assertNotIn("merge-train.md", docstring)
         for phrase in ("fewest", "ascending", "review state", "tie"):
-            self.assertNotIn(phrase, docstring.lower(), phrase)
-        # It holds its own contract instead: the flags, the JSON and the codes.
+            self.assertIn(phrase, docstring.lower(), phrase)
+        # It holds its own contract too: the flags, the JSON and the codes.
         for flag in ("--repo", "--default-branch", "--item", "--execute"):
             self.assertIn(flag, docstring)
         for key in ("order", "parked", "overlaps", "paths", "checkout"):

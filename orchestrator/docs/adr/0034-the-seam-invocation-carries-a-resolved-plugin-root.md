@@ -46,13 +46,15 @@ $ PYTHONPATH=<plugin root> python3 -c "import scripts.worker_state as m; print(m
 <the worktree>/scripts/worker_state.py
 ```
 
-**The session resolves the root once, in one command, and that command covers both
-install shapes.** A plugin-cache install puts the root at
+**The session resolves the root once, and that resolution covers both install shapes.**
+A plugin-cache install puts the root at
 `~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/`. A clone puts it at the
 checkout, which is what `~/.claude/plugins/marketplaces/<marketplace>/` holds. The
 resolver reads the cache first. The cache holds the skill body that the session reads,
-and a seam from one version beside a skill body from another is drift. The command is in
-[`orchestrator/SKILL.md`](../../SKILL.md#config-first--always), once.
+and a seam from one version beside a skill body from another is drift. **The
+`SessionStart` hook now performs this resolution and injects the result into the
+session's context**, so no command runs it by hand any more
+([`orchestrator/references/hooks.md`](../../references/hooks.md)).
 
 **The spawn preflight runs the resolved command before the first Item automation
 exists.** It runs `--help`, which mutates nothing, and a non-zero exit **aborts the

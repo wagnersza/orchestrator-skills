@@ -127,7 +127,7 @@ unattended — it hands you the exact command.
 
 The config is human-editable markdown — edit it directly later; re-run setup only
 to switch tools/harnesses. Worked example:
-[`orchestrator/references/examples/fullstack-app.md`](orchestrator/references/examples/fullstack-app.md).
+[`orchestrator/references/examples/run.md`](orchestrator/references/examples/run.md).
 
 ## Use
 
@@ -165,7 +165,7 @@ orchestrator/
     checklist.template.md
     tools/{_operations,orca,cmux,herdr}.md
     harnesses/{claude,codex,pi,copilot,cursor}.md
-    examples/fullstack-app.md
+    examples/run.md
 orchestrator-setup/
   SKILL.md · orchestrator.template.md
 playwright-cli/

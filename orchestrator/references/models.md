@@ -151,3 +151,40 @@ Tune effort first.
 
 Profiles are a starting point, not a constraint — `docs/agents/orchestrator.md`
 is human-editable, so set any `(model, effort)` pair per role directly.
+
+## Running an adversarial review
+
+`review N` spawns a reviewer on the item's branch, and the reviewer posts one comment
+on the work item. There is no round, no fix loop and no counter — a judgement has no
+exit code, so no tick reads a reviewer's opinion
+([`../docs/adr/0066-review-and-the-train-are-verbs.md`](../docs/adr/0066-review-and-the-train-are-verbs.md)).
+
+1. **Spawn a review worker** on the impl branch (its own worktree), harness per config,
+   `models.review` for the model and effort (default `high` — review accuracy holds at
+   lower effort). **Assert the review model's vendor differs from the impl model's**,
+   and refuse if it is the same. Gate on readiness before the review prompt, the same
+   as any spawn — a fresh worktree on the vendor this machine has launched least often
+   needs it more, not less. Create no **Item automation** for it: nothing watches a
+   reviewer, because a reviewer reaches no transition.
+2. **Prompt it to review** the diff/MR and the layer 4 report (where `gates.deep` is
+   configured) against the work item's acceptance criteria, through `prompt-improver`
+   as a **code-review prompt**. Ask for **coverage, not filtering** — "only
+   high-severity" or "don't nitpick" makes every current model silently drop real bugs.
+   Four substitutions this prompt needs:
+   - **Run the suites and the gate commands yourself.** A worker's own claim that a
+     suite or a **Gate** is green is the claim under review, not evidence for it.
+   - **Give every acceptance-criteria checkbox its own named answer.** A summary over a
+     group of boxes hides the one that failed.
+   - **Spawn no sub-agents.** The reviewer is already the second opinion, and a
+     sub-agent's finding arrives unattributed — the one exception to the **Delegation
+     cap**.
+   - **Report per axis, with a confidence and a severity on each finding** — the two
+     axes of `/code-review`, plus these two per-finding fields.
+   Name first: a mutant the suite left alive, a SAST finding at high or critical
+   severity, and a fired **Halt condition**.
+3. **Report that the comment landed, and write no work-state label.** The findings go
+   to the maintainer, never to the impl worker — nothing re-prompts it, and no effort
+   steps up a rung. Where they want a fix, they ask for it as its own work.
+
+The review worktree's teardown is a pending human decision, not an automatic one — a
+destructive step keeps its confirmation whatever its work product is worth.
