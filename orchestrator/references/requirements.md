@@ -8,6 +8,58 @@ config and checks exactly this set, then offers to install what's missing.
 > Install commands marked **(verify)** are not pinned — confirm against the
 > tool's own docs before running. The linked doc is the source of truth.
 
+## Load config, then preflight
+
+Every flow reads the per-project config at `docs/agents/orchestrator.md` in the target
+repo before it does anything else. If it's missing, run `/orchestrator-setup` — never
+guess a tool, a harness or a model. From it:
+
+- **tool** → the concrete commands in [`tools/<tool>.md`](tools/_operations.md).
+- **harness + yolo** → the launch command in [`harnesses/<harness>.md`](harnesses/claude.md).
+- **models** → one `(model, effort)` pair per role, from [`models.md`](models.md). Never a
+  hardcoded model.
+- **models.review** → the reviewer's own pair, read by the `review N` verb alone. Its
+  vendor is asserted different from the impl model's ([`models.md`](models.md)).
+- **repo** → the main checkout; every tracker and git-state op runs there, on the
+  default branch.
+- **project recipe** → `setup_cmd`, `run_recipe` + `ports`, `db_gate`, `evidence` — the
+  project-specific parts of the completion contract.
+
+**Work-state labels, the tracker CLI and the board coordinates come from
+`docs/agents/issue-tracker.md`, never from the orchestrator config.** Run
+`/setup-matt-pocock-skills` first where that file is missing.
+
+**Every tracker read this plugin makes is a row in
+[`tracker-reads.md`](tracker-reads.md).** Read the row you need at the moment you need
+it, never from memory, and check its exit code before you parse its output — a broken
+tracker CLI writes prose rather than JSON. Where a read fails, report it in one line
+(the command, and the tracker's own first line) and stop: spawn nothing, write no
+label, move no card.
+
+**Preflight runs once per session, before the first spawn.** Confirm the tool binary,
+the harness binary (and the review harness, where a `review N` will run), the tracker
+CLI, and the three plugin dependencies below — `prompt-improver`, `simple-english` and
+`resolving-merge-conflicts` — are present. Any of their several install shapes
+satisfies the check; run the check block above rather than writing one by hand.
+
+**Check the Browser surface only when the project recipe asks for browser evidence.**
+The gate is a non-blank `run_recipe`, or an `evidence` bar that asks for UI proof. Where
+neither holds, this preflight skips `playwright-cli` and its browsers entirely — a
+repo with a blank `run_recipe` is never blocked on a browser install. Where the gate
+does hold and a check fails, point at
+[`../../playwright-cli/references/installation.md`](../../playwright-cli/references/installation.md)
+as well as `/orchestrator-setup`.
+
+**The plugin root needs no resolution by hand.** The `SessionStart` hook
+(`hooks/context.py`, see [`hooks.md`](hooks.md)) exports it into the session's context
+at the start of every turn. Substitute that value into a seam invocation as a literal
+path — never a shell variable, because an **Item automation** runs its precheck in a
+shell that saw no assignment.
+
+If any dependency above is missing, stop and point the user at `/orchestrator-setup`.
+Don't spawn against a missing binary, don't compose a prompt without `prompt-improver`,
+and never tell a worker to invoke a skill that is not installed.
+
 ## Keeping them current
 
 `/orchestrator-setup` step 0a runs this before anything else, on every invocation.

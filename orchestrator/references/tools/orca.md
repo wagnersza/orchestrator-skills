@@ -221,8 +221,8 @@ fills the placeholder:
 
 `<plugin root>` is a **literal path** here, and never a shell variable. This schedule
 stores the string and runs it a minute later, in a shell that saw no assignment. The
-caller resolves the value and writes it in
-([`../../SKILL.md`](../../SKILL.md#resolve-the-plugin-root-and-prove-the-seam-runs)).
+`SessionStart` hook resolves the value into the caller's context, and the caller writes
+it in ([`../hooks.md`](../hooks.md)).
 
 **The provider never runs, by design.** The CLI requires `--prompt` and `--provider`, and
 exit 0 is the only code that starts that agent. No path through `tick` exits 0, so every

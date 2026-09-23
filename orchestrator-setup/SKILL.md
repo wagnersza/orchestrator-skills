@@ -840,9 +840,10 @@ the tracker rather than a worktree:
   selector cuts a new worktree per run, and this schedule reads the tracker rather than a
   worktree. The two flag names are in operation 11 of the tool reference.
 - **`<plugin root>` is a literal path here, and never a shell variable.** The tool stores
-  this string and runs it a minute later, in a shell that saw no assignment. So resolve the
-  value and write it in, the same way a per-item precheck carries it
-  ([`../orchestrator/SKILL.md`](../orchestrator/SKILL.md#resolve-the-plugin-root-and-prove-the-seam-runs)).
+  this string and runs it a minute later, in a shell that saw no assignment. The
+  `SessionStart` hook resolves the value into this session's context, and this step
+  writes it in, the same way a per-item precheck carries it
+  ([`../orchestrator/references/hooks.md`](../orchestrator/references/hooks.md)).
 - **Read every other value from the config this setup wrote**, and never from this page.
   The two roofs are `max_stories` and `max_workers`, the gate mode is `parallel_check`, and
   the three board coordinates come from the `## Project board` section of
