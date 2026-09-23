@@ -87,5 +87,7 @@ sentence `0045` holds.
   **Work-state label** write from a Bash command in any session, and `--label` on a create
   carries the same flag a swap carries. So the hook denied the very write this ADR asks for.
   A create writes an item's first state rather than moving an existing one, so a command that
-  creates an item is exempt. Every write on an existing item is still denied, which is the
-  half of the hook that protects the loop.
+  creates an item is exempt. An `edit` is still a denial, which is the half of the hook that
+  protects the loop. The exemption is read across the whole command, the same way the close
+  seam's exemption already is, so a hand-typed write beside a create goes through. That hook
+  fails open by design.
