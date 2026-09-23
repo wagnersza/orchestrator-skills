@@ -26,10 +26,6 @@ models:
     model:  gpt-5.6-terra
     effort: high
 
-review:
-  enabled: false
-  rounds:  3
-
 repo:     ~/git/acme-app
 tracker:  # docs/agents/issue-tracker.md -> GitLab (glab), labels: ready-for-agent / in-progress / to-review / done
 

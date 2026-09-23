@@ -186,16 +186,19 @@ already prove.
 
 ## The count of comments that carry a literal
 
-How many comments hold a fixed string. Two counts take this shape: the **Review
-round** number is the count of `Verdict:` comments, and the retry count of a stalled worker
-is the count of `Re-prompt:` comments on that item. Where the flows need
-it: **On the tick** (`stalled`), **Adversarial review**, and **Reporting to the user**.
+How many comments hold a fixed string. One count takes this shape, and it is the retry count
+of a stalled worker: the number of `Re-prompt:` comments on that item. Where the flows need
+it: **On the tick** (`stalled`) and **Reporting to the user**.
 
-**The tick reads both counts itself**, from the comment bodies one tracker read already
+**The tick reads that count itself**, from the comment bodies one tracker read already
 returns. So the commands that follow are for a session that answers a question about an
 item. No transition needs one.
 
-Both literals are quoted here, so a writing pass leaves them byte-identical
+**The `Verdict:` count retired with the Review round.** No seam reads a reviewer's comment,
+so no count of one reaches a transition
+([ADR 0066](../docs/adr/0066-review-and-the-train-are-verbs.md)).
+
+The literal is quoted here, so a writing pass leaves it byte-identical
 ([ADR 0058](../docs/adr/0058-one-re-prompt-then-a-human.md)).
 
 ```bash

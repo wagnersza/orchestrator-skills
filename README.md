@@ -5,7 +5,7 @@ session coordinates **worker** sessions: each worker is a
 `(tool, harness, model)` triple implementing one work item in its own worktree.
 
 - **`orchestrator/`** — pick the next ready work item, spawn a worker, prompt and
-  monitor it, run optional cross-vendor adversarial review, and close finished
+  monitor it, run cross-vendor adversarial review on demand, and close finished
   work. Tool-agnostic (orca / cmux / herdr), harness-agnostic (claude / codex /
   pi / copilot / cursor), and works over any tracker the mattpocock skills
   support (GitHub / GitLab / local markdown).
@@ -140,7 +140,7 @@ phrases:
 | **implement #N** / start work on X | Spawn a worker for the item (worktree + harness + prompt + checklist). |
 | **work on #N, max K** | Batch-spawn every unblocked child of #N, capped at K. |
 | **what are the workers doing** | Monitor via checklist files + terminal idle state. |
-| **review #N adversarially** | Spawn a cross-vendor reviewer even if review is off in config. |
+| **review #N adversarially** | Spawn a cross-vendor reviewer. It posts one comment for you to read, and nothing parses it. |
 | **close task #N** / it's done | Report where the item is. A close needs no verb: merge the pull request, and the next tick runs the transaction. |
 
 Each worker keeps a file-based **checklist** (`.orchestrator/checklist-<item>.md`,

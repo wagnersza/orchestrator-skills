@@ -10,7 +10,7 @@ The config it runs against is the peer example, fullstack-app.md.
 Two turns on `acme-app`, against the config in
 [`fullstack-app.md`](fullstack-app.md) — `tool: orca`, `harness: claude`,
 `models.heavy: opus-5 @ xhigh`, `models.medium: sonnet-5 @ medium`, `models.light:
-sonnet-5 @ low`, `review.enabled: false`, GitLab tracker. This repo has no runtime, so a trace of the flow is how the
+sonnet-5 @ low`, `models.review: gpt-5.6-terra @ high`, GitLab tracker. This repo has no runtime, so a trace of the flow is how the
 routing contract gets tested. The rules are in [`../../SKILL.md`](../../SKILL.md).
 The rows are in [`../skill-routing.md`](../skill-routing.md).
 
@@ -106,9 +106,8 @@ unreachable.
   fields per child: `#59 → /diagnosing-bugs · light · sonnet-5 · low`, `#62 →
   /implement · medium · sonnet-5 · medium`, `#60 → /implement · heavy · opus-5 ·
   xhigh`. One blanket skill for the batch is the same defect as one blanket model.
-- **A fix round.** Review is off on this config, so this is the on-demand path:
-  `review #61 adversarially` spawns a `gpt-5.6-terra` reviewer, which requests
-  changes. The fix prompt goes back to the original #61 worker and re-enters
-  `/implement` — the skill the original spawn used. Not `/code-review`, although a
-  review produced the findings, and not a fresh resolution of the verb. The effort
-  steps up a rung, and the skill does not change.
+- **A review.** `review #61 adversarially` spawns a `gpt-5.6-terra` reviewer on #61's
+  branch, and that reviewer posts one comment naming three findings. **The comment goes to
+  the maintainer, and no verb resolves off it.** Nothing re-prompts the #61 worker, and its
+  effort stays where the spawn put it. Where the maintainer wants those findings fixed,
+  they ask for the fix as its own work (ADR 0066).

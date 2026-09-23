@@ -116,7 +116,7 @@ class TrackerTest(unittest.TestCase):
                 str(ITEM): {
                     "state": "OPEN",
                     "labels": ["in-progress"],
-                    "comments": ["Verdict: approve"],
+                    "comments": ["Re-prompt: 0 of 10 boxes"],
                     "board": "To do",
                 }
             },
@@ -132,7 +132,7 @@ class TrackerTest(unittest.TestCase):
 
         self.assertEqual(
             one.item_facts(ITEM),
-            (["in-progress"], ["Verdict: approve"]),
+            (["in-progress"], ["Re-prompt: 0 of 10 boxes"]),
         )
         self.assertEqual(
             one.issue(ITEM),

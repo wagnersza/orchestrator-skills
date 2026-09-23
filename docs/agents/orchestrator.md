@@ -27,12 +27,10 @@ models:
     model:  gpt-5.6-sol   # the openai tier closest to opus-5; codex launches it
     effort: high          # codex tops out at `high`, so no clamp applies
 
-# --- adversarial review (optional) ---
-review:
-  enabled: false          # on -> spawn a cross-vendor reviewer at the review state
-  rounds:  3              # max fix<->review cycles before handing to human review
-                          # model+effort come from models.review; its vendor MUST
-                          # differ from the impl role's
+# --- adversarial review ---
+# It is a verb: `review N` spawns the reviewer, and no tick reaches one. There is no
+# switch and no round bound (ADR 0066). The pair comes from models.review above, and
+# its vendor MUST differ from the impl role's.
 
 # --- the two roofs on live work (ADR 0045) ---
 # The queue tick reads both, and the lower one wins. It starts nothing where either roof
@@ -122,18 +120,19 @@ gates:
     config) reaches the whole ladder, so no clamp applies.
 - **yolo** is always required for a worker (nobody approves its prompts). For
   `claude` that's `--dangerously-skip-permissions`.
-- **review** is off. Run it on demand with "review #N adversarially" — that spawns
+- **review** is a verb. Run it with "review #N adversarially" — that spawns
   a `gpt-5.6-sol` reviewer under `codex` (openai) against an `opus-5`/`sonnet-5`
-  impl (anthropic), so the cross-vendor assertion holds. `codex` on this machine
+  impl (anthropic), so the cross-vendor assertion holds. The reviewer posts one
+  comment, and nothing parses it. `codex` on this machine
   runs against the OLX GenAI proxy with an API key, and not against a ChatGPT
   login. So **the worker terminal needs `LLM_API_KEY` in its environment**, or the
-  reviewer gets a `401` and no verdict arrives. Verified on 2026-09-01:
+  reviewer gets a `401` and no comment arrives. Verified on 2026-09-01:
   `codex -c model_reasoning_effort="high" exec --model gpt-5.6-sol` prints
   `provider: olx-genai` and answers.
   **`gpt-5.6-sol` is the tier that matches the `opus-5` profile**, and the earlier
   `gpt-5.6-terra` matched `sonnet-5`. A reviewer below the implementer's profile
-  reads a hard diff and reports nothing, so the review round costs money and
-  proves nothing.
+  reads a hard diff and reports nothing, so the review costs money and proves
+  nothing.
   **The story proof takes no harness of its own.** Its spawn reads the one
   `harness:` field above and the `heavy` role, so it cannot run under `codex`
   today. And no story here reaches that step, because `run_recipe` is blank.

@@ -103,8 +103,8 @@ behind it, and each rule file has its fixture pair.
 | unpinned version | a provider, a module or a runtime with no exact version | a provider bump is a decision and not a surprise |
 | cost delta | a plan whose monthly cost delta is more than the agreed figure | a change that triples the bill gets read before it merges |
 
-A fired Halt condition is also one finding in an adversarial review, and that finding is
-grounds for `request-changes` ([`../SKILL.md`](../SKILL.md)).
+A fired Halt condition is also one finding in an adversarial review, and a reviewer names
+it first in its comment ([`../SKILL.md`](../SKILL.md)).
 
 ## The zero-changes rule
 

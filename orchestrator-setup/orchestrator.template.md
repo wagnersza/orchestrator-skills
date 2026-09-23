@@ -33,11 +33,10 @@ models:
     effort: high
 
 # --- adversarial review (optional) ---
-review:
-  enabled: false          # on -> spawn a cross-vendor reviewer at the review state
-  rounds:  3              # max fix<->review cycles before handing to human review
-                          # model+effort come from models.review; its vendor MUST
-                          # differ from the impl role's
+# --- adversarial review ---
+# It is a verb: `review N` spawns the reviewer, and no tick reaches one. There is no
+# switch and no round bound (ADR 0066). The pair comes from models.review above, and
+# its vendor MUST differ from the impl role's.
 
 # --- the two roofs on live work (ADR 0045) ---
 # The queue tick reads both, and the lower one wins. It starts nothing where either roof
@@ -116,9 +115,9 @@ gates:
     legacy `review.model`, still honoured for review).
 - **yolo** is always required for a worker (nobody approves its prompts). The
   harness reference names the actual flag.
-- **review** — when `enabled`, the orchestrator asserts `models.review.model`'s
-  vendor differs from the impl role's (see `references/models.md`). It runs up to
-  `rounds` fix↔review cycles, then hands to human review regardless.
+- **review** — a verb. On `review N` the orchestrator asserts `models.review.model`'s
+  vendor differs from the impl role's (see `references/models.md`). The reviewer posts
+  one comment on the work item, and nothing parses it.
 - **Work-state labels** — one family, four values, and it never stacks
   (`ready-for-agent`, `in-progress`, `to-review`, `needs-human`) — come from
   `docs/agents/issue-tracker.md`, not this file — single source of truth. So do the

@@ -1,6 +1,6 @@
 ---
 name: orchestrator
-description: Orchestrate agent worker sessions across any workspace tool (orca/cmux/herdr), harness (claude/codex/pi/copilot/cursor), and frontier model. Pick the next ready work item, read whether it is a user story or a leaf task, spawn a worker in its own worktree on the right model and effort for the job, prompt/monitor it via a file-based checklist, run optional cross-vendor adversarial review, then report finished work for the maintainer to merge. Use this skill for every work-item action, and never wait for the user to type /orchestrator. A work verb plus a work-item number N is enough, with or without a "#". Trigger on "work on N", "work on #N", "implement N", "build N", "start N", "do N", "implement X", "spawn a worker", "start a session for X", "prompt worker Y", "what next", "what should I run/work on", "what's ready", "what are the workers doing", "list workers", "review N adversarially", "merge and close N", "merge N and close it", "close N", "close task #N", "it's done", "wrap up N", "orchestrate". A bare number after a work verb always means a tracked work item, so route it here rather than reading it as a file or a line number.
+description: Orchestrate agent worker sessions across any workspace tool (orca/cmux/herdr), harness (claude/codex/pi/copilot/cursor), and frontier model. Pick the next ready work item, read whether it is a user story or a leaf task, spawn a worker in its own worktree on the right model and effort for the job, prompt/monitor it via a file-based checklist, run cross-vendor adversarial review on demand, then report finished work for the maintainer to merge. Use this skill for every work-item action, and never wait for the user to type /orchestrator. A work verb plus a work-item number N is enough, with or without a "#". Trigger on "work on N", "work on #N", "implement N", "build N", "start N", "do N", "implement X", "spawn a worker", "start a session for X", "prompt worker Y", "what next", "what should I run/work on", "what's ready", "what are the workers doing", "list workers", "review N adversarially", "merge and close N", "merge N and close it", "close N", "close task #N", "it's done", "wrap up N", "orchestrate". A bare number after a work verb always means a tracked work item, so route it here rather than reading it as a file or a line number.
 ---
 
 # Orchestrator
@@ -29,7 +29,7 @@ in the target repo. **Before anything else, load it.** If it's missing, run
 - **tool** → the concrete commands in [`references/tools/<tool>.md`](references/tools/_operations.md) (operation contract).
 - **harness + yolo** → the launch command from [`references/harnesses/<harness>.md`](references/harnesses/claude.md) (composes the yolo flag, the `--model` value, and the effort flag).
 - **models** → one `(model, effort)` pair per **role** (`heavy` / `medium` / `light` / `review`). Never a hardcoded model — pick the right one for the job, see [Right model for the job](#right-model-for-the-job).
-- **review** → whether to spawn a cross-vendor reviewer (model+effort from `models.review`; vendor asserted different — see [`references/models.md`](references/models.md)).
+- **models.review** → the reviewer's own pair, read by the `review N` verb alone. Its vendor is asserted different from the impl model's — see [`references/models.md`](references/models.md).
 - **repo** → the main checkout; all tracker/git-state ops run there, on the default branch.
 - **project recipe** → `setup_cmd`, `run_recipe` + `ports`, `db_gate`, `evidence` — the project-specific parts of the completion contract.
 
@@ -55,8 +55,8 @@ with its `unreadable` outcome
 [`docs/adr/0039-a-tracker-read-has-a-verified-command-in-the-skill.md`](docs/adr/0039-a-tracker-read-has-a-verified-command-in-the-skill.md).
 
 **Preflight the config's dependencies.** Before the first spawn of a session,
-confirm the tool binary, the harness binary (and the review harness if
-`review.enabled`), and the tracker CLI are present — `command -v <bin>` — plus the
+confirm the tool binary, the harness binary (and the review harness, where this
+session will run a `review N`), and the tracker CLI are present — `command -v <bin>` — plus the
 **`prompt-improver` skill**, which every spawn and review prompt goes through —
 `claude plugin list | grep -o 'prompt-improver@[a-z-]*'`, falling back to
 `ls ~/.claude/skills/prompt-improver/SKILL.md`. Any of its three install shapes
@@ -353,10 +353,6 @@ read it before the first spawn of a session.
    [`references/models.md`](references/models.md). Read them there, and never
    restate them here. A doubt is not a signal, so an item that fires no `heavy`
    signal and misses one `light` condition stays `medium`.
-   **Step up one rung on a failed round.** `light` steps to `medium`, and `medium`
-   steps to `heavy`. A failed `heavy` round steps its effort up instead (`xhigh`, or
-   `max` if `xhigh` already failed), because there is no Role above it. A reviewer's
-   verdict is the fact behind that step.
    **A stalled worker keeps its Role** — it gets one re-prompt and then a human
    ([`docs/adr/0058-one-re-prompt-then-a-human.md`](docs/adr/0058-one-re-prompt-then-a-human.md)).
 2. **Resolve** `models.<role>` → model + effort. A flat `model:`/`effort:` config
@@ -450,7 +446,7 @@ maintainer reads the pull request and types the ask, so this session offers the 
 never infers one
 ([`docs/adr/0053-one-work-state-label-and-a-computed-position.md`](docs/adr/0053-one-work-state-label-and-a-computed-position.md)).
 Report the list as its own capped list, under the ready queue. Then offer the train
-([Merge the queue](#merge-the-queue)).
+([The merge train is a verb](#the-merge-train-is-a-verb)).
 
 **This read is the whole fallback where the tool supports no automation surface.** `cmux`
 and `herdr` create no schedule, so no tick fires and no transition lands
@@ -758,9 +754,11 @@ the item. Check reuse before booting; tear down after evidence — per the recip
 
 ### Start the tick — one Item automation per worker
 
-**A spawn with no tick is incomplete.** The last step of every spawn creates an **Item
-automation** (op 11). One per worker, implementation and review alike. The **Tool** owns
-the schedule, so it outlives this session, a restart of the harness and a reboot. It
+**An implementation spawn with no tick is incomplete.** Its last step creates an **Item
+automation** (op 11), one per item. **A review spawn creates none**, because a reviewer
+reaches no transition ([Adversarial review is a verb](#adversarial-review-is-a-verb)). The
+**Tool** owns the schedule, so it outlives this session, a restart of the harness and a
+reboot. It
 ticks once a minute. A batch of five siblings gets five automations, one each.
 Definitions: the **Item automation** and **Position** entries in
 [`CONTEXT.md`](CONTEXT.md). Rationale:
@@ -775,13 +773,12 @@ runs on a tick. That command goes into op 11's `<precheck-command>` placeholder:
 python3 <plugin root>/scripts/worker_state.py tick --item <N> \
   --worktree <the path from op 2> \
   --process '<the pattern from references/harnesses/<harness>.md>' \
-  --rounds <config's review.rounds> --stall-after <duration> \
+  --stall-after <duration> \
   --repo <owner>/<name> \
   --tracker-cli <gh or glab> --tracker-host <host> \
   --require-gate '<one per required layer, from config's gates: block>' \
   --checkout <config's repo> --default-branch <the default branch> \
-  --teardown-command '<op 12 && op 10, with the ids filled in>' \
-  --review    # only where config's review.enabled is on
+  --teardown-command '<op 12 && op 10, with the ids filled in>'
 ```
 
 **The last three flags are the close, and they are not optional.** A merged pull request
@@ -815,12 +812,10 @@ names no harness, no tracker and no tool. So the spawn is the one place they are
 | Value | Where you read it | What it decides |
 |---|---|---|
 | the plugin root | the preflight in [Resolve the plugin root](#resolve-the-plugin-root-and-prove-the-seam-runs) | which copy of the seam a tick runs, and whether it runs at all |
-| the round bound | config's `review.rounds` (default 3) | when `rounds-exhausted` fires instead of `verdict-request-changes` |
 | the proof-box gate | a non-blank `run_recipe`, or an `evidence` bar that asks for UI proof | whether the worker's **Checklist** ships a proof box — see [The proof box](#the-proof-box) |
 | the harness process pattern | `references/harnesses/<harness>.md` | what the `dead` outcome looks for |
 | the stall window | longer than the item's slowest single step, so a worker thinking hard is never read as stalled | when `stalled` fires |
 | the required gate layers | config's `gates:` block — one `--require-gate` per non-blank command, minus `deep` under the `lite` profile, and never `story` | when `gates-unproven` fires in place of a finish. With none the record is never read ([`references/quality-gates.md`](references/quality-gates.md)) |
-| the review policy | config's `review.enabled` | whether a finish holds its swap to the review state, because a **Review round** comes first |
 | the tracker CLI | `docs/agents/issue-tracker.md` | which command reads the labels and the comments, and which writes the label a transition swaps |
 | the tracker host | `docs/agents/issue-tracker.md`, where the tracker is self-hosted | which server those reads and that write go to |
 | the checkout | config's `repo` | where step 5 of a **Close transaction** pulls the merge into |
@@ -844,10 +839,9 @@ proof is required.
 `--repo` is the tracker repository as `OWNER/NAME`, read from
 `docs/agents/issue-tracker.md`.
 
-**`--review` is a switch and not a value.** Pass it only where config's `review.enabled` is
-on. A finish then holds its swap, because a **Review round** comes next and a worker still
-owns the item. With no `--review` a finish writes the review state, which is the policy this
-repo runs.
+**A finish always writes the review state.** No flag holds that swap, because no review
+round follows it inside the loop. An **Adversarial review** is a verb the maintainer asks
+for ([`docs/adr/0066-review-and-the-train-are-verbs.md`](docs/adr/0066-review-and-the-train-are-verbs.md)).
 
 **`--tracker-cli` and `--tracker-host` cover the tracker read and the label write.** `gh` on
 github.com is the default and needs no host, so this repo passes neither flag. A self-hosted
@@ -921,11 +915,11 @@ line in the schedule's run history and a label on the item. You find it when the
 asks, or when you next read the queue
 (["What next?"](#what-next--pick-the-next-work), which already reports every item at
 `to-review` beside the ready queue).
-Until the item that removes that gap lands, **read the item's labels and its `Verdict:`
-comments before you answer any question about a worker**
+Until the item that removes that gap lands, **read the item's labels before you answer
+any question about a worker**
 ([`references/tracker-reads.md`](references/tracker-reads.md)).
 
-**Three outcomes carry a label the tick wrote, and it is one swap in one call.** The
+**One outcome carries a label the tick wrote, and it is one swap in one call.** The
 work-state family has four values and it never stacks. So the tick removes every value it
 found and adds the new one in the same command. **It moves no card**, because the board is
 an input ([Board status](#board-status)). That write is also what stops a repeat fire on the
@@ -942,77 +936,43 @@ posts one `Re-prompt:` comment and moves nothing. The second writes `needs-human
 the maintainer clears that label
 ([`docs/adr/0058-one-re-prompt-then-a-human.md`](docs/adr/0058-one-re-prompt-then-a-human.md)).
 
-**Four outcomes carry nothing at all**, and the tick exits 2 on each of them. The item stays
-where it is, and the row below is the whole of what is left to do.
+**Three outcomes carry nothing at all**, and the tick exits 2 on each of them. The item
+stays where it is, and the row below is the whole of what is left to do.
 
 | Outcome | What the tick already wrote | What is left for you |
 |---|---|---|
-| `implementation-complete` | `in-progress` → `to-review`, on a leaf item and on a `user-story` parent alike. **Review on**: nothing, because a worker still owns the item and `--review` holds the swap | **Leaf, review on**: [Adversarial review](#adversarial-review-when-configs-reviewenabled) steps 1 and 2. Step 1 also **repoints the precheck** at the reviewer's worktree, with the review harness's process pattern — below. **Leaf, review off**: the item is already with a human. Report the finish, the label the tick wrote, and the review you can still offer, in one line. **Parent**: [The story proof](#the-story-proof), steps 4 to 7. Read the evidence note and the spec PR, then run [The layer 5 story gate](#the-layer-5-story-gate). **The gate runs after that swap, and it needs no label of its own.** No adversarial review round runs on the parent |
+| `implementation-complete` | `in-progress` → `to-review`, on a leaf item and on a `user-story` parent alike | **Leaf**: the item is already with a human. Report the finish, the label the tick wrote, and the [`review N`](#adversarial-review-is-a-verb) you can still offer, in one line. **Parent**: [The story proof](#the-story-proof), steps 4 to 7. Read the evidence note and the spec PR, then run [The layer 5 story gate](#the-layer-5-story-gate). **The gate runs after that swap, and it needs no label of its own.** |
 | `gates-unproven` | nothing, because the item stays where it is | Reset the context and re-prompt — below. The line names one of four causes, so quote that cause and name the command to run again. Never move the item to review on this line |
-| `verdict-approve` | `in-progress` → `to-review` | [Adversarial review](#adversarial-review-when-configs-reviewenabled) step 4 — gather evidence, and report that the item is with a human |
-| `verdict-request-changes` | nothing, because a fix round is still the same worker's work | [Adversarial review](#adversarial-review-when-configs-reviewenabled) step 3, at the round the line names. That step also **repoints the precheck** back at the implementation worktree, with the implementation harness's pattern — below |
-| `rounds-exhausted` | `in-progress` → `to-review` | Step 4 again — "after the last round regardless". The bound is spent, so offer no further round |
 | `merged` | the whole **Close transaction**: the review label came off, the item closed, and the worktree and the automation are gone. The line carries the plan | Nothing on the item. **Parent-close is what is left** ([Close a task](#close-a-task)), and only where this was the last child of a `user-story` parent |
 | `dead` | nothing, because the item stays where it is | Report, and **never re-prompt** — below |
 | `stalled` | **first stall**: one `Re-prompt:` comment, and no label. **Second**: `needs-human`, with one comment that says what it saw | **First**: read that comment, then reset the context and re-prompt with the steps it carries — below. **Second**: report that the item is with a human, and clear nothing yourself |
 | `unreadable` | nothing, because a read that failed cannot say where the item sits | Report in one line: the tracker read is broken, and the item is unobserved until that read works again |
 
 **The computed Position is what makes the response a lookup.** The seam computes where the
-item sits and reads no label of its own to do that. It reads the work-state label, the
-`Verdict:` comment list and the last write to the checklist. So `implementation-complete`
-and `verdict-approve` can never arrive for one item on the same minute. The rule has one
-home, the **Position** entry in [`CONTEXT.md`](CONTEXT.md), and this table restates no part
-of it. `unreadable` is the one outcome no position gates: the read that failed is the read
-that carries the facts. The on-demand door (`review #N adversarially`) is unchanged, and it
-needs no label of its own.
+item sits and reads no label of its own to do that. It reads the work-state labels, and
+nothing else. The rule has one home, the **Position** entry in
+[`CONTEXT.md`](CONTEXT.md), and this table restates no part of it. `unreadable` is the one
+outcome no position gates: the read that failed is the read that carries the facts.
 
 **`needs-human` answers before every fact.** The tick reads that label first and stays
 quiet, so a paused item moves nowhere and no row above runs.
 
-**Why four outcomes carry no label.** A fix round is still the same worker's work, so
-nothing changes state. `dead` says something about the worker rather than about
-the item, and a re-prompt cannot reach a process that is gone. `unreadable` says something
-about the tracker read, and a fact the tick never read
-cannot decide a label. `gates-unproven` says the work is not finished after all, so the
-item stays where it is
+**Why three outcomes carry no label.** `dead` says something about the worker rather than
+about the item, and a re-prompt cannot reach a process that is gone. `unreadable` says
+something about the tracker read, and a fact the tick never read cannot decide a label.
+`gates-unproven` says the work is not finished after all, so the item stays where it is
 ([`docs/adr/0036-a-gate-run-is-work-product.md`](docs/adr/0036-a-gate-run-is-work-product.md)).
 
-**A row you already ran is a row that carries the same round
-number, or the same checklist position.** Say so in
-one line and do nothing. That stays a lookup, because the line carries both facts.
+**A row you already ran is a row that carries the same checklist position.** Say so in one
+line and do nothing. That stays a lookup, because the line carries the fact.
 
-**Two rows carry an act on the schedule: they repoint the precheck at the live worker.** One
-**Item automation** per item stands, and a transition moves the work to a different worker.
-So the precheck follows it (op 13,
-[`references/tools/_operations.md`](references/tools/_operations.md)). The repoint sits in
-the same row as the spawn of that worker, so one transition is one step. It is not a repair
-the maintainer has to remember:
-
-- `implementation-complete` points the precheck at the reviewer's worktree, with the review
-  harness's process pattern from
-  [`references/harnesses/<harness>.md`](references/harnesses/claude.md). Step 1 of
-  [Adversarial review](#adversarial-review-when-configs-reviewenabled) creates that
-  worktree, so the same row already holds both values.
-- `verdict-request-changes` points it back at the implementation worktree, with the
-  implementation harness's pattern. The fix round runs there.
-
-**The automation is repointed, and never restarted.** The schedule, its name and its run
-history all stay, so step 8 of a **Close transaction** still removes one schedule under one
-name. The edit fails closed: a rejected repoint leaves the old precheck running, and the
-item keeps an observer. **A row that names no next worker repoints nothing.**
-`verdict-approve` and `rounds-exhausted` hand the item to a human. `dead`, `stalled`,
-`gates-unproven` and `unreadable` say nothing about which worker is live. Rationale:
-[`docs/adr/0026-the-automation-follows-the-live-worker.md`](docs/adr/0026-the-automation-follows-the-live-worker.md).
-
-**The repointed precheck is the same `tick` command, with two flags changed.** `--worktree`
-and `--process` name the live worker. Every other flag keeps the value the spawn resolved
-([Start the tick](#start-the-tick--one-item-automation-per-worker)). So a repoint changes
-which worker is watched and nothing else about the transition the tick can apply.
-
-**A tool that records operation 13 as unsupported changes nothing else about the flow.**
-`cmux` and `herdr` declare no automation surface, so no schedule exists and nothing needs a
-repoint. Run the rest of the row unchanged. Then say in the report that the repoint is
-unavailable on this tool ([Reporting to the user](#reporting-to-the-user)).
+**No row repoints the precheck any more.** One **Item automation** per item stands, and no
+transition moves the work to a second worker. The reviewer a `review N` spawns is outside
+this loop, so nothing watches it and nothing follows it
+([`docs/adr/0066-review-and-the-train-are-verbs.md`](docs/adr/0066-review-and-the-train-are-verbs.md)).
+The precheck a spawn wrote is the precheck the item keeps, until step 8 of a **Close
+transaction** removes the schedule
+([`docs/adr/0026-the-automation-follows-the-live-worker.md`](docs/adr/0026-the-automation-follows-the-live-worker.md)).
 
 **`gates-unproven` — the record does not agree with the box, so a re-prompt is the
 response.** The line names one of four causes: a missing file, a missing line, a non-zero exit or
@@ -1036,8 +996,7 @@ arrives about a minute after the worker exits.
 
 **`stalled` — one re-prompt, and then a human.** A live process with stale work product, so a
 re-prompt is the response that works once. **The tick owns the count**, which is the number of
-`Re-prompt:` comments on the work item. That is the shape the **Review round** number already
-takes, as the count of `Verdict:` comments. So no session holds either count in its context
+`Re-prompt:` comments on the work item. So no session holds that count in its context
 ([`docs/adr/0058-one-re-prompt-then-a-human.md`](docs/adr/0058-one-re-prompt-then-a-human.md)).
 **Only a comment that opens with the literal counts**, so a report or a note that quotes it
 spends no retry.
@@ -1055,8 +1014,8 @@ spends no retry.
 keeps its Role.** Both are judgement on a live terminal, and nothing here asks for
 either.
 
-**No response above touches the automation.** It outlives the re-prompt, the fix round and
-this session, so there is nothing to restart. The seam still holds no state that changes an
+**No response above touches the automation.** It outlives the re-prompt and this session,
+so there is nothing to restart. The seam still holds no state that changes an
 answer, which is what keeps a re-prompt free. Rationale:
 [`docs/adr/0018-the-worker-watch-is-a-stateless-seam.md`](docs/adr/0018-the-worker-watch-is-a-stateless-seam.md)
 and
@@ -1095,9 +1054,9 @@ Where the gate does hold:
 
 ### Reset the worker's context before every re-prompt
 
-**Every re-prompt resets the worker's context first** — a stall recovery and an
-adversarial-review fix round alike. A worker that burned a long attempt carries that whole
-attempt into its retry, and the retry is the turn that most needs the headroom.
+**Every re-prompt resets the worker's context first**, whichever outcome asks for it. A
+worker that burned a long attempt carries that whole attempt into its retry, and the retry
+is the turn that most needs the headroom.
 
 **The command is harness-shaped.** On `claude` it is `/clear`. Every other harness takes
 whatever its own [`references/harnesses/<harness>.md`](references/harnesses/claude.md)
@@ -1109,78 +1068,63 @@ a harness that cannot parse one.
 **The re-prompt is then self-contained.** A cleared worker has forgotten its spawn prompt.
 So the re-prompt re-carries four things. The routed skill, as a literal invocation. The
 worker's own harness, model, effort and role. Then the acceptance criteria and the scope
-edges. **That is the same list a fix prompt already carries** (step 3 of
-[Adversarial review](#adversarial-review-when-configs-reviewenabled)) — one contract
-reached from two directions, not two rules. A re-prompt is a worker prompt, so it goes
-through `prompt-improver` as an agentic-pipeline prompt like any other.
+edges. A re-prompt is a worker prompt, so it goes through `prompt-improver` as an
+agentic-pipeline prompt like any other.
 
 **The checklist file is what makes the reset safe.** Progress lives on disk, so a reset
 loses the worker's reasoning and never its position. Rationale:
 [`docs/adr/0018-the-worker-watch-is-a-stateless-seam.md`](docs/adr/0018-the-worker-watch-is-a-stateless-seam.md).
 
-## Adversarial review (when config's `review.enabled`)
+## Adversarial review is a verb
 
-When a worker finishes a work item and review is enabled. **The tick is the actor that
-starts it** — its `implementation-complete` outcome
-([On the tick](#on-the-tick--what-it-wrote-and-what-is-left-for-you)). The item stays at `in-progress`
-through the whole loop, because a worker still owns it.
+`review N` spawns a reviewer on the item's branch, and the reviewer posts one comment on
+the work item. **There is no round, no fix loop and no counter.** A judgement has no exit
+code, so no tick reads a reviewer's opinion and no configuration switch turns this on
+([`docs/adr/0066-review-and-the-train-are-verbs.md`](docs/adr/0066-review-and-the-train-are-verbs.md)).
 
-**The round bound is the resolved `review.rounds`, and one value serves both halves.** It
-bounds the loop below, and it is the same number written into the tick's `--rounds` at spawn
-([Start the tick](#start-the-tick--one-item-automation-per-worker)). So the seam and the
-loop cannot disagree about which round is the last one. And `rounds-exhausted` is the
-outcome that reports the bound spent.
+The maintainer asks for it by name. *review 38*, *review #38 adversarially* and *get a
+second opinion on 38* are the same ask. Run it whenever they ask, at any point in the
+item's life.
 
 1. **Spawn a review worker** on the impl branch (its own worktree, op 2 with
    `--base-branch <impl-branch>`), harness per config, model + effort =
    `models.review` (default effort `high` — review accuracy holds at lower effort).
    Assert the review model's vendor differs from the impl model's
-   (`references/models.md`) — refuse if same vendor. **Then gate on readiness before
-   the review prompt**, per
+   ([`references/models.md`](references/models.md)) — refuse if same vendor. **Then gate on
+   readiness before the review prompt**, per
    [Gate readiness before the first prompt](#gate-readiness-before-the-first-prompt).
    A review spawn needs this more than an impl spawn, not less. Its worktree is fresh,
    and its harness is usually the *other* vendor's — so it is the one this machine has
-   launched least often. A lost review round is also silent: the impl worker waits, the
-   findings never arrive, and nothing reports an error. **Then repoint the item's Item
-   automation at this worktree** (op 13), and create no second one. One schedule per
-   item stands, and its precheck follows the live worker
-   ([On the tick](#on-the-tick--what-it-wrote-and-what-is-left-for-you)). The precheck is the same `tick`
-   command. `--worktree` and `--process` then name this worktree and the review harness.
-   **The automation is repointed, and never restarted**, so the schedule and its run history
-   both stay. The first `Verdict:` comment is what makes the tick read a verdict rather
-   than a checklist, so a reviewer needs no flag and no label of its own.
+   launched least often. **Create no Item automation for it** (op 11), and repoint the
+   item's own automation nowhere. Nothing watches a reviewer, because a reviewer reaches
+   no transition.
 2. **Prompt it to review** the diff/MR and the `make deep` report against the work
    item's acceptance criteria — drafted, then run through `prompt-improver` for the
    review model's profile, same as a spawn prompt. Say it's a **code-review prompt**:
    `prompt-improver` has a specific rule for these — **ask for coverage, filter
    downstream** — and it's the one that matters most here. Never "only
    high-severity", "be conservative", or "don't nitpick": every model here obeys
-   that literally and silently drops real bugs. The orchestrator ranks when it
-   reads the verdict. The reviewer posts a verdict on the work item: **approve**
-   or **request-changes + findings**.
+   that literally and silently drops real bugs.
 
-   **The verdict carries a `Verdict:` line, and the prompt asks for it verbatim.** Its
-   value is `approve` or `request-changes`. That literal is what puts the item in a review
-   round, so a review whose comment omits it fires no transition at all. Its count is
-   also the round number, so an omitted line loses the count with it. It is quoted
-   in the **Completion signal** entry of [`CONTEXT.md`](CONTEXT.md), so a writing pass
-   leaves it byte-identical.
+   **The reviewer posts one comment on the work item, and it carries no literal.** No
+   line of it is parsed, so it is written for the maintainer to read. Findings, per axis,
+   and nothing shaped like a value a machine acts on.
 
    **Four substitutions this prompt needs, learned by running the flow.** Each closes a
-   way a reviewer produces a plausible verdict that is not a review:
+   way a reviewer produces a plausible report that is not a review:
 
    - **Run the suites and the gate commands yourself, rather than trusting the commit
      messages.** A worker's own claim that a suite or a **Gate** is green is the claim
      under review, not evidence for it.
-   - **Give every acceptance-criteria checkbox its own verdict.** One verdict per box,
+   - **Give every acceptance-criteria checkbox its own answer.** One answer per box,
      named. A summary over a group of boxes hides the one box that failed.
    - **Do not spawn sub-agents.** The reviewer is already the second opinion. A
-     sub-agent's findings arrive unattributed and cost a round. This rule is the one
+     sub-agent's findings arrive unattributed. This rule is the one
      exception to the **Delegation cap**:
      [`docs/adr/0035-workers-delegate-to-sub-agents-under-a-cap.md`](docs/adr/0035-workers-delegate-to-sub-agents-under-a-cap.md).
    - **Report per axis, with a confidence and a severity on each finding.** The axes
      stay `/code-review`'s two. This adds only the two per-finding fields, which is
-     what lets this session rank without re-reading the diff.
+     what lets a maintainer rank without re-reading the diff.
 
    These four are prompt *content*, so they go into the draft and through
    `prompt-improver` with the rest — they restate no rule of the two-axis contract.
@@ -1189,67 +1133,25 @@ outcome that reports the bound spent.
    Evidence block of the review note, so the reviewer reads gate output instead of a
    worker's claim ([`references/quality-gates.md`](references/quality-gates.md),
    [`docs/adr/0032-quality-gates-are-a-layered-contract.md`](docs/adr/0032-quality-gates-are-a-layered-contract.md)).
-   Three findings are each grounds for `request-changes`. They are a mutant that the
+   Three findings are each worth naming first in the comment. They are a mutant that the
    suite left alive, a SAST finding at high or critical severity, and a fired **Halt
    condition**. The first two break a hard threshold in the layer 4 rows of the gate
    matrix. The third stops an infra plan and not code, so it is not a **Gate**. Its rows
-   land with the Terraform column ([`CONTEXT.md`](CONTEXT.md)). Each one is one finding
-   in the verdict. The fix loop in step 3 then answers it as it answers every other
-   finding.
+   land with the Terraform column ([`CONTEXT.md`](CONTEXT.md)).
 
    **A repo with a blank `deep` command has no report to read.** That Layer drops its
    checklist box before this session sends the checklist
    ([The prompt: checklist + completion contract](#the-prompt-checklist--completion-contract)).
    The reviewer then reads the diff, and reviews it as it does today.
-3. **On request-changes:** reset the original impl worker's context
-   ([Reset the worker's context before every re-prompt](#reset-the-workers-context-before-every-re-prompt)).
-   Then re-prompt **that same worker** with the findings to fix, and re-review. **Repoint the
-   precheck back at the implementation worktree** (op 13), with the implementation harness's
-   process pattern. The fix round then watches the worker that is fixing
-   ([On the tick](#on-the-tick--what-it-wrote-and-what-is-left-for-you)). The automation already runs and
-   outlives the round, so it is repointed and never restarted. Loop,
-   bounded at the resolved `review.rounds` (default 3), and the round the tick's line names
-   is the round you are on.
-   Each fix round steps the impl worker's effort up one rung — a finding the model
-   missed at `high` is what `xhigh` is for. In a fix round, one finding is one slice,
-   so the reviewer can map each fix to the finding it answers. **The fix prompt
-   re-enters the same routed skill the original spawn used** — not a re-resolution of
-   the verb, and not `/code-review` because a review produced the findings. The worker
-   resumes in the posture it started in. Effort steps up, and the skill does not change.
+3. **Report that the comment landed, and write no work-state label.** The item stays
+   exactly where it was. **The findings go to the maintainer, and never to the impl
+   worker.** Nothing re-prompts that worker with them, and no effort steps up a rung. The
+   maintainer decides what a finding is worth, which is the decision they already make on
+   a pull request. Where they want a fix, they ask for it as its own work.
 
-   **A fix prompt written from the findings alone is incomplete.** The findings say what
-   is wrong. They carry nothing about who is fixing it. Three things go in besides:
-
-   - **The routed skill, as a literal invocation.** `/implement`, not a sentence
-     mentioning `/implement`. Same rule as a spawn prompt, for the same reason — a
-     mention reads as a suggestion, and the worker then works freehand. **A fix prompt
-     goes to a worker whose context this session has cleared**, so it re-states the
-     invocation instead of relying on the worker to remember entering it.
-   - **The worker's own harness, model, effort and role.** Effort steps up each round,
-     so the worker cannot infer its current setting from the last one it saw.
-   - **The reviewer's model, effort and harness, with the cross-vendor fact stated.**
-     Not a footnote. A worker that does not know a **different vendor** produced the
-     findings reads them as its own second-guessing, and argues with them instead of
-     fixing them.
-
-   Word these the way a spawn prompt words the same facts. Then run the fix prompt
-   through `prompt-improver` as an agentic-pipeline prompt. A fix prompt is a worker
-   prompt, so every rule in
-   [The prompt: checklist + completion contract](#the-prompt-checklist--completion-contract)
-   applies to it unchanged.
-4. **On approve, or after the last round regardless:** gather evidence and report that the
-   item is with a human. **The tick has already swapped `in-progress` for `to-review`**, on
-   its `verdict-approve` or `rounds-exhausted` outcome. No card moves with it
-   ([Board status](#board-status)). **Write that label nowhere.** The item holds
-   `in-progress` for the whole loop, because a worker owns it and a fix round is that same
-   worker's work. So the label changes only here, at the one moment the loop concludes
-   ([`docs/adr/0056-the-tick-applies-the-transition-it-computed.md`](docs/adr/0056-the-tick-applies-the-transition-it-computed.md)).
-   `--review` on the precheck is what holds the finish back until this moment
-   ([Start the tick](#start-the-tick--one-item-automation-per-worker)).
-   Merge is always a human step.
-
-On demand: **"review #N adversarially"** runs this flow directly even if review is
-off in config.
+**Report the reviewer's teardown as a pending human decision.** The review worktree holds
+no work product the item needs, but a teardown is destructive, so it keeps its confirmation
+([Safety](#safety)).
 
 ## Close a task
 
@@ -1369,8 +1271,8 @@ restate its reason here
 
 **The Item automation is `orchestrator-item-<parent N>`, and one item never holds two
 schedules.** Where the parent already carries one, repoint its precheck at the proof worktree
-(op 13), the same way a review round does
-([On the tick](#on-the-tick--what-it-wrote-and-what-is-left-for-you)). Where it carries none, create one at
+(op 13, [`references/tools/_operations.md`](references/tools/_operations.md)). Where it
+carries none, create one at
 this spawn ([Start the tick](#start-the-tick--one-item-automation-per-worker)). Step 8 of the
 parent's own **Close transaction** removes it.
 
@@ -1449,25 +1351,26 @@ untriaged is work to report, and never a close this session refuses. Rationale, 
 threshold and the accepted risk:
 [`docs/adr/0033-the-story-gate-is-advisory.md`](docs/adr/0033-the-story-gate-is-advisory.md).
 
-## Merge the queue
+## The merge train is a verb
 
-This flow runs when the maintainer asks for the queue, usually after a
-["What next?"](#what-next--pick-the-next-work) read. **No tick starts it**, because no label
-records a merge ask. It runs one **Merge train**: one ordered run over the **Merge queue**,
-both defined in [`CONTEXT.md`](CONTEXT.md).
+This flow runs when the maintainer asks for the order, usually after a
+["What next?"](#what-next--pick-the-next-work) read. **No tick starts it, and no label
+records the ask.** It runs one **Merge train**: one ordered run over the **Merge queue**,
+both defined in [`CONTEXT.md`](CONTEXT.md). Rationale:
+[`docs/adr/0066-review-and-the-train-are-verbs.md`](docs/adr/0066-review-and-the-train-are-verbs.md),
+which narrows
+[`docs/adr/0037-the-merge-queue-is-an-ordered-train.md`](docs/adr/0037-the-merge-queue-is-an-ordered-train.md).
 
 **The ordering rule and the park rule live in
 [`references/merge-train.md`](references/merge-train.md).** Read them there at the moment
-you need them, and never from memory. This section restates neither one. Rationale:
-[`docs/adr/0037-the-merge-queue-is-an-ordered-train.md`](docs/adr/0037-the-merge-queue-is-an-ordered-train.md).
+you need them, and never from memory. This section restates neither one.
 
 1. **Resolve the Merge queue fresh.** The maintainer's ask names the items. Where the ask
    names the queue rather than a list, read every open item at `to-review` and confirm the
    set in one line before the train starts. Nothing on the tracker records the ask, so a
    train never infers one
    ([`docs/adr/0053-one-work-state-label-and-a-computed-position.md`](docs/adr/0053-one-work-state-label-and-a-computed-position.md)).
-2. **Ask the seam for the order.** Rank nothing yourself. `scripts/merge_train.py` plans a
-   train, and it merges nothing.
+2. **Ask the seam for the order.** Rank nothing yourself.
 
    ```bash
    python3 <plugin root>/scripts/merge_train.py --repo <config's repo> \
@@ -1482,9 +1385,12 @@ you need them, and never from memory. This section restates neither one. Rationa
    `python3 <plugin root>/scripts/merge_train.py --help` is the argument surface, and the
    module docstring holds the JSON keys and one row per exit code. **Never restate one of
    them here or in a report.**
-3. **Report the plan before the first merge.** The order and the parked list, capped at 5
-   rows like every other report ([Reporting to the user](#reporting-to-the-user)). That
-   report is what lets the maintainer stop a train they did not expect.
+
+   **It mutates nothing.** The test-merge runs in a throwaway checkout the seam creates and
+   removes again, so no checkout a session works in moves. It plans, it merges nothing, and
+   it writes no label and no comment.
+3. **Report the plan.** The order and the parked list, capped at 5 rows like every other
+   report ([Reporting to the user](#reporting-to-the-user)).
 4. **Park what the plan parked.**
    [`references/merge-train.md`](references/merge-train.md) holds the park rule, and this
    session performs it. **The comment is the whole park.** No label moves, because a queued
@@ -1494,7 +1400,7 @@ you need them, and never from memory. This section restates neither one. Rationa
 5. **Hand the maintainer the order, and merge nothing.** They merge on the tracker, in
    that order, and each merge closes its own item on the next tick
    ([Close a task](#close-a-task)). **No step of a Close transaction changes, and their
-   order does not change.** So a train adds one caller and no second close path.
+   order does not change.**
 6. **A late conflict parks the item, and the train continues.** It appears when the
    maintainer merges, because an earlier merge of this same train moved the default branch.
    Park it per step 4, then continue with the next item. `resolving-merge-conflicts` is
@@ -1507,7 +1413,7 @@ you need them, and never from memory. This section restates neither one. Rationa
 ## Reporting to the user
 
 An orchestrator session runs long and the user reads it between other work. They
-cannot hold "we're on round 2 of 3 for #38" across turns, so every report restates
+cannot hold "#38 is at checklist 4 of 7" across turns, so every report restates
 it. Shape output for acting on, not for completeness:
 
 - **Lead with state, not narration.** First line is the board: what changed and
@@ -1528,33 +1434,30 @@ it. Shape output for acting on, not for completeness:
   different skills. A spawn with no routed skill drops the field and keeps the other
   three.
 - **Restate the position every turn, and carry the progress with it.** A worker's progress
-  is `implementation · checklist 4/7`, a review loop is `review round 2 of 3`. Every
-  report of an owned item says where it sits, because that is the fact a fresh
-  session cannot infer. The position is computed, so read it the way the seam does: the
-  work-state label, the `Verdict:` comment count and the checklist file. Do not ask the
-  user to remember any of the three.
+  is `implementation · checklist 4/7`. Every report of an owned item says where it sits,
+  because that is the fact a fresh session cannot infer. The position is computed, so read
+  it the way the seam does: the work-state label, and then the checklist file for the
+  progress beside it. Do not ask the user to remember either one.
 - **A tick report names the outcome and the transition the tick applied.** The outcome is the
-  tick's own word: `implementation-complete`, `gates-unproven`,
-  `verdict-approve`, `verdict-request-changes`, `rounds-exhausted`,
+  tick's own word: `implementation-complete`, `gates-unproven`, `merged`,
   `dead`, `stalled` or `unreadable`. Then
-  the label the tick wrote, then what you did. `#38 implementation-complete · in-progress
-  held. Reviewer spawned, gpt-5.6-terra @ high.` **Where the tick handed the item to a human,
+  the label the tick wrote, then what you did. **Where the tick handed the item to a human,
   name the swap it wrote.** That one write is the whole hand-off:
-  `#38 verdict-approve · in-progress → to-review.` Read the swap off the item, and never
-  write one yourself.
+  `#38 implementation-complete · in-progress → to-review.` Read the swap off the item, and
+  never write one yourself.
 - **A story-proof line names the parent and the two artifacts.**
   `#57 story proof · evidence note on #57 · spec PR #64.` The parent number is
   the fact a fresh session cannot infer, because the item that reached the finish was the
   last child ([The story proof](#the-story-proof)).
-- **Both counts come from the tracker, so restate both.**
-  [On the tick](#on-the-tick--what-it-wrote-and-what-is-left-for-you) says how to read each one.
+- **The retry count comes from the tracker, so restate it.**
+  [On the tick](#on-the-tick--what-it-wrote-and-what-is-left-for-you) says how to read it.
   `#38 stalled in implementation ·
   checklist 4/7 · retry 1 of 1. Context reset, re-prompted with the unticked steps.` On the
   second stall the tick already wrote `needs-human`, so name the label and stop:
   `#38 stalled again · needs-human written. Read its comment and take the item back.` On
   `dead` the next step is a teardown — name it as the pending human decision.
 - **Say that the tick writes the label, and that you do not.** One line on the spawn line:
-  `#38 tick: applies the transition, review policy off`
+  `#38 tick: applies the transition`
   ([Start the tick](#start-the-tick--one-item-automation-per-worker)). The user then knows
   which writes happen with nobody in the turn, and that `needs-human` is the label that
   stops them.
@@ -1581,7 +1484,7 @@ it. Shape output for acting on, not for completeness:
   it or stash it, clear needs-human, and the next tick finishes the close.`
 - **A train report names the order the seam planned**, what parked and why, and it ends with
   the one action left. That is the close-report shape, once per train instead of once per
-  item ([Merge the queue](#merge-the-queue)). **A parked item is that action**, and it
+  item ([The merge train is a verb](#the-merge-train-is-a-verb)). **A parked item is that action**, and it
   carries the conflicting paths. `#152 #153 in that order, ready to merge. #151 parked:
   orchestrator/SKILL.md conflicts. Resolve it in 151-merge-train first.`
 - **Matter-of-fact failures.** Location, cause, fix — no "uh oh", no apology.
