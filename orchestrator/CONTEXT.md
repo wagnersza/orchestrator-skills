@@ -21,7 +21,7 @@ The dial for how much a model **thinks** — `low | medium | high | xhigh | max`
 _Avoid_: reasoning effort, thinking budget, temperature.
 
 **Role**:
-The class of job a work item represents, which selects its `(Model, Effort)` pair from config's `models:` block. Four: **heavy** (a contract, a schema, a code seam, three or more files, or an open decision. Strongest model, `high`), **medium** (the ordinary work item. Cheaper model, `medium`), **light** (one file, criteria fully enumerated, no open decision. Cheaper model, `low`), **review** (the adversarial reviewer. A different vendor, `high`). A spawn takes **medium**. It takes **heavy** only where one listed signal fires, and **light** only where all three listed conditions hold. A doubt is not a signal, so an item that fires no `heavy` signal and misses one `light` condition stays **medium**. `references/models.md` holds both lists and names the signal a spawn report must carry. A fix round steps the Role up one rung, and a failed **heavy** round steps its **Effort** up instead. This default reverses the default-heavy rule of `docs/adr/0005-role-based-model-and-effort.md`, and the rationale is `docs/adr/0059-medium-is-the-default-role.md`.
+The class of job a work item represents, which selects its `(Model, Effort)` pair from config's `models:` block. Four: **heavy** (a contract, a schema, a code seam, three or more files, or an open decision. Strongest model, `high`), **medium** (the ordinary work item. Cheaper model, `medium`), **light** (one file, criteria fully enumerated, no open decision. Cheaper model, `low`), **review** (the adversarial reviewer. A different vendor, `high`). A spawn takes **medium**. It takes **heavy** only where one listed signal fires, and **light** only where all three listed conditions hold. A doubt is not a signal, so an item that fires no `heavy` signal and misses one `light` condition stays **medium**. `references/models.md` holds both lists and names the signal a spawn report must carry. This default reverses the default-heavy rule of `docs/adr/0005-role-based-model-and-effort.md`, and the rationale is `docs/adr/0059-medium-is-the-default-role.md`.
 _Avoid_: tier, profile, model class.
 
 **Cost profile**:
@@ -44,10 +44,18 @@ The harness's unattended flag (analog of claude's `--dangerously-skip-permission
 _Avoid_: unattended mode, skip-permissions.
 
 **Adversarial review**:
-An optional review of a worker's output by a second worker running a **different-vendor** model (e.g. implement with opus-5, review with gpt-5.6). Config names the review model + effort explicitly (`models.review`) and the orchestrator asserts its vendor differs from the impl model's. The review worker runs on the impl branch (own worktree) and reads the diff/MR against the acceptance criteria. Its prompt asks for **coverage, not filtering** — a "only high-severity" bar makes every current model silently drop real bugs.
+A review of a worker's output by a second worker running a **different-vendor** model (e.g. implement with opus-5, review with gpt-5.6). Config names the review model + effort explicitly (`models.review`) and the orchestrator asserts its vendor differs from the impl model's. The review worker runs on the impl branch (own worktree) and reads the diff/MR against the acceptance criteria. Its prompt asks for **coverage, not filtering** — a "only high-severity" bar makes every current model silently drop real bugs.
+
+**It is a verb, and `review N` is the whole of it.** The reviewer posts one comment on the
+work item, and a human reads it. **No tick starts one, no configuration switch turns it on,
+and nothing parses the comment.** A judgement has no exit code, so it can never be the input
+of a deterministic gate. **The findings go to the maintainer and never to the impl worker**:
+nothing re-prompts that worker with them, and no **Effort** steps up a rung
+([`docs/adr/0066-review-and-the-train-are-verbs.md`](docs/adr/0066-review-and-the-train-are-verbs.md)).
 
 **Review round**:
-One cycle of adversarial review: the review worker posts a verdict (approve / request-changes + findings). On **request-changes**, the orchestrator re-prompts the **original impl worker** with the findings to fix, then re-reviews. Bounded at **3 rounds**. After approve — or after the 3rd round regardless — the orchestrator gathers evidence and moves the item to **human review**. The human reviews after the fixes, and merge stays a human step. The maintainer merges on the tracker, and that merge is what fires the **Close transaction** on the next tick. No worker merges, no session merges, and nothing is typed ([`docs/adr/0057-the-merge-is-the-second-act.md`](docs/adr/0057-the-merge-is-the-second-act.md)).
+**A retired term, kept so a reader of an older ADR finds it.** It named one cycle of a bounded fix loop: the reviewer posted a `Verdict:` comment, the **Worker watch** parsed it, and a **request-changes** re-prompted the impl worker with the findings. The bound was 3, and the count was the number of those comments. **The whole loop left the automated loop**, because a reviewer forming an opinion cannot be a deterministic gate and a round counter is state a restarted session misreads. What is left is the **Adversarial review** verb above ([`docs/adr/0066-review-and-the-train-are-verbs.md`](docs/adr/0066-review-and-the-train-are-verbs.md), narrowing [`docs/adr/0003-cross-vendor-adversarial-review.md`](docs/adr/0003-cross-vendor-adversarial-review.md)).
+_Avoid_: fix round, fix loop, review cycle, verdict (each names a part of the loop that retired).
 
 **Close transaction**:
 The five steps that finish a **Work item**, in one fixed order, once its pull request is merged. They keep the numbers 4 to 8 they held when the transaction had eight, because `scripts/close_item.py` prints those numbers in every plan:
@@ -64,10 +72,10 @@ The five steps that finish a **Work item**, in one fixed order, once its pull re
 
 **The actor for all five steps is the tick of an Item automation**, and never a session and never a **Worker**. **The trigger is a merged pull request, and no verb and no label authorises it.** The **Worker watch** reads the branch off the worktree it watches, then asks the **Tracker adapter** for the pull request opened from that branch. Where the answer reads `MERGED`, it runs the five steps in its own process. The seam refuses rather than warns. An unmerged pull request and a dirty worktree each stop the transaction with a distinct exit code. **A refused transaction writes `needs-human` plus one comment that names what stopped it**, so the item stops rather than retrying every minute. Nothing is removed without a teardown command. Rationale, the rejected alternatives, and the risk accepted for an unattended actor: `docs/adr/0015-close-is-a-deterministic-transaction.md` and [`docs/adr/0057-the-merge-is-the-second-act.md`](docs/adr/0057-the-merge-is-the-second-act.md).
 
-**A Merge train loops this transaction, and changes no step of it.** The five steps and
-their order are the same whether one merge fires one close or a train runs ten, teardown
-included. So a train adds one caller and no second merge path. **No tick calls a train**,
-and it stays a verb the maintainer asks for
+**A Merge train changes no step of this transaction, and calls none of them.** It hands the
+maintainer an order. Each merge they then make fires its own close on the next tick, teardown
+included, whether they merged one branch or ten. So a train adds no second merge path. **No
+tick calls a train**, and it stays a verb the maintainer asks for
 ([`docs/adr/0037-the-merge-queue-is-an-ordered-train.md`](docs/adr/0037-the-merge-queue-is-an-ordered-train.md),
 narrowed by [`docs/adr/0057-the-merge-is-the-second-act.md`](docs/adr/0057-the-merge-is-the-second-act.md)).
 _Avoid_: teardown (that names step 8 alone), close flow, closing sequence, wrap-up.
@@ -151,8 +159,9 @@ carries it, not before the last commit of the item.
 
 **A trivial item is one commit, and that is not a violation.** The rule is "one commit
 per logical change", never "at least N commits". A minimum count makes a worker split
-a change whose parts fail on their own. In a **Review round** fix cycle, one finding
-is one slice, so the reviewer can map each fix to the finding it answers.
+a change whose parts fail on their own. Where a maintainer asks for the fixes an
+**Adversarial review** found, one finding is one slice, so a later reader maps each fix to
+the finding it answers.
 
 Slices serve the reviewer who reads the open PR. They are not a request to change the
 merge button: this repo squash-merges, so `main` keeps one commit per item. Rationale
@@ -183,7 +192,7 @@ with none reads the same instruction, delegates nothing, and satisfies it.
 
 **The adversarial reviewer is the one exception, and it keeps its own rule.** The
 review prompt tells the reviewer to spawn no sub-agents. The reviewer is already the
-second opinion, and an unattributed finding costs a **Review round**. Enforcement is
+second opinion, and an unattributed finding reaches the maintainer with no author. Enforcement is
 documentary, the same as the **Browser surface** rule. Nothing counts the sub-agents a
 worker runs. Rationale, the sentence this reverses, why the number is not a config
 field, and the accepted risk:
@@ -353,9 +362,11 @@ the next tick, so no queue forms unless the maintainer asks for a train
 _Avoid_: merge backlog, ready-to-merge list, merge candidates, close queue.
 
 **Merge train**:
-One ordered run over a **Merge queue**. It resolves the order from a seam,
-`scripts/merge_train.py`, and it hands the maintainer that order. **The maintainer merges
-in it, and each merge closes its own item on the next tick.** So a merged item leaves no
+One ordered run over a **Merge queue**. **It is a verb, and nothing unattended reaches it.**
+It resolves the order from a seam, `scripts/merge_train.py`, and it hands the maintainer that
+order. **The seam mutates nothing**: it test-merges in a throwaway checkout it creates and
+removes again, then prints one JSON plan. **The maintainer merges
+in that order, and each merge closes its own item on the next tick.** So a merged item leaves no
 worktree and no schedule behind, because step 8 of each **Close transaction** is that
 teardown. **A branch that conflicts is parked, and the train keeps moving**: the session
 reports the conflicting paths on the work item and carries on with the next branch. Nothing
@@ -365,18 +376,19 @@ any of them. The three ordering steps, the park rule and the seam's contract:
 [`references/merge-train.md`](references/merge-train.md). Rationale, the rejected
 alternatives and the accepted risk:
 [`docs/adr/0037-the-merge-queue-is-an-ordered-train.md`](docs/adr/0037-the-merge-queue-is-an-ordered-train.md),
-narrowed by [`docs/adr/0057-the-merge-is-the-second-act.md`](docs/adr/0057-the-merge-is-the-second-act.md).
+narrowed by [`docs/adr/0057-the-merge-is-the-second-act.md`](docs/adr/0057-the-merge-is-the-second-act.md)
+and by [`docs/adr/0066-review-and-the-train-are-verbs.md`](docs/adr/0066-review-and-the-train-are-verbs.md).
 _Avoid_: merge queue (that names the set, not the run), batch merge, auto-merge, merge
 sequence.
 
 **Config**:
-The per-project orchestrator settings — tool, harness, model, adversarial-review policy, tracker-setup pointer, and the two dials the automation reads: `max_stories` (the **Story slot** count, default 2) and `parallel_check` (`touches` or `off`, which decides whether a **Touch set** gates a parallel spawn). Lives at `docs/agents/orchestrator.md` in the target repo (same pattern as `/setup-matt-pocock-skills`): human-editable markdown, seeded from a template in the skill folder, with a one-line summary block in `CLAUDE.md`. Per-project because different projects use different setups.
+The per-project orchestrator settings — tool, harness, model, tracker-setup pointer, and the two dials the automation reads: `max_stories` (the **Story slot** count, default 2) and `parallel_check` (`touches` or `off`, which decides whether a **Touch set** gates a parallel spawn). Lives at `docs/agents/orchestrator.md` in the target repo (same pattern as `/setup-matt-pocock-skills`): human-editable markdown, seeded from a template in the skill folder, with a one-line summary block in `CLAUDE.md`. Per-project because different projects use different setups.
 
 **Setup phase**:
-The one-time interview that writes the Config — the user describes environment, tool, harness/CLI, models, adversarial-review policy, and the project recipes (setup command, run-for-evidence recipe + port scheme, optional DB gate, evidence expectations). Same posture as `/setup-matt-pocock-skills`: explore, present findings, confirm, write. Also ensures the tracker config exists (calls `/setup-matt-pocock-skills` if `docs/agents/issue-tracker.md` is missing).
+The one-time interview that writes the Config — the user describes environment, tool, harness/CLI, models, and the project recipes (setup command, run-for-evidence recipe + port scheme, optional DB gate, evidence expectations). Same posture as `/setup-matt-pocock-skills`: explore, present findings, confirm, write. Also ensures the tracker config exists (calls `/setup-matt-pocock-skills` if `docs/agents/issue-tracker.md` is missing).
 
 **Work-state labels**:
-The tracker labels that gate the queue and mark progress. **One family, four values, and it never stacks**: `ready-for-agent`, `in-progress`, `to-review` and `needs-human`. Owned by `docs/agents/issue-tracker.md` (`/setup-matt-pocock-skills`), not the orchestrator config — single source of truth. During an adversarial-review loop the item stays `in-progress` (a worker still owns it); it flips to the review label only when the loop concludes.
+The tracker labels that gate the queue and mark progress. **One family, four values, and it never stacks**: `ready-for-agent`, `in-progress`, `to-review` and `needs-human`. Owned by `docs/agents/issue-tracker.md` (`/setup-matt-pocock-skills`), not the orchestrator config — single source of truth. An item stays `in-progress` while a worker owns it, and the tick swaps that value for the review label at the finish.
 
 **One seam writes every value of this family, and no session writes one by hand.** The
 **Worker watch** applies the transition it computed, in the process that read the labels. So
@@ -421,16 +433,14 @@ A persistent, file-based task list that survives context loss and works across e
 
 **Position**:
 Where a **Work item** sits inside its own run, computed from facts rather than read from a
-label. Three values: **human review**, **review round** and **implementation**. The
+label. Two values: **human review** and **implementation**. The
 **Worker watch** computes it in one function, and the outcome a tick can reach follows
 from it.
 
 The rule, in this order:
 
 1. The `to-review` label on the item means human review.
-2. Otherwise, a `Verdict:` comment newer than the last write to the **Checklist** means a
-   review round.
-3. Otherwise the item is in implementation.
+2. Otherwise the item is in implementation.
 
 **Human review is a work state, and never a position a worker owns.** So `to-review`
 answers first, and nothing restates it. **One transition is due there, and a merged pull
@@ -439,9 +449,8 @@ pull request opened from it. An open pull request is a quiet tick, and a branch 
 request is a quiet tick. A merged one is a whole **Close transaction**
 ([`docs/adr/0057-the-merge-is-the-second-act.md`](docs/adr/0057-the-merge-is-the-second-act.md)).
 
-**Every fact it reads is a fact the tick already read.** Those facts are the **Work-state
-labels**, the `Verdict:` comment list, and when the **Checklist** file was last written.
-So a position costs no second tracker read and no second file.
+**The one fact it reads is a fact the tick already read**, and that is the **Work-state
+labels**. So a position costs no second tracker read and no file at all.
 
 **A cached answer can be stale, and a computed one cannot.** A second label family stored
 this answer beside the facts that make it. So the two can disagree, and nothing repairs a
@@ -457,21 +466,22 @@ maintainer's own merge. So the next tick reads that label, reads no merge, stays
 no suppression window is needed
 ([`docs/adr/0056-the-tick-applies-the-transition-it-computed.md`](docs/adr/0056-the-tick-applies-the-transition-it-computed.md)).
 
-**A review round always has a verdict behind it.** That verdict is what computes the
-position, so the verdict fires its own outcome and only implementation reads the
-checklist, the process and the stall window. The cost is one accepted risk: a reviewer
-that has posted no verdict yet reads as an implementation worker. The label family that
-retired, what this supersedes and that risk:
+**The review-round value retired with the loop it named.** It was computed from a `Verdict:`
+comment, and no seam reads that literal now. So every worker a tick watches is in
+implementation, and implementation is the one position that reads the checklist, the process
+and the stall window
+([`docs/adr/0066-review-and-the-train-are-verbs.md`](docs/adr/0066-review-and-the-train-are-verbs.md)).
+The label family that retired and what this supersedes:
 [`docs/adr/0053-one-work-state-label-and-a-computed-position.md`](docs/adr/0053-one-work-state-label-and-a-computed-position.md).
-_Avoid_: phase (that named the label family this replaces), stage, state, status (the last
-two name the work-state axis), progress.
+_Avoid_: phase (that named the label family this replaces), review round (that named the
+value this deleted), stage, state, status (the last two name the work-state axis), progress.
 
 **Item automation**:
 One schedule per live **Work item**, owned by the **Tool** rather than by a session's shell, named `orchestrator-item-<N>`. It ticks once a minute. **Its precheck is the whole tick**: the **Worker watch** seam asked for a transition, plus the write that transition carries. **The tick applies the transition it computed**, in the process that read the facts. It delivers nothing and it wakes nobody, so no transition can be lost to a delivery (`docs/adr/0056-the-tick-applies-the-transition-it-computed.md`).
 
 **No agent runs on a tick.** The precheck exits non-zero on every path, so every run records as skipped at no token cost. The schedule's own prompt and provider stay inert. So the loop spends no tokens at all between the spawn of a worker and the maintainer's own reading of the pull request.
 
-**It acts on two things: the work-state label of the item it watches, and the close of that item once its pull request merges.** It composes no prompt, kills no process, moves no card, merges nothing and spawns nothing. **At most one transition lands per run**, which is what stops a wrong computation cascading inside one minute. **The automation decides when, and the seam decides what** — the same split as a **Close transaction**, applied again. One per item, so a leaked schedule names the item it leaked from, and five siblings are five observed items. **One per item also means the schedule follows the live worker.** A session repoints the precheck when it spawns the next worker. So a review round watches the reviewer's worktree, and a fix round watches the implementation worktree again (`docs/adr/0026-the-automation-follows-the-live-worker.md`). Removal is step 8 of the **Close transaction** the tick itself runs, through the teardown command the spawn passes into the precheck. So a refused transaction leaves the item observed. A tool with no automation surface skips the tick and the spawn works unchanged. Rationale, the schedule that replaces the blocking watch, the `dead` and `stalled` split, and the rejected alternatives: `docs/adr/0022-item-automation-replaces-the-blocking-watch.md`.
+**It acts on two things: the work-state label of the item it watches, and the close of that item once its pull request merges.** It composes no prompt, kills no process, moves no card, merges nothing and spawns nothing. **At most one transition lands per run**, which is what stops a wrong computation cascading inside one minute. **The automation decides when, and the seam decides what** — the same split as a **Close transaction**, applied again. One per item, so a leaked schedule names the item it leaked from, and five siblings are five observed items. **One per item also means one worktree is watched.** No transition moves the work to a second worker, so nothing inside the loop repoints the precheck a spawn wrote (`docs/adr/0026-the-automation-follows-the-live-worker.md`, narrowed by `docs/adr/0066-review-and-the-train-are-verbs.md`). Removal is step 8 of the **Close transaction** the tick itself runs, through the teardown command the spawn passes into the precheck. So a refused transaction leaves the item observed. A tool with no automation surface skips the tick and the spawn works unchanged. Rationale, the schedule that replaces the blocking watch, the `dead` and `stalled` split, and the rejected alternatives: `docs/adr/0022-item-automation-replaces-the-blocking-watch.md`.
 
 **A tick in human review reads the pull request for the item's branch.** A merged one closes
 the item, removes the worktree and removes the schedule. So the maintainer merges and types
@@ -483,7 +493,7 @@ _Avoid_: cron job, watcher, daemon, poller (each names a mechanism rather than t
 **Worker watch**:
 The seam that observes a live **Worker**'s own work product and answers whether something needs a decision now. It is not a worker — it has no **Harness** and no **Model** — and it is not the orchestrator, because it composes nothing. Asked once per tick, it reads three facts on the file system plus the work item's labels and comments. In human review it reads one fact more, and that is the pull request opened from the item's branch. It answers one outcome. The printed line names which one fired. It composes no prompt, kills no process, moves no card and spawns nothing, so every destructive act but the close stays in a session a human can interrupt. It holds no state that changes an answer and it writes no file, which is what makes a restart after each re-prompt free.
 
-**The one thing it writes is the transition it computed.** One function inside the seam owns every **Work-state label** swap, and it runs in the process that read those labels. The removals and the addition are one tracker write, so the two can never land apart. **At most one transition lands per run.** Three outcomes carry a label swap, and four refuse and leave the item where it is (`docs/adr/0056-the-tick-applies-the-transition-it-computed.md`).
+**The one thing it writes is the transition it computed.** One function inside the seam owns every **Work-state label** swap, and it runs in the process that read those labels. The removals and the addition are one tracker write, so the two can never land apart. **At most one transition lands per run.** One outcome carries a label swap, and three refuse and leave the item where it is (`docs/adr/0056-the-tick-applies-the-transition-it-computed.md`).
 
 **A stalled worker is the one transition a count decides: one re-prompt, and then a human.** Under the bound the tick posts one `Re-prompt:` comment, and the worker keeps its item. At the bound it writes `needs-human` with one comment and re-prompts nothing. **Nothing computes a rung**, because a bigger model is a judgement about a terminal this seam cannot see (`docs/adr/0058-one-re-prompt-then-a-human.md`).
 
@@ -491,7 +501,7 @@ The seam that observes a live **Worker**'s own work product and answers whether 
 
 **Two subcommands read one plan.** `phase` computes and writes nothing at all, so a maintainer dry-runs one item against a live tracker. `tick` computes through the same code path and then applies. That is the plan-and-execute split a **Close transaction** already holds, applied a second time.
 
-**The watch decides when and what, and the session decides everything else** — spawns, prompts and reports. The merge is the maintainer's own act, and no session and no tick makes one. Ordering is what code holds perfectly and prose holds poorly, so the watch is a seam, `scripts/worker_state.py`. The seam stores no count. It reads both counts from the comment bodies it already holds: the **Review round** number, and the number of retries a stalled worker already got (`docs/adr/0058-one-re-prompt-then-a-human.md`). One **Item automation** per spawn, impl and review alike, because an opt-in observer is off exactly when the maintainer forgets. Rationale, the rejected alternatives, the reviewer accepted risk, and the context reset that goes with a re-prompt: `docs/adr/0018-the-worker-watch-is-a-stateless-seam.md`. The same seam answers readiness for every **Tool** with one check: `docs/adr/0019-readiness-is-a-tool-agnostic-process-check.md`.
+**The watch decides when and what, and the session decides everything else** — spawns, prompts and reports. The merge is the maintainer's own act, and no session and no tick makes one. Ordering is what code holds perfectly and prose holds poorly, so the watch is a seam, `scripts/worker_state.py`. The seam stores no count. It reads the one count it needs from the comment bodies it already holds, and that is the number of retries a stalled worker already got (`docs/adr/0058-one-re-prompt-then-a-human.md`). One **Item automation** per spawn, because an opt-in observer is off exactly when the maintainer forgets. Rationale, the rejected alternatives, the reviewer accepted risk, and the context reset that goes with a re-prompt: `docs/adr/0018-the-worker-watch-is-a-stateless-seam.md`. The same seam answers readiness for every **Tool** with one check: `docs/adr/0019-readiness-is-a-tool-agnostic-process-check.md`.
 
 **The blocking poll loop has retired, and the seam has not.** A loop in a background process of the orchestrator's own shell dies with that shell. It reports nothing when it does. So the trigger is an **Item automation**, and the seam is asked once per tick as a predicate. The exit-code contract survives, the statelessness survives, and the split above survives. What retired is the `watch` subcommand, with its bounded maximum wait and its per-role completion flag. The stall window survives as an argument to the predicate. `docs/adr/0022-item-automation-replaces-the-blocking-watch.md` narrows ADR 0018 to that extent and no further.
 _Avoid_: watchdog, monitor, supervisor, liveness probe (each implies restart authority this thing does not have).
@@ -505,18 +515,19 @@ The directory this plugin is installed in. It holds `scripts/`, so it is the onl
 _Avoid_: skill root, install path, plugin directory, `$CLAUDE_PLUGIN_ROOT` (that names a harness variable which is unset in the shell a skill body opens).
 
 **Completion signal**:
-How a **Worker**'s finish is detected. Two shapes, and a tick reads exactly one — the item's **Position** names which, so no flag carries the worker's **Role**:
+How a **Worker**'s finish is detected. One shape, because every worker a tick watches is an implementation worker and no flag carries a **Role**:
 
-1. **A fully ticked checklist** — every box in `.orchestrator/checklist-<item>.md` is `- [x]`. This is the implementation worker's shape, read in the implementation position. It docks onto the completion contract the **Checklist** already is, so it adds no second place to record progress.
-2. **A `Verdict:` comment** on the **Work item** — the review worker's shape, read in a review round, because a reviewer ticks no checklist. `Verdict:` is a fixed literal shared by the review prompt and the watch, and its value is `approve` or `request-changes`. It is quoted here, so a writing pass leaves it byte-identical.
+1. **A fully ticked checklist** — every box in `.orchestrator/checklist-<item>.md` is `- [x]`. It docks onto the completion contract the **Checklist** already is, so it adds no second place to record progress.
 
-**Shape 1 reads a third fact, and that is the Gate record.** A ticked checklist on its own says a worker believes it is done. A ticked checklist plus a green line for every required layer at the current `HEAD` says a machine agreed. A missing line, a malformed line, a non-zero exit or a stale `head_sha` fires the `gates-unproven` outcome instead. The **Orchestrator** then re-prompts the worker, and the item does not move to review. Which layers are required arrives as a repeatable flag the spawn resolves, so the seam still parses no config (`docs/adr/0036-a-gate-run-is-work-product.md`).
+**The second shape retired with the Review round.** It was a `Verdict:` comment on the **Work item**, and the **Worker watch** parsed it into a transition. A reviewer's comment reaches a human now, and no seam reads it ([`docs/adr/0066-review-and-the-train-are-verbs.md`](docs/adr/0066-review-and-the-train-are-verbs.md)).
 
-Both are **work product**: a worker writes them by doing the work. So neither one reports a finish for a dead worker. `orca terminal read` and `orca terminal wait --for tui-idle` both did report one, which is the failure mode recorded in `docs/adr/0017-gate-worker-readiness-on-a-process-check.md`. Why these two shapes, and why a reviewer's stall detection is weaker as accepted risk: `docs/adr/0018-the-worker-watch-is-a-stateless-seam.md`. Why the same seam also answers readiness for every **Tool**: `docs/adr/0019-readiness-is-a-tool-agnostic-process-check.md`.
+**This shape reads a second fact, and that is the Gate record.** A ticked checklist on its own says a worker believes it is done. A ticked checklist plus a green line for every required layer at the current `HEAD` says a machine agreed. A missing line, a malformed line, a non-zero exit or a stale `head_sha` fires the `gates-unproven` outcome instead. The **Orchestrator** then re-prompts the worker, and the item does not move to review. Which layers are required arrives as a repeatable flag the spawn resolves, so the seam still parses no config (`docs/adr/0036-a-gate-run-is-work-product.md`).
 
-**Both shapes are read once per tick, rather than polled in a loop.** An **Item automation** asks the seam for a transition every minute. So a signal is read at that moment, from disk or from the tracker, and nothing is held between reads. Shape 2 carries one fact more under the tick: **the count of `Verdict:` comments is the Review round number**. So *round 2 of 3* is read from the tracker rather than remembered by a session. Why the tick replaces the loop: `docs/adr/0022-item-automation-replaces-the-blocking-watch.md`.
+Both facts are **work product**: a worker writes them by doing the work. So neither one reports a finish for a dead worker. `orca terminal read` and `orca terminal wait --for tui-idle` both did report one, which is the failure mode recorded in `docs/adr/0017-gate-worker-readiness-on-a-process-check.md`. Why this shape: `docs/adr/0018-the-worker-watch-is-a-stateless-seam.md`. Why the same seam also answers readiness for every **Tool**: `docs/adr/0019-readiness-is-a-tool-agnostic-process-check.md`.
 
-**A third literal takes that same shape, and it is `Re-prompt:`.** It is not a completion signal, because a stall is the fact that fires it. **The count of `Re-prompt:` comments is the number of retries a stalled worker already got**, and the bound is one. So a restart reads the number a maintainer reads. **The literal has to open a line to count**, which is where the tick writes it. So prose that quotes it, in a review note or in this repo, spends no retry. `Re-prompt:` is quoted here for the same reason `Verdict:` is. One prompt writes it and the watch reads it, so a writing pass leaves it byte-identical (`docs/adr/0058-one-re-prompt-then-a-human.md`).
+**The signal is read once per tick, rather than polled in a loop.** An **Item automation** asks the seam for a transition every minute. So a signal is read at that moment, from disk, and nothing is held between reads. Why the tick replaces the loop: `docs/adr/0022-item-automation-replaces-the-blocking-watch.md`.
+
+**One literal is still counted on the tracker, and it is `Re-prompt:`.** It is not a completion signal, because a stall is the fact that fires it. **The count of `Re-prompt:` comments is the number of retries a stalled worker already got**, and the bound is one. So a restart reads the number a maintainer reads. **The literal has to open a line to count**, which is where the tick writes it. So prose that quotes it, in a review note or in this repo, spends no retry. It is quoted here because the tick writes it and the same tick reads it back, so a writing pass leaves it byte-identical (`docs/adr/0058-one-re-prompt-then-a-human.md`).
 _Avoid_: done signal, exit signal, finish event, heartbeat (the last one names liveness, which is the signal this deliberately is not).
 
 **Gate**:
