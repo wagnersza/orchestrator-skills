@@ -1,10 +1,35 @@
 #!/usr/bin/env python3
 """Plan one **Merge train**: the order the queued branches merge in, and the parked ones.
 
-The ordering rule and the park rule live in
-`orchestrator/references/merge-train.md`, and this file restates neither one. This file
-holds the seam's own contract instead: the flags, the JSON it prints, and one row per
-exit code.
+A **Merge queue** is the set of open work items the maintainer's ask names, read fresh
+when a train starts. Nothing on the tracker records the ask, so a train that runs twice
+on one ask needs the maintainer to type it twice.
+
+**The ordering rule.** Test-merge each queued branch onto the default branch first — a
+branch that conflicts there is parked before the train starts. Rank the rest by how
+many other queued branches they share a changed file with, fewest first, and break a
+tie by work-item number, ascending. After each real merge the next branch meets a
+default branch that moved, which is where a late conflict appears and where the park
+rule fires again. File overlap is a cheap proxy; the test-merge this seam runs is the
+real check, so a wrong ranking costs one extra park and never a wrong merge.
+
+**The park rule.** Where a branch conflicts, the session comments the conflicting paths
+on the work item and continues with the next branch. No label moves and no card moves,
+because an item in a queue already wears the review state
+([`orchestrator/docs/adr/0056-the-tick-applies-the-transition-it-computed.md`](../orchestrator/docs/adr/0056-the-tick-applies-the-transition-it-computed.md)).
+Nothing unattended resolves a hunk — a parked item is not a failed one, and it goes back
+to the maintainer who holds every merge
+([`orchestrator/docs/adr/0057-the-merge-is-the-second-act.md`](../orchestrator/docs/adr/0057-the-merge-is-the-second-act.md)).
+
+**The order comment.** Where the plan holds more than one item, the session publishes
+the order on the PR/MR of each item in it: one comment per PR, naming the neighbours
+(`merge after #12, before #14`). The comment is found by a fixed first line,
+`<!-- orchestrator:merge-order -->`, and rewritten in place rather than posted twice. A
+plan of one item writes no comment, because an order of one is not an order. The session
+writes this comment; this seam prints JSON and comments nowhere.
+
+This file holds the seam's own contract too: the flags, the JSON it prints, and one row
+per exit code.
 
 **It plans, and it merges nothing.** There is no `--execute` flag, because there is
 nothing to execute. The merge is the **Close transaction** this repo already holds. The
@@ -302,7 +327,7 @@ def plan_merges(checkout, queue, default_branch):
 
 
 def rank(survivors):
-    """Order the survivors by the rule `orchestrator/references/merge-train.md` holds.
+    """Order the survivors by the ordering rule this module's own docstring holds.
 
     The tuple carries both keys of that rule, so one `sort()` applies them together.
     The overlap count runs over the survivors alone. A parked branch does not merge in
@@ -379,8 +404,10 @@ def main(argv=None):
             "it removes that checkout again on every path out. The plan is one JSON\n"
             "object on stdout.\n"
             "\n"
-            "The ordering rule and the park rule live in\n"
-            "orchestrator/references/merge-train.md."
+            "The ordering rule ranks the survivors by fewest shared files first,\n"
+            "ties broken by item number ascending. The park rule comments the\n"
+            "conflicting paths and moves no label. Both rules are in this module's\n"
+            "own docstring."
         ),
     )
     parser.add_argument(

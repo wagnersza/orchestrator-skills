@@ -1361,9 +1361,9 @@ both defined in [`CONTEXT.md`](CONTEXT.md). Rationale:
 which narrows
 [`docs/adr/0037-the-merge-queue-is-an-ordered-train.md`](docs/adr/0037-the-merge-queue-is-an-ordered-train.md).
 
-**The ordering rule and the park rule live in
-[`references/merge-train.md`](references/merge-train.md).** Read them there at the moment
-you need them, and never from memory. This section restates neither one.
+**The ordering rule and the park rule live in the seam's own module docstring,
+[`scripts/merge_train.py`](../scripts/merge_train.py).** Read it there at the moment
+you need it, and never from memory. This section restates none of it.
 
 1. **Resolve the Merge queue fresh.** The maintainer's ask names the items. Where the ask
    names the queue rather than a list, read every open item at `to-review` and confirm the
@@ -1392,8 +1392,8 @@ you need them, and never from memory. This section restates neither one.
 3. **Report the plan.** The order and the parked list, capped at 5 rows like every other
    report ([Reporting to the user](#reporting-to-the-user)).
 4. **Park what the plan parked.**
-   [`references/merge-train.md`](references/merge-train.md) holds the park rule, and this
-   session performs it. **The comment is the whole park.** No label moves, because a queued
+   [`scripts/merge_train.py`](../scripts/merge_train.py) holds the park rule in its own
+   docstring, and this session performs it. **The comment is the whole park.** No label moves, because a queued
    item already wears the review state, and no card moves either
    ([Board status](#board-status)). `scripts/merge_train.py` comments nowhere, so this
    session posts that one comment.
