@@ -290,6 +290,43 @@ class RefuseHook(unittest.TestCase):
         on its own message."""
         self.allowed(CLOSE_WITH_LABEL)
 
+    def test_an_item_created_with_the_start_label_goes_through(self):
+        """The second allow case. An inline item-writing flow writes `ready-for-agent` on
+        each item it files, and a create sets an item's first state rather than moving an
+        existing one (ADR 0068). Both tracker CLIs spell the verb the same way."""
+        self.allowed(
+            'gh issue create --title "The cache key carries the tenant" '
+            '--body "the body" --label ready-for-agent'
+        )
+        self.allowed(
+            'glab issue create --title "The cache key carries the tenant" '
+            '--description "the body" --label ready-for-agent'
+        )
+
+    def test_a_write_on_an_item_that_already_exists_is_still_denied(self):
+        """The create exemption reaches a create, and an edit is still a denial. So the
+        half of the hook that protects the loop is unchanged."""
+        self.assertIn(
+            "`ready-for-agent`",
+            self.denied("gh issue edit 202 --add-label ready-for-agent"),
+        )
+        self.assertIn(
+            "`ready-for-agent`",
+            self.denied(
+                "gh issue edit 202 --remove-label ready-for-agent "
+                "--add-label in-progress"
+            ),
+        )
+
+    def test_a_create_leading_a_compound_command_carries_the_whole_line(self):
+        """The same reading the close seam's exemption takes: the caller is read across
+        the whole command, so a hand-typed write beside a create goes through. The hook
+        fails open by design, and a compound command is where that shows."""
+        self.allowed(
+            'gh issue create --title "a new item" --label ready-for-agent '
+            "&& gh issue edit 202 --add-label to-review"
+        )
+
     def test_a_hand_typed_write_beside_the_seam_is_permitted_too(self):
         """A compound command holds the seam call and a hand-typed write on the same
         line. The hook reads the caller across the whole command, the same way

@@ -1617,21 +1617,29 @@ class WorkerStateTestCase(unittest.TestCase):
 
     # --- what the deleted merge-requested outcome leaves behind --------------
 
-    def test_the_board_flags_are_gone_from_both_subcommands(self):
-        """They served the merge-requested outcome alone, so the outcome and the three
-        coordinates go together. A flag left in the parser is a flag a caller resolves
-        for nothing. The board section of the tracker file no longer feeds a tick."""
-        for subcommand in ("phase", "tick"):
-            # The usage line carries the path of the checkout that runs, and a worktree
-            # can be named after this migration. So the path is not text this seam
-            # wrote, and it is not what this test reads.
-            out = self.run_seam(subcommand, "--help", lines=400).replace(
-                str(REPO_ROOT), "<repo>"
-            )
+    def test_phase_names_no_board_and_tick_names_two_coordinates(self):
+        """`phase` writes nothing at all, so it needs no board. `tick` writes the card
+        that goes with the label, so it takes the project and the owner and nothing more
+        (ADR 0067). The start column is the maintainer's own lane, so a tick that took
+        that flag would take a flag it cannot use. `--board-option` stayed gone with the
+        five-id write it served."""
+        # The usage line carries the path of the checkout that runs, and a worktree can
+        # be named after this migration. So the path is not text this seam wrote, and it
+        # is not what this test reads.
+        plan = self.run_seam("phase", "--help", lines=400).replace(
+            str(REPO_ROOT), "<repo>"
+        )
+        for flag in BOARD_FLAGS:
+            self.assertNotIn(flag, plan, f"phase --help still names {flag}")
+        self.assertNotIn("board", plan.lower(), "phase --help names a board")
 
-            for flag in BOARD_FLAGS:
-                self.assertNotIn(flag, out, f"{subcommand} --help still names {flag}")
-            self.assertNotIn("board", out.lower(), f"{subcommand} --help names a board")
+        execute = self.run_seam("tick", "--help", lines=400).replace(
+            str(REPO_ROOT), "<repo>"
+        )
+        self.assertIn("--board-project", execute)
+        self.assertIn("--board-owner", execute)
+        for flag in ("--board-option", "--start-column"):
+            self.assertNotIn(flag, execute, f"tick --help names {flag}")
 
     def test_a_tick_makes_one_tracker_read_and_never_a_board_read(self):
         """One read answers every fact a tick needs: the labels and the comments. The
@@ -2201,6 +2209,113 @@ class WorkerStateTestCase(unittest.TestCase):
         )
         self.assertIn(NEEDS_HUMAN, refused)
         self.assertEqual(self.writes(), [])
+
+    # --- the card moves with the label (ADR 0067) ----------------------------
+
+    def card_writes(self):
+        """Every card write this case's run made, as a list of argv strings."""
+        return [one for one in self.writes() if "project item-edit" in one]
+
+    def test_the_claim_moves_the_card_to_in_progress(self):
+        """A card in the start column always means no worker has taken the item, so the
+        claim moves it out of that column as it writes the label."""
+        self.write_fixture(labels=[READY_FOR_AGENT], board=START_COLUMN)
+
+        line = self.run_seam(
+            "tick",
+            "--claim",
+            "--item",
+            str(ITEM),
+            "--gh-fixture",
+            str(self.fixture),
+            "--board-project",
+            str(BOARD_PROJECT),
+            "--board-owner",
+            BOARD_OWNER,
+            expect=EXIT_APPLIED,
+        )
+
+        self.assertIn(f"{READY_FOR_AGENT} → {IN_PROGRESS} on work item #{ITEM}", line)
+        self.assertIn("moved to 'In progress'", line)
+        self.assertEqual(
+            self.card_writes(),
+            [
+                f"gh project item-edit --item {ITEM} --project {BOARD_PROJECT} "
+                f"--owner {BOARD_OWNER} --status In progress"
+            ],
+        )
+
+    def test_a_claim_on_a_paused_item_moves_no_card(self):
+        """`needs-human` is read before the card, so a paused item's card stays where the
+        maintainer left it and the refusal writes nothing at all."""
+        self.write_fixture(labels=[READY_FOR_AGENT, NEEDS_HUMAN], board=START_COLUMN)
+
+        self.run_seam(
+            "tick",
+            "--claim",
+            "--item",
+            str(ITEM),
+            "--gh-fixture",
+            str(self.fixture),
+            "--board-project",
+            str(BOARD_PROJECT),
+            "--board-owner",
+            BOARD_OWNER,
+            expect=EXIT_REFUSED,
+        )
+
+        self.assertEqual(self.writes(), [])
+
+    def test_the_finish_moves_the_card_in_the_same_tick_as_the_label(self):
+        """One tick writes both, so the card and the label cannot land apart."""
+        self.set_up_outcome("implementation-complete", IMPL)
+
+        line = self.apply(board=(BOARD_PROJECT, BOARD_OWNER))
+
+        self.assertIn(f"{IN_PROGRESS} → {TO_REVIEW} on work item #{ITEM}", line)
+        self.assertIn("moved to 'In review'", line)
+        self.assertEqual(
+            self.card_writes(),
+            [
+                f"gh project item-edit --item {ITEM} --project {BOARD_PROJECT} "
+                f"--owner {BOARD_OWNER} --status In review"
+            ],
+        )
+
+    def test_a_transition_with_no_column_moves_no_card(self):
+        """`CARD_COLUMNS` holds the finish alone. A re-prompt leaves the worker owning the
+        item, so its card stays in `In progress`, and a refusal moves nothing either."""
+        self.stalling()
+
+        self.apply(stall=HALF_HOUR, board=(BOARD_PROJECT, BOARD_OWNER))
+
+        self.assertEqual(self.card_writes(), [])
+        self.assertEqual(len(self.writes()), 1, self.writes())
+
+    def test_a_tick_with_no_board_coordinates_moves_no_card(self):
+        """A tracker that names no board is a supported configuration, so the label lands
+        and no card write is even attempted."""
+        for board in ((0, BOARD_OWNER), (BOARD_PROJECT, ""), (0, "")):
+            self.set_up_outcome("implementation-complete", IMPL)
+
+            line = self.apply(board=board)
+
+            self.assertNotIn("card", line, board)
+            self.assertEqual(self.card_writes(), [], board)
+            self.assertEqual(self.work_states_after(IMPL), [TO_REVIEW], board)
+
+    def test_a_failed_card_write_is_reported_and_stops_no_transition(self):
+        """The board is a mirror and the label is the live state, so a board that cannot
+        be written leaves a stale card and nothing else."""
+        self.write_fixture()
+        self.fake_cli("gh")
+
+        clause = worker_state.card_line(
+            Tracker(), ITEM, "In review", (BOARD_PROJECT, BOARD_OWNER)
+        )
+
+        self.assertIn("the card write to 'In review' failed", clause)
+        self.assertEqual(len(clause.splitlines()), 1, clause)
 
     def test_the_wake_is_gone_with_its_five_flags(self):
         """No delivery is left, so no transition can be lost to one and no fact lives in a

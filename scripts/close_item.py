@@ -33,11 +33,15 @@ The five steps, and what each one does:
 | 5. pull the merge | do it. A step, not a gate — behind is normal after a merge |
 | 6. worktree clean? | refuse if dirty, and name the files. Nothing recovers that |
 | 7. label and close | one step, so an item cannot close without its label moving |
-| 8. remove the worktree | only with `--execute --teardown` |
+| 8. remove the worktree | only with `--execute --teardown`, and then the card moves to `Done` |
 
-**Step 7 writes no board card.** The board is an input, and the board's own built-in
-**item closed to Done** workflow is what moves a card to `Done` (ADR 0054). So this
-seam takes no board coordinate and holds no board.
+**Step 7 writes no board card, and step 8 does.** The card write follows the teardown, so
+a card in `Done` means the worktree is gone (ADR 0067). It rides on step 8 rather than
+standing as a step of its own, because the transaction keeps the numbers 4 to 8.
+`--board-project` and `--board-owner` carry the two coordinates, and with either one
+missing no card moves. **A failed card write is reported in the plan and it never fails
+the close**: every step has already run by then. The board's own built-in **item closed to
+Done** workflow writes the same column for most items, so this write is safe to repeat.
 
 **`--abandon` is the other path, and an abandon is not a close.** A worker can die
 before its first commit, and then no pull request exists and no merge can ever fire the
@@ -62,7 +66,7 @@ step of its own, so a refusal names which one failed:
 | 2. worktree clean? | refuse if dirty, and name the files |
 | 3. no pull request | refuse where the branch already has an open one |
 | 4. label and note | remove the work-state label, and post the reason. No close, and no label added |
-| 5. remove the worktree | the same `--teardown-command`, so `hooks/refuse.py` needs no new exemption |
+| 5. remove the worktree | the same `--teardown-command`, so `hooks/refuse.py` needs no new exemption. **No card moves here**, because the item stays open |
 
 That command removes the item's schedule as well as its worktree, because the caller
 composes it as operation 12 then operation 10. So no tick survives the worktree it
@@ -100,9 +104,10 @@ from pathlib import Path
 # puts `scripts/` on the path, and `python3 -m scripts.close_item` puts the repo root
 # there (ADR 0034).
 try:
-    from .tracker import GH, GLAB, OPEN_STATES, Tracker, TrackerError
+    from .tracker import COLUMN_DONE, GH, GLAB, OPEN_STATES, Tracker, TrackerError
 except ImportError:  # the type checker reads the package form above
     from tracker import (  # type: ignore[no-redef, import-not-found]
+        COLUMN_DONE,
         GH,
         GLAB,
         OPEN_STATES,
@@ -324,8 +329,8 @@ def build_plan(args, tracker):
                 )
 
     # --- 7. the label and the close, as one step. An item that closes without its
-    #        label moving cannot happen while they share a step. There is no card
-    #        part: the board is an input, and its own workflow writes `Done` (ADR 0054).
+    #        label moving cannot happen while they share a step. There is no card part:
+    #        the card write comes after the teardown of step 8 (ADR 0067).
     parts = tracker_parts(args, tracker)
     if refusal:
         status, note = STATUS_BLOCKED, not_reached(refusal)
@@ -347,19 +352,73 @@ def build_plan(args, tracker):
         )
     )
 
-    # --- 8. remove the worktree. Two flags, or it does not run.
-    steps.append(teardown_step(8, args, worktree, refusal))
+    # --- 8. remove the worktree, and then move the card to `Done`. Two flags, or the
+    #        teardown does not run, and the card write goes with it (ADR 0067).
+    steps.append(teardown_step(8, args, worktree, refusal, card=card_target(args)))
 
     return steps, refusal
 
 
-def teardown_step(number, args, worktree, refusal):
+def card_target(args):
+    """The card write that follows the teardown, or `None` where there is none.
+
+    **The close writes `Done` after the teardown, so a card in `Done` means the worktree is
+    gone** (ADR 0067). That is why the write rides on step 8 rather than standing as a step
+    of its own: the transaction keeps the numbers 4 to 8.
+
+    `board_project` and `board_owner` read through `getattr`, because
+    `scripts/worker_state.py` builds its own namespace for a close. An older caller then
+    reads as a caller that named no board, and no card moves.
+
+    **The abandon reaches no card write.** Its work item stays open, so `Done` would be a
+    lie about an item nobody closed. `build_abandon_plan` passes no card at all.
+    """
+    project = getattr(args, "board_project", 0)
+    owner = getattr(args, "board_owner", "")
+    if not (project and owner):
+        return None
+    return {
+        "item": args.issue,
+        "column": COLUMN_DONE,
+        "project": project,
+        "owner": owner,
+    }
+
+
+def card_write(card, tracker):
+    """The card write that follows a teardown, as the lines it puts in the plan.
+
+    **A failed card write is reported and it never fails the close.** Every step of the
+    transaction has already run by this point, so a board that cannot be written leaves a
+    stale card and nothing else (ADR 0067).
+
+    The board's own **item closed to Done** workflow writes the same column for most items.
+    The adapter reads the card before it writes, so this is safe to repeat and a card that
+    already sits in `Done` costs no write.
+    """
+    if not card:
+        return []
+    try:
+        wrote = tracker.card_write(
+            card["item"], card["column"], card["project"], card["owner"]
+        )
+    except (TrackerError, OSError, json.JSONDecodeError) as exc:
+        cause = " ".join(str(exc).split())
+        return [f"the card write to {card['column']!r} failed: {cause}"]
+    return [wrote] if wrote else []
+
+
+def teardown_step(number, args, worktree, refusal, card=None):
     """The one step that destroys anything, and both paths reach the same one.
 
     The close reaches it as step 8 and the abandon as its step 5, so the number is an
     argument. Everything else is the same: two flags or it does not run, and the command
     is always the caller's own string. So `hooks/refuse.py` needs no second exemption for
     an abandon, because the abandon runs the very command the close runs.
+
+    `card` is the card write that follows the command, and the close is the one path that
+    passes one. It rides on this step because the write has to come after the teardown, and
+    the transaction keeps the numbers 4 to 8 (ADR 0067).
     """
     command = args.teardown_command or "(no teardown command)"
     if refusal:
@@ -385,9 +444,12 @@ def teardown_step(number, args, worktree, refusal):
     else:
         status, note = (
             STATUS_TODO,
-            ("removes the worktree. This is the only step that destroys anything"),
+            (
+                "removes the worktree. This is the only step that destroys anything"
+                + (f", and then moves the card to {card['column']!r}" if card else "")
+            ),
         )
-    return step(number, "teardown", command, status, note)
+    return step(number, "teardown", command, status, note, card=card)
 
 
 # --- the abandon ------------------------------------------------------------
@@ -628,7 +690,8 @@ def tracker_parts(args, tracker):
     learns neither that one tracker needs a second write nor where that write goes, and
     it names no tracker (ADR 0040).
 
-    **No part of step 7 writes a board card** (ADR 0054).
+    **No part of step 7 writes a board card.** The card write follows the teardown of step
+    8, so a card in `Done` means the worktree is gone (ADR 0067).
     """
     issue = tracker.issue(args.issue)
     labels = issue.get("labels") or []
@@ -802,7 +865,9 @@ def run_step(entry, tracker):
             raise TeardownError(
                 f"the teardown command failed: {proc.stderr.strip() or proc.stdout.strip()}"
             )
-        return [entry["command"]]
+        # The card write follows the teardown, so a card in `Done` means the worktree is
+        # gone. It cannot fail the close: every step has already run (ADR 0067).
+        return [entry["command"], *card_write(entry.get("card"), tracker)]
     raise TrackerError(f"step {entry['step']} has no runner")
 
 
@@ -909,8 +974,26 @@ def main(argv=None):
         "the checkout on disk, so the tracker project takes an argument of its own. "
         "With no value, every command goes to the clone the working directory holds",
     )
-    # There is no board argument. Step 7 writes no card, so this seam needs no board
-    # coordinate at all (ADR 0054).
+    # The two board coordinates. Step 7 still writes no card: the write comes after the
+    # teardown of step 8, so a card in `Done` means the worktree is gone (ADR 0067).
+    parser.add_argument(
+        "--board-project",
+        default=0,
+        type=int,
+        metavar="NUMBER",
+        help="the project number of the board that holds the card. Step 8 moves that card "
+        "to Done after the teardown, so a card in Done means the worktree is gone. The "
+        "caller reads it from the Project board section of docs/agents/issue-tracker.md. "
+        "With this flag missing no card moves, and the close is unchanged. An --abandon "
+        "moves no card whatever this flag says, because its work item stays open",
+    )
+    parser.add_argument(
+        "--board-owner",
+        default="",
+        metavar="OWNER",
+        help="the owner the board belongs to, from the same section. With this flag "
+        "missing no card moves",
+    )
     parser.add_argument(
         "--teardown-command",
         help="the command that removes the worktree, with the ids already in it. "

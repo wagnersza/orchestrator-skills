@@ -5,7 +5,9 @@ Every case runs `python3 -m scripts.close_item` as a subprocess against local gi
 repos built in a temp directory, and asserts on the emitted plan and on what was
 mutated — never on a helper's return value. No network, no GitHub, no mocking
 framework and no agent runs: `--gh-fixture` stands in for every tracker read, so
-`gh` is never called. `GIT_CONFIG_GLOBAL` and `GIT_CONFIG_SYSTEM` point at
+`gh` is never called. The one exception is the failed card write, which a fixture
+cannot answer: that case puts a `gh` that exits non-zero on `PATH` and reads the line
+the plan carries. `GIT_CONFIG_GLOBAL` and `GIT_CONFIG_SYSTEM` point at
 `os.devnull`, so the developer's git config cannot leak into a fixture.
 
 The teardown command is a passed-in string, which is what makes the destructive
@@ -32,6 +34,12 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+
+# One case imports the seam rather than running it: a fixture write never fails, so the
+# failed card write has no answer through the command line (ADR 0067). Every other case
+# runs the seam as a subprocess.
+from scripts import close_item
+from scripts.tracker import Tracker
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -163,7 +171,8 @@ class CloseItemTestCase(unittest.TestCase):
 
         One record for this item and one for its PR, in the one format
         `scripts/tracker.py` documents. `scripts/worker_state.py` reads the same one.
-        There is no card key, because no read here asks for one (ADR 0054).
+        There is no card key, because no read here asks for one: the close writes a card
+        and reads none of its own (ADR 0067).
 
         `pr_head` is the branch the PR was opened from, and it is what the abandon's
         third proof matches. The default is empty, so the default fixture is a branch
@@ -354,10 +363,11 @@ class CloseItemTestCase(unittest.TestCase):
         self.assertNothingMutated(before)
 
     def test_the_plan_holds_no_card_part_at_all(self):
-        """The board is an input, so step 7 plans no board write (ADR 0054).
+        """Step 7 plans no board write, because the card moves after the teardown of step
+        8 (ADR 0067).
 
-        A `skipped` card part would still be a part a reader has to read, and a repo
-        with a board would still plan a write. Neither one exists now.
+        A `skipped` card part would still be a part a reader has to read, and the write
+        that does happen is not part of the label-and-close step at all.
         """
         plan = self.close()
 
@@ -496,6 +506,88 @@ class CloseItemTestCase(unittest.TestCase):
         # And the tracker half of the close happened before it.
         self.assertEqual(len(self.tracker_writes()), 2)
         self.assertEqual(rev(self.checkout, "main"), self.merge_commit)
+
+    def test_the_card_moves_to_done_after_the_teardown(self):
+        """A card in `Done` means the worktree is gone, so the write follows the command
+        that removed it (ADR 0067). The write rides on step 8, so the transaction keeps its
+        numbers 4 to 8 and gains no step."""
+        board = ("--board-project", "6", "--board-owner", "someone")
+
+        plan = self.close("--execute", "--teardown", *board)
+
+        self.assertEqual([entry["step"] for entry in plan["steps"]], [4, 5, 6, 7, 8])
+        self.assertEqual(self.statuses(plan), ["done"] * 5)
+        # The teardown command ran, and then the card write. That order is the point.
+        self.assertEqual(plan["ran"][-2], self.teardown_command())
+        self.assertIn("moved to 'Done'", plan["ran"][-1])
+        self.assertEqual(
+            [one for one in self.tracker_writes() if "project item-edit" in one],
+            [
+                f"gh project item-edit --item {ISSUE} --project 6 --owner someone "
+                f"--status Done"
+            ],
+        )
+
+    def test_a_close_with_no_board_coordinate_moves_no_card(self):
+        """A tracker with no project board is a supported configuration, so the close runs
+        whole and writes nothing to a board."""
+        for board in (("--board-project", "6"), ("--board-owner", "someone"), ()):
+            self.setUp()
+
+            plan = self.close("--execute", "--teardown", *board)
+
+            self.assertEqual(self.statuses(plan), ["done"] * 5, board)
+            self.assertIsNone(self.step(plan, 8)["card"], board)
+            self.assertEqual(
+                [one for one in self.tracker_writes() if "project" in one], [], board
+            )
+
+    def test_a_skipped_teardown_moves_no_card(self):
+        """The card write follows the teardown, so a teardown that did not run leaves the
+        card where it was. The board's own item closed to Done workflow is what covers
+        that case, and it is still on."""
+        plan = self.close("--execute", "--board-project", "6", "--board-owner", "some")
+
+        self.assertEqual(self.step(plan, 8)["status"], "skipped")
+        self.assertEqual([one for one in self.tracker_writes() if "project" in one], [])
+
+    def test_an_abandon_moves_no_card_whatever_the_flags_say(self):
+        """Its work item stays open, so `Done` would be a lie about an item nobody
+        closed."""
+        self.write_fixture(labels=(START_LABEL,))
+
+        plan = self.abandon(
+            "--execute", "--teardown", "--board-project", "6", "--board-owner", "some"
+        )
+
+        self.assertTrue(self.marker.exists())
+        self.assertIsNone(self.step(plan, 5)["card"])
+        self.assertEqual(plan["ran"][-1], self.teardown_command())
+        self.assertEqual([one for one in self.tracker_writes() if "project" in one], [])
+
+    def test_a_failed_card_write_is_reported_and_never_fails_the_close(self):
+        """Every step has already run by then, so a board that cannot be written leaves a
+        stale card and nothing else.
+
+        This is the one case a fixture cannot answer: a fixture write records its command
+        and never fails. So the card write here goes through a real `gh` that exits
+        non-zero, and the answer is a line for the plan rather than an exception.
+        """
+        failing = self.root / "bin"
+        failing.mkdir()
+        (failing / "gh").write_text("#!/bin/sh\necho 'no project scope' >&2\nexit 1\n")
+        (failing / "gh").chmod(0o755)
+        path = os.environ["PATH"]
+        os.environ["PATH"] = f"{failing}{os.pathsep}{path}"
+        self.addCleanup(os.environ.__setitem__, "PATH", path)
+        card = {"item": ISSUE, "column": "Done", "project": 6, "owner": "someone"}
+
+        ran = close_item.card_write(card, Tracker())
+
+        self.assertEqual(len(ran), 1, ran)
+        self.assertIn("the card write to 'Done' failed", ran[0])
+        self.assertIn("no project scope", ran[0])
+        self.assertEqual(len(ran[0].splitlines()), 1, ran[0])
 
     def test_execute_without_the_teardown_flag_leaves_the_worktree_alone(self):
         """One flag is not destructive: the tracker moves and the worktree stays."""
@@ -681,11 +773,12 @@ class CloseItemTestCase(unittest.TestCase):
 
     # --- the two things the seam must not know ------------------------------
 
-    def test_the_seam_takes_no_board_coordinate(self):
-        """The five board flags are gone, because step 7 writes no card (ADR 0054).
+    def test_the_seam_takes_two_board_coordinates_and_no_id(self):
+        """Step 8 writes the card, so the seam takes the project and the owner (ADR 0067).
 
-        A flag left in the parser is a flag a caller resolves for nothing. So the
-        argument surface is where this is proven, and the help text is that surface.
+        The five id flags stay gone. A caller holds a name, and the adapter resolves every
+        id at run time, so a flag that carries an id is a flag a caller resolves for
+        nothing. The argument surface is where this is proven.
         """
         proc = subprocess.run(
             [sys.executable, "-m", "scripts.close_item", "--help"],
@@ -695,6 +788,8 @@ class CloseItemTestCase(unittest.TestCase):
             env=GIT_ENV,
         )
         self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("--board-project", proc.stdout)
+        self.assertIn("--board-owner", proc.stdout)
         for flag in (
             "--project-number",
             "--project-owner",
@@ -704,10 +799,10 @@ class CloseItemTestCase(unittest.TestCase):
         ):
             self.assertNotIn(flag, proc.stdout, f"--help still names {flag}")
 
-        # And no board id of this repo's own is in the module, nor the Markdown
-        # file that owns them.
+        # And no board id of this repo's own is in the module. The two coordinates a
+        # caller passes are a number and an owner, and neither one is an id.
         source = (REPO_ROOT / "scripts" / "close_item.py").read_text()
-        for coordinate in ("PVT_kwHO", "PVTSSF_lAHO", "issue-tracker"):
+        for coordinate in ("PVT_kwHO", "PVTSSF_lAHO"):
             self.assertNotIn(coordinate, source, f"{coordinate!r} is in the seam")
 
     # --- the abandon: a worktree that never opened a pull request -----------

@@ -50,8 +50,8 @@
         <p class="text-sm text-slate-600">waves shipped · 0.36.0 to 0.39.0</p>
       </div>
       <div class="rounded-lg border border-slate-200 bg-white p-4">
-        <p class="font-mono text-2xl font-bold text-sky-700">5</p>
-        <p class="text-sm text-slate-600">open items inside wave 5</p>
+        <p class="font-mono text-2xl font-bold text-sky-700">2</p>
+        <p class="text-sm text-slate-600">open items inside wave 5 · #201 and #207</p>
       </div>
       <div class="rounded-lg border border-slate-200 bg-white p-4">
         <p class="font-mono text-2xl font-bold text-amber-600">18</p>
@@ -166,15 +166,17 @@
             <td class="px-4 py-3">✅ <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/201">#201</a>
               · <b>open</b> · wears <code>wave:5</code>, <code>version:1.0.0</code> and
               <code>ready-for-agent</code></td>
-            <td class="px-4 py-3">✅ 4 filed · 4 open ·
-              <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/88">#88</a>
-              <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/205">#205</a>
-              <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/206">#206</a>
-              <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/207">#207</a></td>
+            <td class="px-4 py-3">✅ 4 filed · 1 open ·
+              <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/88">#88</a> closed
+              <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/205">#205</a> closed
+              <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/206">#206</a> closed
+              <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/207">#207</a> open</td>
             <td class="px-4 py-3 text-emerald-700">✅ 4 of 4, plus <code>version:1.0.0</code> and
               <code>ready-for-agent</code> on all four.</td>
-            <td class="px-4 py-3"><b>Not started, and ready to start.</b> The ticket set is
-              complete and correctly tagged. Nothing has to be filed first.</td>
+            <td class="px-4 py-3"><b>Three of four children closed, and one left.</b>
+              <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/207">#207</a>
+              is the ADR ledger and the <code>1.0.0</code> bump, and it is the last child, so it
+              carries the bump.</td>
           </tr>
           <tr class="bg-slate-50/60">
             <td class="px-4 py-3"><code>wave:after-1.0.0</code></td>
@@ -201,7 +203,7 @@
     <div class="rounded-lg border-2 border-emerald-300 bg-emerald-50 p-5 space-y-2">
       <p class="text-xs uppercase tracking-wider text-emerald-800">The short answer</p>
       <p class="text-sm text-emerald-900"><b>Every wave has its story ticket and its children. No
-        ticket is missing.</b> Wave 5 is the only open wave, and its five tickets are all tagged
+        ticket is missing.</b> Wave 5 is the only open wave, and its five tickets were all tagged
         correctly. The label gaps are all on <b>closed</b> work: wave 0, one child of wave 4, and
         three children of the language columns. They cost nothing today, because no seam and no hook
         reads a <code>wave:*</code> label.</p>
@@ -368,9 +370,11 @@
           <tr>
             <td class="px-4 py-3">Places that write a board card</td>
             <td class="px-4 py-3 text-right font-mono">4</td>
-            <td class="px-4 py-3 text-right font-mono text-emerald-700">0</td>
+            <td class="px-4 py-3 text-right font-mono text-emerald-700">3</td>
             <td class="px-4 py-3">Four write sites for a value derived from one label. Any one of
-              them can be forgotten.</td>
+              them can be forgotten. Wave 2 took all four out. <b>After the migration</b>, three
+              came back as one write per moment of the work, each inside the seam that owns that
+              moment (<code>0067</code>). No pass derives a column from a label.</td>
           </tr>
           <tr>
             <td class="px-4 py-3">Label writes the session performs</td>
@@ -467,7 +471,7 @@ flowchart LR
   W2["Wave 2 · 0.37.0 · SHIPPED<br/><b>Shrink the vocabulary</b><br/>4 labels · 5 outcomes<br/>story #199 · 3 of 3 closed"]
   W3["Wave 3 · 0.38.0 · SHIPPED<br/><b>The tick writes</b><br/>transition seam<br/>story #200 · 4 of 4 closed"]
   W4["Wave 4 · 0.39.0 · SHIPPED<br/><b>The tick spawns</b><br/>spawn_item.py · queue<br/>story #178 · 8 of 8 closed"]
-  W5["Wave 5 · 1.0.0 · NEXT<br/><b>Delete the prose</b><br/>SKILL.md to 120 lines<br/>story #201 · 0 of 4 closed"]
+  W5["Wave 5 · 1.0.0 · IN PROGRESS<br/><b>Delete the prose</b><br/>SKILL.md to 120 lines<br/>story #201 · 3 of 4 closed"]
   L["The four language columns<br/>#100 #101 #102 #103 · 19 items<br/>ALL CLOSED EARLY"]
   X["Filed after this plan · NO WAVE LABEL<br/>#301 #305 #311 · 18 open items<br/>needs a wave decision"]
 
@@ -537,12 +541,14 @@ flowchart LR
               <code>spawn_item.py</code>. The queue subcommand and the queue schedule at setup
               time.</td>
             <td class="px-4 py-3"><b>Act one becomes a drag.</b> Label an item, drag its card to
-              <code>To do</code>, walk away. No session in the middle of the loop at all.</td>
+              <code>To do</code>, walk away. No session in the middle of the loop at all. After
+              <code>0068</code> the flow that files the item writes the label, so the drag is the
+              whole of act one.</td>
             <td class="px-4 py-3 text-rose-600">Highest. A schedule now starts workers with no
               human in the turn. The two roofs and the touch-set gate are what bound it.</td>
           </tr>
           <tr class="bg-emerald-50/50">
-            <td class="px-4 py-3"><b>5</b><br/><code class="text-xs">1.0.0</code><br/>Delete the prose<br/><span class="text-xs font-semibold text-sky-700">◀ you are here</span></td>
+            <td class="px-4 py-3"><b>5</b><br/><code class="text-xs">1.0.0</code><br/>Delete the prose<br/><span class="text-xs font-semibold text-sky-700">◀ you are here · 3 of 4 children closed</span></td>
             <td class="px-4 py-3">Adversarial review and the merge train become verbs.
               <code>SKILL.md</code> falls to 120 lines. The setup body falls to about 300. The
               reference moves. Ten ADRs retire and seven land.</td>
@@ -1137,7 +1143,9 @@ flowchart LR
         <p class="text-sm text-slate-600">Nothing writes the board after wave 2, so the board's own
           <b>item closed to Done</b> workflow becomes the only thing that moves a card to
           <code>Done</code>. <b>Turn it on in the project settings first.</b> Setup can read whether
-          it is on, and it cannot switch it on, because that switch is not in the API.</p>
+          it is on, and it cannot switch it on, because that switch is not in the API. <b>Keep it on
+          after <code>0067</code> too</b>: the close now writes <code>Done</code> itself, and the
+          two are safe beside each other because the seam reads the card before it writes.</p>
       </div>
     </div>
   </section>
@@ -1175,7 +1183,7 @@ flowchart LR
             <tr><td class="px-4 py-3"><code>wave:2</code></td><td class="px-4 py-3"><a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/199">#199</a> one label family</td><td class="px-4 py-3 font-mono">0.37.0</td><td class="px-4 py-3 text-slate-500">closed</td></tr>
             <tr><td class="px-4 py-3"><code>wave:3</code></td><td class="px-4 py-3"><a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/200">#200</a> the tick writes</td><td class="px-4 py-3 font-mono">0.38.0</td><td class="px-4 py-3 text-slate-500">closed</td></tr>
             <tr><td class="px-4 py-3"><code>wave:4</code></td><td class="px-4 py-3"><a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/178">#178</a> the tick spawns</td><td class="px-4 py-3 font-mono">0.39.0</td><td class="px-4 py-3 text-slate-500">closed</td></tr>
-            <tr class="bg-emerald-50/50"><td class="px-4 py-3"><code>wave:5</code></td><td class="px-4 py-3"><a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/201">#201</a> delete the prose</td><td class="px-4 py-3 font-mono">1.0.0</td><td class="px-4 py-3 font-semibold text-emerald-700">open · next</td></tr>
+            <tr class="bg-emerald-50/50"><td class="px-4 py-3"><code>wave:5</code></td><td class="px-4 py-3"><a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/201">#201</a> delete the prose</td><td class="px-4 py-3 font-mono">1.0.0</td><td class="px-4 py-3 font-semibold text-emerald-700">open · 3 of 4 children closed</td></tr>
             <tr class="bg-slate-50/60"><td class="px-4 py-3 text-slate-500"><code>wave:after-1.0.0</code></td><td class="px-4 py-3 text-slate-500">the four language columns, 19 items</td><td class="px-4 py-3 text-slate-500">0.40.0 and earlier</td><td class="px-4 py-3 text-slate-500">closed early</td></tr>
             <tr class="bg-amber-50/70"><td class="px-4 py-3 text-amber-900"><b>no label</b></td><td class="px-4 py-3 text-amber-900"><a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/301">#301</a>, <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/305">#305</a>, <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/311">#311</a> plus 7 loose items</td><td class="px-4 py-3 text-amber-900">none</td><td class="px-4 py-3 font-semibold text-amber-800">18 open · needs a decision</td></tr>
           </tbody>
@@ -1277,7 +1285,7 @@ flowchart LR
             <td class="px-4 py-3 font-mono font-bold">0.39.0 ✅</td>
             <td class="px-4 py-3"><b>wave 4</b> · shipped · story <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/178">#178</a></td>
             <td class="px-4 py-3"><b>Label it, drag it, walk away.</b> No session sits in the
-              middle of the loop.</td>
+              middle of the loop. After <code>0068</code>, just drag it.</td>
             <td class="px-4 py-3 text-right font-mono">2 + 4</td>
             <td class="px-4 py-3 font-mono"><a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/182">#182</a></td>
           </tr>
@@ -1297,7 +1305,7 @@ flowchart LR
           </tr>
           <tr class="bg-emerald-50/60">
             <td class="px-4 py-3 font-mono font-bold">1.0.0</td>
-            <td class="px-4 py-3"><b>wave 5</b> · next</td>
+            <td class="px-4 py-3"><b>wave 5</b> · 3 of 4 children closed</td>
             <td class="px-4 py-3">A 120-line skill body, and a 300-line setup body. Ten ADRs retired
               and seven landed. The body, the setup interview, the label set and the gate contract
               all agree with <a class="iss" href="architecture.html">architecture.html</a>.</td>
@@ -1431,13 +1439,15 @@ flowchart LR
         <span class="font-mono text-slate-400">4</span>
         <div class="space-y-1">
           <p class="font-medium">Work wave 5, story <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/201">#201</a></p>
-          <p class="text-sm text-slate-600">Nothing blocks it. All four children are filed, labelled
-            and marked <code>ready-for-agent</code>. Start with
-            <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/205">#205</a>,
-            because the rewrite in
+          <p class="text-sm text-slate-600">Three of its four children are closed:
+            <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/205">#205</a>
+            made review a verb,
             <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/88">#88</a>
-            can only delete review prose after review becomes a verb. The bump to <code>1.0.0</code>
-            lands with <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/207">#207</a>,
+            cut the body to 120 lines, and
+            <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/206">#206</a>
+            trimmed the setup body. <b>One child is left:</b>
+            <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/207">#207</a>,
+            the ADR ledger. It is the last child, so the bump to <code>1.0.0</code> lands with it
             and with no other child.</p>
         </div>
       </div>
@@ -1452,6 +1462,14 @@ flowchart LR
       <code>0.42.0</code>. That read added the wave ticket audit, the list of unlabelled items and the
       new next steps. <b>It wrote nothing to the tracker.</b> Every label gap named on this page is
       still open on GitHub.</p>
+    <p>Updated 2026-09-23 with the wave 5 progress:
+      <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/205">#205</a>,
+      <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/88">#88</a> and
+      <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/206">#206</a>
+      closed, so one child is left. Two decisions also landed outside the waves:
+      <code>0067</code>, the board mirrors the work at three moments, and <code>0068</code>, an
+      inline item-writing flow writes <code>ready-for-agent</code>. Every count outside the wave 5
+      rows still reads as of the 2026-09-23 tracker read.</p>
   </footer>
 
   </main>

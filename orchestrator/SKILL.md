@@ -41,6 +41,16 @@ descent, and `start --help` answers the gate for one item. Report per
 [`references/reporting.md`](references/reporting.md): every ready item first, then
 enough blocked ones to reach 5, then every item at `to-review` beside them.
 
+## Board status
+
+The board mirrors the work, and a seam writes the card at three moments: the spawn claim
+writes `In progress`, the tick that writes `to-review` writes `In review`, and the close
+writes `Done` after the teardown. **Write no card yourself** — each write rides in the seam
+that owns that moment, and a failed write is reported and stops nothing. `Backlog`, `Ready`
+and the start column stay the maintainer's lanes, so the drag is still what authorises a
+start. The rule is the **Board status** entry in [`CONTEXT.md`](CONTEXT.md), and the
+rationale is [ADR 0067](docs/adr/0067-the-board-is-a-mirror-at-three-moments.md).
+
 ## Spawn a worker
 
 One item with no `user-story` label is one worker in one worktree. A `user-story`
@@ -72,7 +82,13 @@ whenever the maintainer asks, at any point in the item's life.
 A verb the table above does not name can still match a row in
 [`references/skill-routing.md`](references/skill-routing.md) — read it at the moment
 you need it, never from memory, and never copy a row into this body. Lane `inline`
-runs the skill here, in the main checkout. Lane `worker` splices it into the spawn
+runs the skill here, in the main checkout. **An inline item-writing flow writes
+`ready-for-agent` on each item it files**, beside the `## Touches` block and the parent edge
+— so do not add the label afterwards, and add none to a `user-story` parent. **The drag into
+the start column stays the maintainer's act**, so a filed leaf waits in `Backlog`, and a
+child of a story they already dragged is startable at once
+([`docs/adr/0068-an-item-writing-flow-writes-the-start-label.md`](docs/adr/0068-an-item-writing-flow-writes-the-start-label.md)).
+Lane `worker` splices the skill into the spawn
 prompt instead. A verb that matches no row costs one line: name the closest row and
 ask whether to route there, then answer freehand on a decline. A queue question and a
 flow this skill owns directly are not verbs, and never reach this question.
