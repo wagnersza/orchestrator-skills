@@ -1,5 +1,7 @@
 # Phase is a second label family, not a second state machine
 
+> Superseded by [ADR 0053](0053-one-work-state-label-and-a-computed-position.md)
+
 A **Work item** owned by a worker wears `in-progress` from the spawn to the end of the
 review loop. The **Work-state labels** entry of
 [`orchestrator/CONTEXT.md`](../../CONTEXT.md) says so on purpose: the item holds that

@@ -1,5 +1,7 @@
 # A gate run is work product
 
+> Superseded by [ADR 0052](0052-a-gate-blocks-and-a-hook-writes-its-record.md)
+
 A worker ticks its own gate box. Nothing on disk says the command ran, and nothing says
 it exited 0.
 

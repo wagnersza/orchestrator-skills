@@ -1,5 +1,7 @@
 # The seam invocation carries a resolved plugin root
 
+> Superseded by [ADR 0051](0051-a-hook-refuses-and-a-seam-performs.md)
+
 This plugin holds two seams, `scripts/close_item.py` and `scripts/worker_state.py`. Both
 sat behind a bare `python3 -m scripts.<module>`. The `scripts/` package sits at the
 **plugin root**, and that directory is never the working directory of either caller. A

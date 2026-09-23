@@ -1,5 +1,7 @@
 # The Item automation follows the live worker, and one per item stands
 
+> Superseded by [ADR 0056](0056-the-tick-applies-the-transition-it-computed.md)
+
 An **Item automation**'s precheck names one worktree and one harness process pattern
 ([ADR 0022](0022-item-automation-replaces-the-blocking-watch.md)). Both are resolved at
 spawn, against the implementation worker. A **Phase** transition then moves the work to a
