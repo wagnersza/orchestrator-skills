@@ -68,7 +68,6 @@ evidence:   "`make quick` and `make full` green at the pushed HEAD, with the gat
 # The layer model and the Python gate matrix are in references/quality-gates.md.
 # Config is the source of truth for a threshold.
 gates:
-  profile: lite           # layers 1 to 3 run; `lite` drops layer 4
   langs:   [python]       # plus Markdown, which has no gate matrix and no gate tool
   quick:   "make quick"   # layers 1 + 2 — format, lint, types, tests, complexity
   full:    "make full"    # layer 3 — the suite, import boundaries, secrets
@@ -141,8 +140,8 @@ gates:
   They don't exist in the GitHub repo yet; that file carries the `gh label create`
   commands.
 - **gates** is the completion bar, and `references/quality-gates.md` holds the layer
-  model and every default. The profile is `lite`, so layers 1 to 3 run and layer 4 is
-  off. This repo is a documentation artifact plus two Python seams. A mutation score
+  model and every default. Layers 1 to 3 run here, and layer 4 is off. This repo is a
+  documentation artifact plus two Python seams. A mutation score
   over that buys less than it costs. `deep` is blank, so the checklist drops its
   layer 4 box. Two thresholds are blank for a reason of their own, and this file
   names each reason. `coverage` is blank because the suite drives both seams through
