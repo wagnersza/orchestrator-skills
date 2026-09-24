@@ -1,5 +1,7 @@
 # The To merge column is intent, for one column and in one direction
 
+> Superseded by [ADR 0054](0054-the-board-is-an-input-not-a-mirror.md)
+
 [ADR 0009](0009-labels-drive-board-status.md) made the **Work-state labels** the source
 of truth, and the Projects v2 `Status` field a projection of them. One of its consequences
 carries that rule for a human who moves a card:

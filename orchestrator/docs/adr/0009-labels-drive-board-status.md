@@ -1,5 +1,7 @@
 # Labels drive the board; Projects v2 Status is a derived projection
 
+> Superseded by [ADR 0054](0054-the-board-is-an-input-not-a-mirror.md)
+
 The orchestrator moved work items by **label only** — `ready-for-agent` →
 `in-progress` → `to-review` → closed — and never touched a GitHub Projects v2
 `Status` field. On a board with `Backlog | Ready | In progress | In review | Done`

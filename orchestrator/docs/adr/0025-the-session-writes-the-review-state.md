@@ -1,5 +1,7 @@
 # The orchestrator session writes the review state, and the worker stops at its note
 
+> Superseded by [ADR 0056](0056-the-tick-applies-the-transition-it-computed.md)
+
 Three files described the end of implementation, and two of them agreed. The last box of
 [`orchestrator/references/checklist.template.md`](../../references/checklist.template.md)
 tells the **Worker** to flip the work item to the review state and move its board card.

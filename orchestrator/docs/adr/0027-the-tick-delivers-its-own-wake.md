@@ -1,5 +1,7 @@
 # The tick delivers its own wake, so no agent runs on a tick
 
+> Superseded by [ADR 0056](0056-the-tick-applies-the-transition-it-computed.md)
+
 [ADR 0022](0022-item-automation-replaces-the-blocking-watch.md) put a **relay** between
 the precheck and the **Orchestrator**: on exit 0 the **Item automation** starts a bounded
 agent, and that agent sends one line to the session. `orca automations create` requires

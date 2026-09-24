@@ -1,5 +1,7 @@
 # The wake target is a terminal handle, resolved at spawn
 
+> Superseded by [ADR 0056](0056-the-tick-applies-the-transition-it-computed.md)
+
 [ADR 0022](0022-item-automation-replaces-the-blocking-watch.md) gave the relay one
 target: the orchestrator terminal, found **by title**. The first live run of an **Item
 automation** found no terminal by the title `orchestrator`. So the relay posted its line
