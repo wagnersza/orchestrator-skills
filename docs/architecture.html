@@ -41,12 +41,15 @@
 
     <div class="rounded-lg border-2 border-emerald-300 bg-emerald-50 p-5 space-y-2">
       <p class="text-xs uppercase tracking-wider text-emerald-800">You act twice per work item</p>
-      <p class="text-sm text-emerald-900"><b>Act one starts it:</b> the
-        <code>ready-for-agent</code> label, and the card dragged into the board's
-        <code>To do</code> column. <b>Act two finishes it:</b> you merge the PR on GitHub.
+      <p class="text-sm text-emerald-900"><b>Act one starts it:</b> you drag the card into the
+        board's <code>To do</code> column. <b>Act two finishes it:</b> you merge the PR on GitHub.
         Nothing between those two acts needs a session open, a chat verb, or a second column
         drag. <b>The merge is the signal</b>, so there is no label to remember and no queue to
         approve.</p>
+      <p class="text-xs text-emerald-900">The <code>ready-for-agent</code> label used to be part of
+        act one. Since <code>0068</code> the inline flow that files the item writes it, because the
+        flow that wrote the specification is the one that knows the item is specified. <b>The drag is
+        still the authorisation</b>, so the label alone starts nothing.</p>
     </div>
 
     <div class="grid sm:grid-cols-4 gap-4 pt-2">
@@ -1026,7 +1029,21 @@ flowchart TB
   <section class="space-y-5">
     <div class="flex items-baseline gap-3">
       <h2 class="font-serif text-3xl">What to build, in order</h2>
-      <span class="text-xs uppercase tracking-wider text-slate-500">10 items</span>
+      <span class="text-xs uppercase tracking-wider text-emerald-700">10 items · all shipped</span>
+    </div>
+
+    <div class="rounded-lg border-2 border-emerald-300 bg-emerald-50 p-5 space-y-2">
+      <p class="font-semibold text-emerald-900">This build order is finished. The plugin is at
+        <code>1.0.0</code>.</p>
+      <p class="text-sm text-emerald-900">Item 9 shipped as
+        <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/205">#205</a>,
+        and item 10 as
+        <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/88">#88</a>,
+        <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/206">#206</a> and
+        <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/207">#207</a>,
+        which carried the version bump. <b>Read the table below for why each piece sits where it
+        sits, not for what to do next.</b> One decision landed after it and reversed a law this page
+        used to state: <code>0067</code> made the board a mirror.</p>
     </div>
 
     <div class="overflow-x-auto rounded-lg border border-slate-200 bg-white">
@@ -1075,14 +1092,15 @@ flowchart TB
   </section>
 
   <footer class="border-t border-slate-200 pt-6 text-sm text-slate-500 space-y-1">
-    <p>This page holds the desired state only, and it says nothing about the skill as it stands
-      today. Today's state, and the five waves that reach this design, are in
+    <p><b>This page described a desired state, and that state is now the shipped one.</b> All five
+      waves closed and the plugin is at <code>1.0.0</code>. Today's state and the wave history are in
       <a class="iss" href="skill-state-and-roadmap.html" style="color:#4338ca">skill-state-and-roadmap.html</a>.</p>
-    <p>Written 2026-08-27. Updated 2026-09-23: the board became a mirror again, and a seam now
-      writes the card at three moments (<code>0067</code>). An inline item-writing flow now writes
-      <code>ready-for-agent</code> as it files an item (<code>0068</code>). Both landed after the
-      migration this page describes, and the drag into <code>To do</code> is unchanged by
-      either.</p>
+    <p>Written 2026-08-27. Updated 2026-09-24: the ten-item build order is complete, and wave 5
+      closed with <code>1.0.0</code>. Two decisions landed after the migration and this page carries
+      both. <code>0067</code> made the board a mirror, so a seam writes the card at three moments.
+      <code>0068</code> gave the <code>ready-for-agent</code> label to the inline flow that files the
+      item. <b>The drag into <code>To do</code> is unchanged by either</b>, and it is still the whole
+      of act one.</p>
   </footer>
 
   </main>

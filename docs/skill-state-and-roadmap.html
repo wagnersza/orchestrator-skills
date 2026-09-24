@@ -27,7 +27,7 @@
   <!-- ══════════════ HEADER ══════════════ -->
   <header class="space-y-4">
     <p class="text-xs uppercase tracking-widest text-slate-500">Migration plan · orchestrator-skills · 0.42.0 today, 1.0.0 at the end</p>
-    <h1 class="font-serif text-4xl leading-tight">Four waves shipped. One wave left.</h1>
+    <h1 class="font-serif text-4xl leading-tight">Five waves shipped. 1.0.0 is out.</h1>
 
     <p class="text-lg text-slate-600 max-w-3xl">The target design lives in
       <a class="iss font-mono text-base" href="architecture.html">architecture.html</a>. This page
@@ -37,24 +37,38 @@
     <p class="text-slate-600 max-w-3xl">The migration runs in five waves. <b>Each wave leaves the
       repo working and shippable.</b> No wave depends on the wave after it. The riskiest change,
       the rewrite of the skill body, is last, because it can only shrink once every rule it holds
-      has a new owner. <b>Waves 1 to 4 are shipped and closed. Wave 5 is the only one still
-      open.</b></p>
+      has a new owner. <b>All five waves are shipped. The plugin is at 1.0.0, and the migration
+      this page planned is finished.</b></p>
+
+    <div class="rounded-lg border border-emerald-300 bg-emerald-50 p-5 max-w-3xl">
+      <p class="font-semibold text-emerald-900">Wave 5 closed on 2026-09-24.</p>
+      <p class="text-sm text-emerald-900 pt-1">Its four children merged in order:
+        <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/205">#205</a>
+        review and the merge train became verbs,
+        <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/88">#88</a>
+        cut the skill body to a dispatcher,
+        <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/206">#206</a>
+        trimmed the setup body, and
+        <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/207">#207</a>
+        added the ADR ledger and bumped the version. <b>The plan below is history now.</b> Read it
+        for why the repo has the shape it has, not for what to do next.</p>
+    </div>
 
     <div class="grid sm:grid-cols-4 gap-4 pt-2">
       <div class="rounded-lg border border-slate-200 bg-white p-4">
-        <p class="font-mono text-2xl font-bold text-slate-700">23</p>
+        <p class="font-mono text-2xl font-bold text-slate-700">20</p>
         <p class="text-sm text-slate-600">open work items today</p>
       </div>
       <div class="rounded-lg border border-slate-200 bg-white p-4">
-        <p class="font-mono text-2xl font-bold text-emerald-700">4 of 5</p>
-        <p class="text-sm text-slate-600">waves shipped · 0.36.0 to 0.39.0</p>
+        <p class="font-mono text-2xl font-bold text-emerald-700">5 of 5</p>
+        <p class="text-sm text-slate-600">waves shipped · 0.36.0 to 1.0.0</p>
       </div>
       <div class="rounded-lg border border-slate-200 bg-white p-4">
-        <p class="font-mono text-2xl font-bold text-sky-700">2</p>
-        <p class="text-sm text-slate-600">open items inside wave 5 · #201 and #207</p>
+        <p class="font-mono text-2xl font-bold text-sky-700">1</p>
+        <p class="text-sm text-slate-600">open item inside wave 5 · #201, the story itself</p>
       </div>
       <div class="rounded-lg border border-slate-200 bg-white p-4">
-        <p class="font-mono text-2xl font-bold text-amber-600">18</p>
+        <p class="font-mono text-2xl font-bold text-amber-600">19</p>
         <p class="text-sm text-slate-600">open items with no wave label</p>
       </div>
       <div class="rounded-lg border border-slate-200 bg-white p-4">
@@ -70,8 +84,8 @@
         <p class="text-sm text-slate-600">versions shipped with no version label</p>
       </div>
       <div class="rounded-lg border border-slate-200 bg-white p-4">
-        <p class="font-mono text-2xl font-bold text-indigo-700">1</p>
-        <p class="text-sm text-slate-600">wave you can start today · wave 5</p>
+        <p class="font-mono text-2xl font-bold text-indigo-700">0</p>
+        <p class="text-sm text-slate-600">waves left to start · the migration is done</p>
       </div>
     </div>
   </header>
@@ -166,17 +180,17 @@
             <td class="px-4 py-3">✅ <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/201">#201</a>
               · <b>open</b> · wears <code>wave:5</code>, <code>version:1.0.0</code> and
               <code>ready-for-agent</code></td>
-            <td class="px-4 py-3">✅ 4 filed · 1 open ·
+            <td class="px-4 py-3">✅ 4 filed · 4 closed ·
               <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/88">#88</a> closed
               <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/205">#205</a> closed
               <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/206">#206</a> closed
-              <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/207">#207</a> open</td>
-            <td class="px-4 py-3 text-emerald-700">✅ 4 of 4, plus <code>version:1.0.0</code> and
-              <code>ready-for-agent</code> on all four.</td>
-            <td class="px-4 py-3"><b>Three of four children closed, and one left.</b>
+              <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/207">#207</a> closed</td>
+            <td class="px-4 py-3 text-emerald-700">✅ 4 of 4, plus <code>version:1.0.0</code> on all
+              four.</td>
+            <td class="px-4 py-3"><b>All four children closed on 2026-09-24.</b>
               <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/207">#207</a>
-              is the ADR ledger and the <code>1.0.0</code> bump, and it is the last child, so it
-              carries the bump.</td>
+              was the last one, so it carried the <code>1.0.0</code> bump. The story itself stays
+              open until the layer 5 story gate is triaged.</td>
           </tr>
           <tr class="bg-slate-50/60">
             <td class="px-4 py-3"><code>wave:after-1.0.0</code></td>
@@ -1438,17 +1452,19 @@ flowchart LR
       <div class="px-5 py-4 flex gap-4">
         <span class="font-mono text-slate-400">4</span>
         <div class="space-y-1">
-          <p class="font-medium">Work wave 5, story <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/201">#201</a></p>
-          <p class="text-sm text-slate-600">Three of its four children are closed:
+          <p class="font-medium">Wave 5 is done. Story <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/201">#201</a>
+            has no children left</p>
+          <p class="text-sm text-slate-600">All four children closed on 2026-09-24:
             <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/205">#205</a>
             made review a verb,
             <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/88">#88</a>
-            cut the body to 120 lines, and
+            cut the body to a dispatcher,
             <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/206">#206</a>
-            trimmed the setup body. <b>One child is left:</b>
-            <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/207">#207</a>,
-            the ADR ledger. It is the last child, so the bump to <code>1.0.0</code> lands with it
-            and with no other child.</p>
+            trimmed the setup body, and
+            <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/207">#207</a>
+            added the ADR ledger and carried the bump to <code>1.0.0</code>. <b>What is left is the
+            layer 5 story gate</b>: run it, triage every <code>Strong</code> candidate, then close
+            the story.</p>
         </div>
       </div>
     </div>
@@ -1462,14 +1478,20 @@ flowchart LR
       <code>0.42.0</code>. That read added the wave ticket audit, the list of unlabelled items and the
       new next steps. <b>It wrote nothing to the tracker.</b> Every label gap named on this page is
       still open on GitHub.</p>
-    <p>Updated 2026-09-23 with the wave 5 progress:
-      <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/205">#205</a>,
-      <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/88">#88</a> and
-      <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/206">#206</a>
-      closed, so one child is left. Two decisions also landed outside the waves:
+    <p>Updated 2026-09-24. <b>Wave 5 closed and the plugin shipped
+      <code>1.0.0</code>.</b> All four children of
+      <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/201">#201</a>
+      are closed, and
+      <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/207">#207</a>
+      carried the bump. Two decisions also landed outside the waves:
       <code>0067</code>, the board mirrors the work at three moments, and <code>0068</code>, an
-      inline item-writing flow writes <code>ready-for-agent</code>. Every count outside the wave 5
-      rows still reads as of the 2026-09-23 tracker read.</p>
+      inline item-writing flow writes <code>ready-for-agent</code>. One story was filed after them,
+      <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/328">#328</a>,
+      which takes the board to GitLab through
+      <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/329">#329</a> and
+      <a class="iss" href="https://github.com/wagnersza/orchestrator-skills/issues/330">#330</a>.
+      The counts at the top of this page are the 2026-09-24 read: 20 open items, 19 of them with no
+      wave label.</p>
   </footer>
 
   </main>
