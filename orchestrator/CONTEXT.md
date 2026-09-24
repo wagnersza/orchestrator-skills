@@ -219,7 +219,7 @@ Where work items live (GitHub / GitLab / local markdown). The orchestrator does 
 _Avoid_: issue tracker, board (when the layer is meant).
 
 **Tracker adapter**:
-`scripts/tracker.py` — the one module that holds every tracker command the two Python seams run or print. One class, and a tracker is four values on it: the CLI name, the host, the repository and the fixture. Where two trackers disagree about a command, the branch is inside the one method that differs. So a new tracker lands here and in no seam. The commands are the verified ones `references/tracker-reads.md` holds as prose, and a read is checked before it is parsed in both places. It receives every per-repo value as an argument and reads no configuration file, which is what keeps it separate from the **Tracker** entry above. One fixture format serves every test under `scripts/`: one record per **Work item**, and one per pull request. A pull request record carries a `head` key. One read asks for the pull request opened from a branch, because a tick holds the branch and never a number. **A difference between two trackers can also be a count of commands.** One tracker closes a **Work item** and records the reason in the same command, and the other has no reason flag at all. **So the adapter answers the writes that close an item and the order they run in.** A caller iterates that answer, and it assembles no order of its own. The order matters, because an item that closes first closes with no reason on it. A caller reads no CLI name either (`docs/adr/0067-the-adapter-orders-a-multi-write-close.md`). Rationale, and the deferral it reverses: `docs/adr/0040-the-tracker-is-one-adapter-behind-both-seams.md`.
+`scripts/tracker.py` — the one module that holds every tracker command the two Python seams run or print. One class, and a tracker is four values on it: the CLI name, the host, the repository and the fixture. Where two trackers disagree about a command, the branch is inside the one method that differs. So a new tracker lands here and in no seam. The commands are the verified ones `references/tracker-reads.md` holds as prose, and a read is checked before it is parsed in both places. It receives every per-repo value as an argument and reads no configuration file, which is what keeps it separate from the **Tracker** entry above. One fixture format serves every test under `scripts/`: one record per **Work item**, and one per pull request. A pull request record carries a `head` key. One read asks for the pull request opened from a branch, because a tick holds the branch and never a number. **A difference between two trackers can also be a count of commands.** One tracker closes a **Work item** and records the reason in the same command, and the other has no reason flag at all. **So the adapter answers the writes that close an item and the order they run in.** A caller iterates that answer, and it assembles no order of its own. The order matters, because an item that closes first closes with no reason on it. A caller reads no CLI name either (`docs/adr/0069-the-adapter-orders-a-multi-write-close.md`). Rationale, and the deferral it reverses: `docs/adr/0040-the-tracker-is-one-adapter-behind-both-seams.md`.
 _Avoid_: tracker client, tracker wrapper, tracker layer (each one suggests a stack this deliberately is not), CLI abstraction.
 
 **Work item**:
@@ -271,9 +271,13 @@ gate for a `user-story`. It ends when the parent closes.
 
 **A child of a live Story run starts on its `ready-for-agent` label alone.** The queue tick
 descends from the parent to its unblocked children, and it spawns each child that wears that
-label. It reads no child's own card. It writes the label on no child, so the rule that only a
-human writes it is unchanged. One drag then starts ten children, on the labels a grooming
-pass already wrote. **A child with no label stays stopped**, which is how a maintainer
+label. It reads no child's own card. **It writes the label on no child**, so the half of that
+rule that carries the safety is unchanged: no seam and no schedule writes it. One drag then
+starts ten children, on the labels a grooming pass or an inline item-writing flow already
+wrote. **A child filed under an authorised story is startable as soon as it is filed**,
+because that flow writes the label at the create
+([`docs/adr/0068-an-item-writing-flow-writes-the-start-label.md`](docs/adr/0068-an-item-writing-flow-writes-the-start-label.md)).
+**A child with no label stays stopped**, which is how a maintainer
 parks one ticket under a running story. A child that itself carries `user-story` is a nested
 spec, so the descent continues to the implementable leaves, which is the rule the `work on N`
 flow already holds.
@@ -391,13 +395,26 @@ The one-time interview that writes the Config — the user describes environment
 **Work-state labels**:
 The tracker labels that gate the queue and mark progress. **One family, four values, and it never stacks**: `ready-for-agent`, `in-progress`, `to-review` and `needs-human`. Owned by `docs/agents/issue-tracker.md` (`/setup-matt-pocock-skills`), not the orchestrator config — single source of truth. An item stays `in-progress` while a worker owns it, and the tick swaps that value for the review label at the finish.
 
-**One seam writes every value of this family, and no session writes one by hand.** The
-**Worker watch** applies the transition it computed, in the process that read the labels. So
-the removals and the addition are one tracker write, and nothing can stack
+**One seam writes every value of this family, and no session moves an item from one value to
+another by hand.** The **Worker watch** applies the transition it computed, in the process
+that read the labels. So the removals and the addition are one tracker write, and nothing can
+stack
 ([`docs/adr/0056-the-tick-applies-the-transition-it-computed.md`](docs/adr/0056-the-tick-applies-the-transition-it-computed.md)).
 The spawn claim goes through that same writer, under one named transition. The one other
 writer is `scripts/close_item.py`, which flips the family and closes the item as one step of
 a **Close transaction**.
+
+**`ready-for-agent` has one more writer, and it writes it on create.** An inline
+item-writing flow writes that label on each item it files, beside the `## Touches` block and
+the parent edge it already writes. The label means the item is fully specified, and the flow
+that wrote the specification is the one that knows it. **The drag into the start column stays
+the maintainer's, and it stays the authorisation**, so the label alone still starts nothing.
+`hooks/refuse.py` exempts a create for this, and it still denies every `edit`
+([`docs/adr/0068-an-item-writing-flow-writes-the-start-label.md`](docs/adr/0068-an-item-writing-flow-writes-the-start-label.md),
+narrowing
+[`docs/adr/0045-a-story-start-is-automatic-under-two-roofs.md`](docs/adr/0045-a-story-start-is-automatic-under-two-roofs.md)
+and
+[`docs/adr/0053-one-work-state-label-and-a-computed-position.md`](docs/adr/0053-one-work-state-label-and-a-computed-position.md)).
 
 **`needs-human` is the one label that stops the machine.** It means a seam refused. Every
 tick reads it first and stays quiet, whatever the other facts say. It carries one comment
@@ -406,7 +423,15 @@ an owned run is a **Position**, and **no label records that**
 ([`docs/adr/0053-one-work-state-label-and-a-computed-position.md`](docs/adr/0053-one-work-state-label-and-a-computed-position.md)).
 
 **Board status**:
-The `Status` field on a work item's card, where the tracker has a project board (GitHub Projects v2). **The board is an input, and nothing writes it.** One question is asked of it: is this item's card in the start column. So `Status` is no projection of the **Work-state labels**, and there is no derivation table, no reconcile pass and no sync command. **The card arrives with the item, and a gate lists no board**: `Tracker.labelled_items` reads one labelled set and each item's card in one call, and `Tracker.item_card` reads the card of one item. `Tracker.board_cards` is the whole-board list, and the `report` verb is its one caller. The two coordinates and the name of the start column live in `docs/agents/issue-tracker.md`, alongside the labels; a repo with no board omits that section, and the label alone is the whole gate. Rationale: [`docs/adr/0054-the-board-is-an-input-not-a-mirror.md`](docs/adr/0054-the-board-is-an-input-not-a-mirror.md) and [`docs/adr/0064-the-start-gate-reads-two-labelled-sets.md`](docs/adr/0064-the-start-gate-reads-two-labelled-sets.md).
+The `Status` field on a work item's card, where the tracker has a project board (GitHub Projects v2). **The board is a mirror of the work state, and a seam writes the card at three moments.** It is read in one column and written in three, and the two sets do not overlap. So `Status` is still no derived projection of the **Work-state labels**: there is no derivation table, no reconcile pass and no sync command. **The card arrives with the item, and a gate lists no board**: `Tracker.labelled_items` reads one labelled set and each item's card in one call, and `Tracker.item_card` reads the card of one item. `Tracker.board_cards` is the whole-board list, and the `report` verb is its one caller. `Tracker.card_write` is the one write. The two coordinates and every column name live in `docs/agents/issue-tracker.md`, alongside the labels; a repo with no board omits that section, the label alone is the whole gate, and no card write is attempted. Rationale: [`docs/adr/0067-the-board-is-a-mirror-at-three-moments.md`](docs/adr/0067-the-board-is-a-mirror-at-three-moments.md), which reverses [`docs/adr/0054-the-board-is-an-input-not-a-mirror.md`](docs/adr/0054-the-board-is-an-input-not-a-mirror.md), and [`docs/adr/0064-the-start-gate-reads-two-labelled-sets.md`](docs/adr/0064-the-start-gate-reads-two-labelled-sets.md).
+
+**Three writes, one per moment of the work.** The spawn claim writes `In progress`, before
+the prompt reaches the worker. The tick that writes `to-review` writes `In review`, in the
+same run. The close writes `Done`, after the teardown of step 8, so a card in `Done` means
+the worktree is gone. Each write sits in the seam that already owns that moment, and **a
+failed card write is reported and stops nothing**. The `Done` write is safe to repeat, so the
+board's own **item closed to Done** workflow stays on beside it. The token needs the
+`project` scope.
 
 **One column is the start column, and its direction is board to label.** `To do` is that
 column. A card the maintainer drags there means "an agent can start this now". **What the
@@ -416,11 +441,14 @@ whole run, and it needs no label. A standalone leaf card is the second fact besi
 card is never read. The three rows are the **Ready queue** unit above
 ([`docs/adr/0062-a-story-card-authorises-its-run.md`](docs/adr/0062-a-story-card-authorises-its-run.md)).
 
-**A drag is intent in every column, because nothing overwrites a card.** No drag removes a
-label, so a card dragged back out of `To do` changes nothing. A take-back is the maintainer
-removing `ready-for-agent`, or writing `needs-human` plus a comment that says why.
+**A drag is intent in every column, because nothing reads a card and writes it back.**
+`Backlog`, `Ready` and the start column are the maintainer's own lanes, and nothing writes
+one. No drag removes a label, so a card dragged back out of `To do` changes nothing, and a
+card the loop wrote to `In progress` and the maintainer drags back stays where they put it. A
+take-back is the maintainer removing `ready-for-agent`, or writing `needs-human` plus a
+comment that says why.
 
-**A closed item reaches `Done` through the board's own built-in item closed to Done
+**A closed item also reaches `Done` through the board's own built-in item closed to Done
 workflow.** The maintainer enables it in the project settings, and **no session can**,
 because that switch is not in the API. `/orchestrator-setup` reads whether it is on and
 says so.
@@ -482,17 +510,17 @@ One schedule per live **Work item**, owned by the **Tool** rather than by a sess
 
 **No agent runs on a tick.** The precheck exits non-zero on every path, so every run records as skipped at no token cost. The schedule's own prompt and provider stay inert. So the loop spends no tokens at all between the spawn of a worker and the maintainer's own reading of the pull request.
 
-**It acts on two things: the work-state label of the item it watches, and the close of that item once its pull request merges.** It composes no prompt, kills no process, moves no card, merges nothing and spawns nothing. **At most one transition lands per run**, which is what stops a wrong computation cascading inside one minute. **The automation decides when, and the seam decides what** — the same split as a **Close transaction**, applied again. One per item, so a leaked schedule names the item it leaked from, and five siblings are five observed items. **One per item also means one worktree is watched.** No transition moves the work to a second worker, so nothing inside the loop repoints the precheck a spawn wrote (`docs/adr/0026-the-automation-follows-the-live-worker.md`, narrowed by `docs/adr/0066-review-and-the-train-are-verbs.md`). Removal is step 8 of the **Close transaction** the tick itself runs, through the teardown command the spawn passes into the precheck. So a refused transaction leaves the item observed. A tool with no automation surface skips the tick and the spawn works unchanged. Rationale, the schedule that replaces the blocking watch, the `dead` and `stalled` split, and the rejected alternatives: `docs/adr/0022-item-automation-replaces-the-blocking-watch.md`.
+**It acts on two things: the work-state label of the item it watches, and the close of that item once its pull request merges.** It composes no prompt, kills no process, moves no card into a lane the maintainer owns, merges nothing and spawns nothing. **At most one transition lands per run**, which is what stops a wrong computation cascading inside one minute. **The automation decides when, and the seam decides what** — the same split as a **Close transaction**, applied again. One per item, so a leaked schedule names the item it leaked from, and five siblings are five observed items. **One per item also means one worktree is watched.** No transition moves the work to a second worker, so nothing inside the loop repoints the precheck a spawn wrote (`docs/adr/0026-the-automation-follows-the-live-worker.md`, narrowed by `docs/adr/0066-review-and-the-train-are-verbs.md`). Removal is step 8 of the **Close transaction** the tick itself runs, through the teardown command the spawn passes into the precheck. So a refused transaction leaves the item observed. A tool with no automation surface skips the tick and the spawn works unchanged. Rationale, the schedule that replaces the blocking watch, the `dead` and `stalled` split, and the rejected alternatives: `docs/adr/0022-item-automation-replaces-the-blocking-watch.md`.
 
 **A tick in human review reads the pull request for the item's branch.** A merged one closes
 the item, removes the worktree and removes the schedule. So the maintainer merges and types
-nothing, and no label records the ask. **The tick still merges nothing, moves no card and
-spawns nothing**
+nothing, and no label records the ask. **The tick still merges nothing, spawns nothing, and moves no card into a lane
+the maintainer owns**
 ([`docs/adr/0057-the-merge-is-the-second-act.md`](docs/adr/0057-the-merge-is-the-second-act.md)).
 _Avoid_: cron job, watcher, daemon, poller (each names a mechanism rather than the unit), run automation (`Run` is not a term this repo defines).
 
 **Worker watch**:
-The seam that observes a live **Worker**'s own work product and answers whether something needs a decision now. It is not a worker — it has no **Harness** and no **Model** — and it is not the orchestrator, because it composes nothing. Asked once per tick, it reads three facts on the file system plus the work item's labels and comments. In human review it reads one fact more, and that is the pull request opened from the item's branch. It answers one outcome. The printed line names which one fired. It composes no prompt, kills no process, moves no card and spawns nothing, so every destructive act but the close stays in a session a human can interrupt. It holds no state that changes an answer and it writes no file, which is what makes a restart after each re-prompt free.
+The seam that observes a live **Worker**'s own work product and answers whether something needs a decision now. It is not a worker — it has no **Harness** and no **Model** — and it is not the orchestrator, because it composes nothing. Asked once per tick, it reads three facts on the file system plus the work item's labels and comments. In human review it reads one fact more, and that is the pull request opened from the item's branch. It answers one outcome. The printed line names which one fired. It composes no prompt, kills no process, moves no card into a lane the maintainer owns and spawns nothing, so every destructive act but the close stays in a session a human can interrupt. It holds no state that changes an answer and it writes no file, which is what makes a restart after each re-prompt free.
 
 **The one thing it writes is the transition it computed.** One function inside the seam owns every **Work-state label** swap, and it runs in the process that read those labels. The removals and the addition are one tracker write, so the two can never land apart. **At most one transition lands per run.** One outcome carries a label swap, and three refuse and leave the item where it is (`docs/adr/0056-the-tick-applies-the-transition-it-computed.md`).
 

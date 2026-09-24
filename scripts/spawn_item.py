@@ -64,7 +64,10 @@ it reads the gate once and stays instant.
 
 **The `in-progress` label is one call to `scripts/worker_state.py`'s own claim.** No
 second writer exists for that label, so a caller here and the orchestrator's own claim
-step can never disagree about how it is written.
+step can never disagree about how it is written. **That claim moves the board card to
+`In progress` too**, so a card in the start column always means no worker has taken the
+item. `--board-project` and `--board-owner` carry the two coordinates, and with either
+one missing no card moves and the label still lands (ADR 0067).
 
 The exit code carries the outcome, so the caller reports the cause and parses no
 prose: 0 a resolved plan or a completed spawn, 1 a step's own command failed, 2 a
@@ -557,7 +560,14 @@ def build(args, tracker, config, pair):
 
 
 def execute(
-    plan, tracker, prompt_path, item, worktree, process, ready_timeout=READY_TIMEOUT
+    plan,
+    tracker,
+    prompt_path,
+    item,
+    worktree,
+    process,
+    ready_timeout=READY_TIMEOUT,
+    board=(0, ""),
 ):
     """Run the plan in order and stop at the first refusal.
 
@@ -570,6 +580,11 @@ def execute(
     run, so the gate asks `worker_state.ready` again, for real, before step 5
     ever sends a prompt. It keeps asking for up to `ready_timeout` seconds, so the
     gate waits for an agent that is still starting rather than refusing it.
+
+    `board` is `(project, owner)`, and step 5 hands it to the claim. That claim writes the
+    card as well as the label, so the two coordinates ride through here rather than being
+    read a second time (ADR 0067). With either one missing no card moves, and the claim
+    still writes its label.
     """
     for entry in plan["steps"]:
         if entry["status"] == STATUS_REFUSED:
@@ -598,7 +613,7 @@ def execute(
             entry["status"] = STATUS_DONE
             continue
         try:
-            run_step(entry, tracker, prompt_path, item)
+            run_step(entry, tracker, prompt_path, item, board)
         except (CommandError, TrackerError) as exc:
             entry["status"] = STATUS_FAILED
             plan["error"] = str(exc)
@@ -618,8 +633,12 @@ def run_command(command):
         )
 
 
-def run_step(entry, tracker, prompt_path, item):
-    """Run one step's own action."""
+def run_step(entry, tracker, prompt_path, item, board=(0, "")):
+    """Run one step's own action.
+
+    `board` is `(project, owner)`, and step 5 is the one step that reads it. The claim
+    writes the card as well as the label (ADR 0067).
+    """
     if entry["step"] in (1, 2, 6, 7):
         run_command(entry["command"])
         return
@@ -636,7 +655,7 @@ def run_step(entry, tracker, prompt_path, item):
         checklist.write_text(entry["checklist"])
         return
     if entry["step"] == 5:
-        code, line = worker_state.claim(item, tracker)
+        code, line = worker_state.claim(item, tracker, board)
         if code != worker_state.EXIT_APPLIED:
             raise CommandError(f"the claim did not apply: {line}")
         _, _, send_command = entry["command"].partition(" && ")
@@ -760,6 +779,24 @@ def main(argv=None):
         help="the tracker host, for a server the CLI does not reach by default",
     )
     parser.add_argument(
+        "--board-project",
+        default=0,
+        type=int,
+        metavar="NUMBER",
+        help="the project number of the board that holds the card. Step 5 moves that "
+        "card to In progress as it writes the label, so a card in the start column "
+        "always means no worker has taken the item. The caller reads it from the "
+        "Project board section of docs/agents/issue-tracker.md. With this flag missing "
+        "no card moves, and the label still lands",
+    )
+    parser.add_argument(
+        "--board-owner",
+        default="",
+        metavar="OWNER",
+        help="the owner the board belongs to, from the same section. With this flag "
+        "missing no card moves",
+    )
+    parser.add_argument(
         "--gh-fixture",
         help="JSON that stands in for the tracker reads and writes, so a plan needs "
         "no network and no login (used by the tests)",
@@ -807,6 +844,7 @@ def main(argv=None):
             Path(args.worktree),
             args.process,
             args.ready_timeout,
+            (args.board_project, args.board_owner),
         )
         if args.execute
         else plan["exit_code"]

@@ -101,6 +101,49 @@ class TrackerTest(unittest.TestCase):
         script.chmod(0o755)
         return log
 
+    def fake_card_cli(self, cards=(), options=(), project_id="PVT_1"):
+        """A `gh` that answers the three reads a card write makes, and its argv log.
+
+        `cards` is one `(work item number, card id, Status name)` per card on the board, and
+        `options` is the column names the `Status` field offers. One fake answers all three
+        reads, because the write makes all three before it writes.
+
+        The script answers on its second argument, which is the `project` subcommand. An
+        `item-edit` matches none of the three, so it prints nothing and logs its argv.
+        """
+        log = self.root / "gh.argv"
+        script = self.bin / "gh"
+        answers = {
+            "item-list": {
+                "items": [
+                    {"id": card, "status": status, "content": {"number": number}}
+                    for number, card, status in cards
+                ]
+            },
+            "field-list": {
+                "fields": [
+                    {
+                        "id": "FIELD",
+                        "name": tracker.STATUS_FIELD_NAME,
+                        "options": [
+                            {"id": f"opt-{name}", "name": name} for name in options
+                        ],
+                    }
+                ]
+            },
+            "view": {"id": project_id},
+        }
+        script.write_text(
+            "#!/usr/bin/env python3\n"
+            "import json, sys\n"
+            f"open({str(log)!r}, 'a').write(' '.join(sys.argv[1:]) + '\\n')\n"
+            f"answers = {answers!r}\n"
+            "if sys.argv[2] in answers:\n"
+            "    print(json.dumps(answers[sys.argv[2]]))\n"
+        )
+        script.chmod(0o755)
+        return log
+
     def write_fixture(self, **items):
         """One fixture file in the one format, and the path to it."""
         path = self.root / "tracker.json"
@@ -531,18 +574,147 @@ class TrackerTest(unittest.TestCase):
         self.assertEqual(cards, {99: "In review"})
         self.assertEqual(cards.get(ITEM, ""), "")
 
-    def test_the_adapter_holds_a_board_read_and_no_board_write(self):
-        """The board is an input, so the two methods that only wrote a card are gone.
+    def test_the_adapter_holds_one_card_read_and_one_card_write(self):
+        """The board is a mirror now, so one write sits beside the reads (ADR 0067).
 
-        `board_card` answered the id a write addresses, and `card_argv` was the write.
-        Neither one has a caller now (ADR 0054). `board_status` answered one item out of a
-        board list, and the gate reads the card with the item now (ADR 0064).
+        `card_write` is that write, and it takes a column name. The three methods the old
+        five-id write needed stay gone: `board_card` answered the id a write addressed,
+        `card_argv` was the write, and `board_status` answered one item out of a board list.
+        A caller names no id at all now, so none of the three comes back.
         """
         one = tracker.Tracker()
 
-        self.assertTrue(hasattr(one, "board_cards"))
+        for name in ("board_cards", "item_card", "card_write"):
+            self.assertTrue(hasattr(one, name), f"{name} is missing from the adapter")
         for name in ("board_card", "card_argv", "board_status"):
             self.assertFalse(hasattr(one, name), f"{name} is still on the adapter")
+
+    # --- the card write, at the three moments (ADR 0067)
+
+    def test_the_card_write_resolves_every_id_the_write_needs(self):
+        """A caller holds the column name, so no configuration file holds an id."""
+        log = self.fake_card_cli(
+            cards=[(ITEM, "CARD_54", "To do")],
+            options=["To do", "In progress", "Done"],
+        )
+
+        one = tracker.Tracker()
+        line = one.card_write(ITEM, tracker.COLUMN_IN_PROGRESS, 6, "someone")
+
+        self.assertIn("moved from 'To do' to 'In progress'", line)
+        self.assertEqual(
+            log.read_text().splitlines(),
+            [
+                f"project item-list 6 --owner someone --format json "
+                f"--limit {tracker.BOARD_LIMIT}",
+                "project field-list 6 --owner someone --format json",
+                "project view 6 --owner someone --format json",
+                "project item-edit --id CARD_54 --project-id PVT_1 --field-id FIELD "
+                "--single-select-option-id opt-In progress",
+            ],
+        )
+
+    def test_the_card_write_read_is_unfiltered_so_a_done_card_is_found(self):
+        """The filtered read leaves out every card in `Done`, so a repeat write of `Done`
+        would read as an item with no card. That is silent rather than safe, so this read
+        carries no `--query` at all.
+        """
+        log = self.fake_card_cli(
+            cards=[(ITEM, "CARD_54", "Done")], options=["Done", "In review"]
+        )
+
+        line = tracker.Tracker().card_write(ITEM, tracker.COLUMN_DONE, 6, "someone")
+
+        self.assertIn("already sits in 'Done'", line)
+        self.assertNotIn("--query", log.read_text())
+
+    def test_a_card_that_already_sits_in_the_column_costs_no_write(self):
+        """The `Done` write runs beside the board's own item closed to Done workflow, so
+        every one of the three writes has to be safe to run twice.
+        """
+        log = self.fake_card_cli(
+            cards=[(ITEM, "CARD_54", "In review")], options=["In review"]
+        )
+
+        one = tracker.Tracker()
+        first = one.card_write(ITEM, tracker.COLUMN_IN_REVIEW, 6, "someone")
+        second = one.card_write(ITEM, tracker.COLUMN_IN_REVIEW, 6, "someone")
+
+        self.assertEqual(first, second)
+        self.assertIn("already sits in 'In review'", first)
+        self.assertNotIn("item-edit", log.read_text())
+
+    def test_an_item_with_no_card_answers_and_never_raises(self):
+        log = self.fake_card_cli(
+            cards=[(99, "CARD_99", "To do")], options=["In progress"]
+        )
+
+        line = tracker.Tracker().card_write(ITEM, tracker.COLUMN_IN_PROGRESS, 6, "some")
+
+        self.assertIn(f"work item #{ITEM} has no card", line)
+        self.assertNotIn("item-edit", log.read_text())
+
+    def test_a_column_the_board_does_not_hold_answers_and_never_raises(self):
+        """A renamed column reads this way, and a board with no `Status` field does too."""
+        log = self.fake_card_cli(
+            cards=[(ITEM, "CARD_54", "To do")], options=["To do", "Shipped"]
+        )
+
+        line = tracker.Tracker().card_write(ITEM, tracker.COLUMN_DONE, 6, "someone")
+
+        self.assertIn("the board has no 'Done' column", line)
+        self.assertNotIn("item-edit", log.read_text())
+
+    def test_a_card_write_with_no_board_reads_nothing_and_writes_nothing(self):
+        """A tracker with no project board is a supported configuration, so each missing
+        coordinate answers an empty clause. The other tracker has no such board at all.
+        """
+        log = self.fake_card_cli(cards=[(ITEM, "CARD_54", "To do")], options=["Done"])
+        column = tracker.COLUMN_DONE
+
+        for one, args in (
+            (tracker.Tracker(), (ITEM, column, 0, "someone")),
+            (tracker.Tracker(), (ITEM, column, 6, "")),
+            (tracker.Tracker(), (ITEM, "", 6, "someone")),
+            (tracker.Tracker(cli=tracker.GLAB), (ITEM, column, 6, "someone")),
+        ):
+            self.assertEqual(one.card_write(*args), "")
+        self.assertFalse(log.exists(), log.read_text() if log.exists() else "")
+
+    def test_a_card_write_in_fixture_mode_runs_nothing_and_is_recorded(self):
+        """A fixture holds no project id and no option id, so the recorded line names the
+        item and the column. That line is what a seam suite reads.
+        """
+        path = self.write_fixture(items={str(ITEM): {"board": "To do"}})
+
+        line = tracker.Tracker(fixture=path).card_write(
+            ITEM, tracker.COLUMN_IN_PROGRESS, 6, "someone"
+        )
+
+        self.assertIn("moved to 'In progress'", line)
+        self.assertEqual(
+            (path.parent / (path.name + ".writes")).read_text().splitlines(),
+            [
+                f"gh project item-edit --item {ITEM} --project 6 --owner someone "
+                f"--status In progress"
+            ],
+        )
+        # The fixture is a read surface, so the write left its `board` key alone.
+        self.assertEqual(tracker.Tracker(fixture=path).item_card(ITEM), "To do")
+
+    def test_a_card_list_that_fills_its_page_refuses_rather_than_answers(self):
+        """The same rule every list read here holds: a card past the page is invisible, so
+        a caller must never read that as a missing card.
+        """
+        self.fake_card_cli(
+            cards=[(n, f"CARD_{n}", "To do") for n in range(tracker.BOARD_LIMIT)],
+            options=["Done"],
+        )
+
+        with self.assertRaises(tracker.TrackerError) as raised:
+            tracker.Tracker().card_write(ITEM, tracker.COLUMN_DONE, 6, "someone")
+
+        self.assertIn("Raise BOARD_LIMIT", str(raised.exception))
 
     # --- a labelled set carries its own cards (ADR 0064)
 

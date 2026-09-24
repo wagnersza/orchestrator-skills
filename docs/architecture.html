@@ -59,8 +59,8 @@
         <p class="text-sm text-slate-600">labels · one family · from 2 families</p>
       </div>
       <div class="rounded-lg border border-slate-200 bg-white p-4">
-        <p class="font-mono text-2xl font-bold text-emerald-700">0</p>
-        <p class="text-sm text-slate-600">board writes · from 4 places</p>
+        <p class="font-mono text-2xl font-bold text-emerald-700">3</p>
+        <p class="text-sm text-slate-600">board writes · one per moment</p>
       </div>
       <div class="rounded-lg border border-slate-200 bg-white p-4">
         <p class="font-mono text-2xl font-bold text-indigo-700">5</p>
@@ -164,11 +164,14 @@ flowchart TB
           belongs to a seam.</p>
       </div>
       <div class="band border-emerald-500 bg-white rounded-r-lg p-5 space-y-2">
-        <p class="font-semibold">Nothing writes the board</p>
-        <p class="text-sm text-slate-600">The board is read at the start and never written. Your
-          drag into <code>To do</code> is the only column move in the design. When the item
-          closes, the board's own built-in workflow moves the card to <code>Done</code>, at no
-          cost to us.</p>
+        <p class="font-semibold">The board mirrors the work, at three moments</p>
+        <p class="text-sm text-slate-600">The board is read in one column and written in three,
+          and the two sets do not overlap. The spawn writes <code>In progress</code>, the finish
+          writes <code>In review</code>, and the close writes <code>Done</code> after the
+          teardown. Each write sits in the seam that already owns that moment, so there is no
+          reconcile pass and no derivation table. Your drag into <code>To do</code> is still the
+          only column move you make, and it is still what authorises a start. A failed card
+          write is reported and stops nothing.</p>
       </div>
       <div class="band border-rose-500 bg-white rounded-r-lg p-5 space-y-2">
         <p class="font-semibold">A seam performs, a hook refuses</p>
@@ -204,13 +207,18 @@ flowchart TB
         <tbody class="divide-y divide-slate-100">
           <tr class="bg-amber-50/50">
             <td class="px-4 py-3 font-mono text-xs">ready-for-agent</td>
-            <td class="px-4 py-3">You, or triage</td>
-            <td class="px-4 py-3">Half of the start gate. On its own it starts nothing.</td>
+            <td class="px-4 py-3">You, or the flow that wrote the item</td>
+            <td class="px-4 py-3">Half of the start gate. On its own it starts nothing.
+              <code>/to-tickets</code>, <code>/to-spec</code> and <code>/triage</code> write it
+              as they file the item, because the flow that wrote the specification knows the item
+              is specified. The drag is still yours.</td>
           </tr>
           <tr class="bg-amber-50/50">
             <td class="px-4 py-3 font-mono text-xs">card in To do</td>
             <td class="px-4 py-3">You, by dragging</td>
-            <td class="px-4 py-3">The other half, and <b>the only column move in this design</b>.
+            <td class="px-4 py-3">The other half, and <b>the only column move you make</b>. The
+              three the loop makes are <code>In progress</code>, <code>In review</code> and
+              <code>Done</code>, and none of them is this column.
               With both facts the queue tick starts the item, once every
               <code>## Blocked by</code> item is closed and both roofs are free. No board means
               the label alone is the gate.</td>
@@ -273,8 +281,8 @@ flowchart TB
           swap, and one test asserts exactly one label after every transition. <b>An undelivered
           wake burning its window.</b> There is no delivery left, so no marker and no window.
           <b>An answered round firing again.</b> Rounds are gone with the review loop. <b>A card
-          dragged to a column nobody read.</b> There is one column now, and the tick reads it
-          every minute.</p>
+          dragged to a column nobody read.</b> There is one column you drag to, and the tick
+          reads it every minute. The three the loop writes are not that column.</p>
       </div>
       <div class="rounded-lg border border-slate-200 bg-white p-5 space-y-2">
         <p class="font-semibold text-sm">What you give up, stated plainly</p>
@@ -582,9 +590,10 @@ flowchart TB
       <div class="band border-slate-400 bg-white rounded-r-lg p-5 space-y-2">
         <p class="font-semibold text-sm">Two hooks are skipped on purpose</p>
         <p class="text-sm text-slate-600">A <code>Stop</code> hook could reconcile the board. Not
-          needed, because the session writes no label and nothing writes the board. A merge guard
-          is not needed either, because <b>you are the one who merges</b>. Add either only if a
-          real failure asks for it.</p>
+          needed, because the session writes no label and no card: each card write happens inside
+          the seam that owns its moment, so there is nothing left to reconcile on a stop. A merge
+          guard is not needed either, because <b>you are the one who merges</b>. Add either only
+          if a real failure asks for it.</p>
       </div>
     </div>
   </section>
@@ -625,11 +634,12 @@ flowchart TB
               <code>HEAD</code>.</td>
           </tr>
           <tr>
-            <td class="px-4 py-3 font-mono text-xs">close_item.py<br/><span class="text-sky-700 font-sans">exists, loses its board flags</span></td>
+            <td class="px-4 py-3 font-mono text-xs">close_item.py<br/><span class="text-sky-700 font-sans">exists, keeps two board coordinates</span></td>
             <td class="px-4 py-3">close</td>
             <td class="px-4 py-3">Closing the item, removing the worktree and removing the
-              schedule. <b>Its merge steps go, because you merge.</b> The five board coordinate
-              flags go with them.</td>
+              schedule, and then moving the card to <code>Done</code>. <b>Its merge steps go,
+              because you merge.</b> The five board id flags go with them, and two coordinates
+              stay: the project and the owner. A failed card write never fails the close.</td>
             <td class="px-4 py-3">A dirty worktree. It refuses, and never warns. That is what
               protects uncommitted work.</td>
           </tr>
@@ -717,13 +727,13 @@ flowchart TB
               ways to drop layer 4 can disagree.</td>
           </tr>
           <tr>
-            <td class="px-4 py-3">The board, read only</td>
-            <td class="px-4 py-3">Owner, project number, and the name of the column that means
-              start. Two coordinates.</td>
-            <td class="px-4 py-3"><b>Five ids become two coordinates.</b> The
-              <code>Status</code> field id, the option map, the derivation table and the two write
-              calls all go, because nothing writes the board. The token needs
-              <code>read:project</code> and no more.</td>
+            <td class="px-4 py-3">The board, by name</td>
+            <td class="px-4 py-3">Owner, project number, and the name of every column the loop
+              reads or writes. Names, never ids.</td>
+            <td class="px-4 py-3"><b>Five ids become two coordinates and four names.</b> The
+              <code>Status</code> field id, the option map and the derivation table all go,
+              because the seam resolves each id from the column name at run time. The token needs
+              the <code>project</code> scope, which covers the read and the three writes.</td>
           </tr>
           <tr class="bg-sky-50/50">
             <td class="px-4 py-3">The gate files, and one smoke run</td>
@@ -749,10 +759,11 @@ flowchart TB
     <div class="grid md:grid-cols-3 gap-4">
       <div class="band border-rose-500 bg-white rounded-r-lg p-5 space-y-2">
         <p class="font-semibold text-sm">The one thing setup cannot do for you</p>
-        <p class="text-sm text-slate-600">Nothing writes the board any more, so <b>the board's own
-          built-in workflow is what moves a card to <code>Done</code></b>. Setup reads whether
-          <b>item closed to Done</b> is enabled and says so plainly. It cannot turn it on, because
-          that switch is not in the API. This is the only external dependency in the whole
+        <p class="text-sm text-slate-600"><b>The board's own built-in workflow moves a card to
+          <code>Done</code> too</b>, and it covers every item the close did not touch. Setup reads
+          whether <b>item closed to Done</b> is enabled and says so plainly. It cannot turn it on,
+          because that switch is not in the API. Keep it on: the close reads the card before it
+          writes, so the two never fight. This is the only external dependency in the whole
           design.</p>
       </div>
       <div class="band border-indigo-500 bg-white rounded-r-lg p-5 space-y-2">
@@ -917,7 +928,7 @@ flowchart TB
           <tr class="bg-rose-50/50"><td class="px-4 py-3">Resolve the item shape</td><td class="px-4 py-3 text-right font-mono">26</td><td class="px-4 py-3"><b>deleted</b> · the queue tick descends</td></tr>
           <tr class="bg-amber-50/50"><td class="px-4 py-3">The proof phase</td><td class="px-4 py-3 text-right font-mono">26</td><td class="px-4 py-3">folded into <code>references/story-flows.md</code></td></tr>
           <tr class="bg-rose-50/50"><td class="px-4 py-3">Reset the context</td><td class="px-4 py-3 text-right font-mono">24</td><td class="px-4 py-3"><b>deleted</b> · inside the re-prompt</td></tr>
-          <tr class="bg-rose-50/50"><td class="px-4 py-3">Board status</td><td class="px-4 py-3 text-right font-mono">22</td><td class="px-4 py-3"><b>deleted</b> · nothing writes the board</td></tr>
+          <tr class="bg-rose-50/50"><td class="px-4 py-3">Board status</td><td class="px-4 py-3 text-right font-mono">22</td><td class="px-4 py-3"><b>9 lines</b> · the three writes, and the drag that authorises</td></tr>
           <tr class="bg-rose-50/50"><td class="px-4 py-3">Work a #N</td><td class="px-4 py-3 text-right font-mono">22</td><td class="px-4 py-3"><b>deleted</b> · the queue tick's descent</td></tr>
           <tr class="bg-emerald-50/60"><td class="px-4 py-3">Monitor workers</td><td class="px-4 py-3 text-right font-mono">20</td><td class="px-4 py-3"><b>stays</b>, four bullets</td></tr>
           <tr class="bg-emerald-50/60"><td class="px-4 py-3">Safety</td><td class="px-4 py-3 text-right font-mono">20</td><td class="px-4 py-3"><b>stays</b>, cut to 5 bullets</td></tr>
@@ -951,7 +962,7 @@ flowchart TB
     <p class="text-slate-600 max-w-3xl"><b>The setup skill shrinks for a different reason.</b>
       <code>orchestrator-setup/SKILL.md</code> goes from 686 lines to about 300, and none of that is
       a move to a reference file. It is the review question, the gate profile question, the board
-      write half and the terminal title being deleted outright. Setup is never in context on a
+      id half and the terminal title being deleted outright. Setup is never in context on a
       worker turn, so its length costs nothing per turn. It shrinks because the things it configured
       no longer exist.</p>
   </section>
@@ -970,7 +981,7 @@ flowchart TB
             <tr><th class="text-left px-4 py-3">Retired</th><th class="text-left px-4 py-3">Because</th></tr>
           </thead>
           <tbody class="divide-y divide-slate-100">
-            <tr><td class="px-4 py-3 font-mono text-xs">0009</td><td class="px-4 py-3">labels drive board status. Nothing writes the board now.</td></tr>
+            <tr><td class="px-4 py-3 font-mono text-xs">0009</td><td class="px-4 py-3">labels drive board status. A seam writes the card at three named moments now, and no pass derives a column from a label.</td></tr>
             <tr><td class="px-4 py-3 font-mono text-xs">0016</td><td class="px-4 py-3">the orchestrator merges when asked. You merge.</td></tr>
             <tr><td class="px-4 py-3 font-mono text-xs">0021</td><td class="px-4 py-3">phase is a second label family. The position is computed now.</td></tr>
             <tr><td class="px-4 py-3 font-mono text-xs">0024</td><td class="px-4 py-3">the wake target is a resolved handle. There is no wake to deliver.</td></tr>
@@ -994,7 +1005,7 @@ flowchart TB
             <tr><td class="px-4 py-3">the tick applies the transition it computed</td><td class="px-4 py-3">supersedes 0024, 0025, 0026 and 0027 together.</td></tr>
             <tr><td class="px-4 py-3">a hook refuses, a seam performs</td><td class="px-4 py-3">the plane boundary, and it supersedes 0034.</td></tr>
             <tr><td class="px-4 py-3">the merge is the second act</td><td class="px-4 py-3">supersedes 0016 and 0038. The close needs no label and no verb.</td></tr>
-            <tr><td class="px-4 py-3">the board is an input, not a mirror</td><td class="px-4 py-3">supersedes 0009. One column read, zero writes.</td></tr>
+            <tr><td class="px-4 py-3">the board is an input, not a mirror</td><td class="px-4 py-3">supersedes 0009. One column read, zero writes. <b>Reversed after the migration</b> by <code>0067</code>: the board mirrors the work at three moments, and the drag still authorises.</td></tr>
             <tr><td class="px-4 py-3">adversarial review and the merge train leave the loop</td><td class="px-4 py-3">a judgement cannot be a deterministic gate, and an order you pick needs no seam. Both stay as verbs. It also narrows 0037.</td></tr>
           </tbody>
         </table>
@@ -1067,7 +1078,11 @@ flowchart TB
     <p>This page holds the desired state only, and it says nothing about the skill as it stands
       today. Today's state, and the five waves that reach this design, are in
       <a class="iss" href="skill-state-and-roadmap.html" style="color:#4338ca">skill-state-and-roadmap.html</a>.</p>
-    <p>Written 2026-08-27.</p>
+    <p>Written 2026-08-27. Updated 2026-09-23: the board became a mirror again, and a seam now
+      writes the card at three moments (<code>0067</code>). An inline item-writing flow now writes
+      <code>ready-for-agent</code> as it files an item (<code>0068</code>). Both landed after the
+      migration this page describes, and the drag into <code>To do</code> is unchanged by
+      either.</p>
   </footer>
 
   </main>

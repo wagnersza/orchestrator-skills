@@ -17,9 +17,9 @@ This file carries no Markdown link. The orchestrator copies it into a worker's o
 worktree, where a relative path out of this directory resolves to nothing.
 
 The last box ends at the review note. The worker writes no work-state label, and it
-moves no board card. The tick of an Item automation writes the label, and nothing writes a
-card. See ../docs/adr/0056-the-tick-applies-the-transition-it-computed.md
-and ../docs/adr/0054-the-board-is-an-input-not-a-mirror.md.
+moves no board card. The tick of an Item automation writes both: the review label, and the
+card that goes with it. See ../docs/adr/0056-the-tick-applies-the-transition-it-computed.md
+and ../docs/adr/0067-the-board-is-a-mirror-at-three-moments.md.
 -->
 
 # Checklist — <item>

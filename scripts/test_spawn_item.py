@@ -370,6 +370,29 @@ class SpawnItemTestCase(unittest.TestCase):
         )
         self.assertTrue(proved.exists(), "the send ran after the label write")
 
+    def test_step_5_moves_the_board_card_with_the_label(self):
+        """The claim writes both, so the two coordinates ride through this seam rather than
+        being read again. A spawn with no coordinates writes the label alone (ADR 0067)."""
+        self.worktree.mkdir()
+        self.child_in(self.worktree)
+
+        self.spawn(
+            "--board-project",
+            "6",
+            "--board-owner",
+            "someone",
+            execute=True,
+            expect=EXIT_OK,
+        )
+
+        self.assertEqual(
+            [one for one in self.tracker_writes() if "project item-edit" in one],
+            [
+                f"gh project item-edit --item {ITEM} --project 6 --owner someone "
+                f"--status In progress"
+            ],
+        )
+
     def test_a_needs_human_item_refuses_the_label_and_sends_no_prompt(self):
         """A second refusal path into the same step: the item is already parked."""
         self.write_fixture(labels=["needs-human"])

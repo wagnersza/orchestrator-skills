@@ -9,7 +9,9 @@ before it runs.
 
 1. **A work-state label write from any session.** Only a seam writes one. The
    vocabulary comes from `docs/agents/issue-tracker.md`, so no label string is
-   copied into this file.
+   copied into this file. **A create is exempt**: an inline item-writing flow labels the
+   item it just filed, which sets an item's first state rather than moving an existing one
+   (ADR 0068).
 2. **The teardown command outside `scripts/close_item.py`.** Step 8 of the close
    transaction removes a worktree, and nothing else does.
 3. **A `git push` while a configured gate has no green line at `HEAD`.** The
@@ -58,6 +60,12 @@ TABLE_LABEL = re.compile(r"^\|[^|]*\|\s*`([^`]+)`\s*\|")
 # The flags either tracker CLI writes a label with. A command that carries none of
 # them writes no label, whatever strings it holds.
 LABEL_FLAGS = ("--add-label", "--remove-label", "--label", "--unlabel")
+
+# The verb that files a new work item, on either tracker CLI. **A create is exempt, and it
+# is the one exemption beside the close seam** (ADR 0068). An inline item-writing flow
+# labels the item it just filed, and that write sets an item's first state rather than
+# moving an existing one. Every write on an existing item is still denied.
+CREATE_VERB = "create"
 
 # The teardown verb, as two consecutive words. One tool says `worktree rm` and
 # another says `worktree remove`, so the pair matches every tool that spells the
@@ -164,14 +172,31 @@ def labels_written(words):
     return [value.strip() for value in written if value.strip()]
 
 
+def creates_an_item(words):
+    """Whether this command files a new work item, on either tracker CLI.
+
+    Both CLIs spell it as three words: the CLI, the object, then `create`. So the verb in
+    third position is the whole test, and a `--label` value of `create` cannot reach it.
+    """
+    return len(words) > 2 and words[2] == CREATE_VERB
+
+
 def label_denial(root, words):
     """The reason a work-state label write is denied, or an empty string.
 
     The close seam is the one caller allowed to make this write. `teardown_denial`
     runs the same test for its own write. A command that names the seam anywhere is
     read as that seam's call, so a hand-typed write beside it goes through too.
+
+    **A create is the second exemption** (ADR 0068). An inline item-writing flow writes
+    `ready-for-agent` on each item it files, and that write sets an item's first state
+    rather than moving an existing one. An `edit` is still a denial.
+
+    Both exemptions are read across the whole command, so a hand-typed write beside a
+    create goes through the same way one beside the seam does. This hook fails open, and
+    that is the choice it makes everywhere: a hook that guesses denies correct work.
     """
-    if any(CLOSE_SEAM in word for word in words):
+    if any(CLOSE_SEAM in word for word in words) or creates_an_item(words):
         return ""
     written = labels_written(words)
     if not written:
