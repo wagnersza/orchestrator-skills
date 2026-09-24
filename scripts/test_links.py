@@ -24,6 +24,16 @@ A link inside a fenced code block is example output rather than a cross-referenc
 so the walk skips it. The walk skips a link whose scheme is `http`, `https` or
 `mailto` as well, which is what keeps the suite offline.
 
+The same file holds a second walk, over the ADR ledger. `CLAUDE.md` asks for a new
+ADR whenever a decision reverses or narrows an earlier one, and it asks the older
+file for one pointer forward. That was prose, so half of it held: the new ADR
+existed every time, and the old file stayed silent. A reader then read a retired
+decision as current policy. `orchestrator/docs/adr/README.md` is the ledger, with
+one row per number, and `ledger_failures` reports every place the ledger and the
+files disagree. It reports in both directions: a declared edge with no pointer
+behind it, and a pointer with no row in front of it. It also reads the bodies, so
+an ADR that states a reversal and skips the ledger fails the suite.
+
 Fixtures are small Markdown files in a temporary directory. So each failure class
 has a link behind it that really dangles. Every test asserts on the reported
 failures, and none of them asserts on a helper.
@@ -161,6 +171,211 @@ def scan(root):
                         )
                     )
     return failures
+
+
+# --- the ADR ledger ---------------------------------------------------------
+
+# The ledger, and the decision records it indexes.
+ADR_DIR = Path("orchestrator") / "docs" / "adr"
+LEDGER = "README.md"
+
+# `0045-a-story-start-is-automatic-under-two-roofs.md`, and the number it carries.
+ADR_NAME = re.compile(r"^(\d{4})-[a-z0-9-]+\.md$")
+
+# A ledger row opens with its number, as a link where a file carries that number.
+ROW = re.compile(r"^\| *\[?(\d{4})\b")
+
+# A number no file carries says so in its subject cell.
+VOID_ROW = re.compile(r"^\| *\d{4} *\| *Void\b")
+
+# The target half of a link to another decision record, from inside their directory.
+ADR_TARGET = re.compile(r"\((\d{4})-[a-z0-9-]+\.md\)")
+
+# One decision record, in the three forms these files use to name each other.
+NAMED = r"(?:\[ADR (\d{4})\]|ADR (\d{4})\b|`(\d{4})-[a-z0-9-]+\.md`)"
+
+# A claim in the body of a decision record: the verb, then the record it acts on.
+# Bold markers and one short qualifier can stand between the two, and nothing else
+# can. So `It narrows **[ADR 0026](...)**` is a claim, and so is `reverses one
+# decision of ADR 0005`. `It narrows nothing in `0054-...`` is no claim, because
+# `nothing in` is no qualifier. The rule is tight on purpose. It reads the sentence
+# shape these files already use and it parses no English past it, so it reports no
+# claim that a reader would not read as one. A claim it misses still needs its row,
+# and the row is what the pointer walk reads.
+CLAIM = re.compile(
+    r"(?:supersedes|narrows|reverses)\*{0,2} *"
+    r"(?:\*{0,2} *(?:one decision of|one paragraph of|part of|again"
+    r"|the [a-z][a-z -]{0,30} of) *)?"
+    r"\*{0,2} *" + NAMED
+)
+
+# `and ADR 0008`, so one sentence can name a second record.
+CLAIM_MORE = re.compile(r"^ *,? *and +" + NAMED)
+
+
+def adr_files(root):
+    """Every decision record under the ADR directory, keyed by its number."""
+    found = {}
+    for path in sorted((Path(root) / ADR_DIR).glob("*.md")):
+        number = ADR_NAME.match(path.name)
+        if number:
+            found[number.group(1)] = path
+    return found
+
+
+def prose(path):
+    """The body of one Markdown file, with every fenced code block dropped."""
+    return "\n".join(line for _, line in body_lines(path.read_text(encoding="utf-8")))
+
+
+def preamble(path):
+    """The part of one decision record above its first `##` heading.
+
+    A pointer forward lives here, so a reader who opens the file meets it before the
+    decision. Everything under the first heading is the decision itself, and no walk
+    in this file reads a pointer out of it.
+    """
+    lines = []
+    for line in prose(path).splitlines():
+        if line.startswith("## "):
+            break
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def ledger_rows(path):
+    """The ledger as `{number: (void, [numbers it declares changed that number])}`."""
+    rows = {}
+    for line in prose(path).splitlines():
+        found = ROW.match(line)
+        if found:
+            cells = line.split("|")
+            rows[found.group(1)] = (
+                VOID_ROW.match(line) is not None,
+                ADR_TARGET.findall(cells[3]) if len(cells) > 3 else [],
+            )
+    return rows
+
+
+def claims(path, number):
+    """Every earlier decision record the body of `path` claims that it changes."""
+    text = prose(path)
+    found: set[str] = set()
+    for claim in CLAIM.finditer(text):
+        named = [n for n in claim.groups() if n]
+        rest = text[claim.end() :]
+        while True:
+            more = CLAIM_MORE.match(rest)
+            if not more:
+                break
+            named += [n for n in more.groups() if n]
+            rest = rest[more.end() :]
+        found.update(n for n in named if n < number)
+    return found
+
+
+def row_failures(files, rows):
+    """Every number between the first record and the last that the ledger misreads.
+
+    A number a file carries needs a subject. A number no file carries needs a void
+    note, so a gap in the sequence reads as void and never as a deleted file.
+    """
+    failures = []
+    for count in range(1, int(max(files)) + 1):
+        number = f"{count:04d}"
+        if number not in rows:
+            failures.append(
+                ("missing row", f"the ledger holds no row for ADR {number}")
+            )
+        elif rows[number][0] and number in files:
+            failures.append(
+                (
+                    "wrong row",
+                    f"the ledger calls ADR {number} void, and "
+                    f"{files[number].name} carries that number",
+                )
+            )
+        elif not rows[number][0] and number not in files:
+            failures.append(
+                (
+                    "wrong row",
+                    f"the ledger gives ADR {number} a subject, and no file "
+                    f"carries that number",
+                )
+            )
+    return failures
+
+
+def pointer_failures(files, rows):
+    """Both directions of one edge: the row in front of it, the pointer behind it."""
+    failures = []
+    for number, path in sorted(files.items()):
+        declared = set(rows.get(number, (False, []))[1])
+        pointed = {n for n in ADR_TARGET.findall(preamble(path)) if n > number}
+        for newer in sorted(declared - pointed):
+            failures.append(
+                (
+                    "missing pointer",
+                    f"the ledger says ADR {newer} changed ADR {number}, and "
+                    f"{path.name} names no ADR {newer} above its first heading",
+                )
+            )
+        for newer in sorted(pointed - declared):
+            failures.append(
+                (
+                    "stray pointer",
+                    f"{path.name} points forward at ADR {newer}, and the ledger "
+                    f"declares no such edge",
+                )
+            )
+    return failures
+
+
+def claim_failures(files, rows):
+    """Every body that states a reversal the ledger does not carry."""
+    failures = []
+    for number, path in sorted(files.items()):
+        for older in sorted(claims(path, number)):
+            if number not in set(rows.get(older, (False, []))[1]):
+                failures.append(
+                    (
+                        "unledgered claim",
+                        f"{path.name} says it changes ADR {older}, and the ledger "
+                        f"declares no such edge",
+                    )
+                )
+    return failures
+
+
+def ledger_failures(root):
+    """Return every place the ADR ledger and the records it indexes disagree.
+
+    Each item is a `(kind, message)` pair, the shape `scan` returns. Five kinds:
+
+    - `missing row`, a number with no row in the ledger.
+    - `wrong row`, a row that calls a number void where a file carries it, or a row
+      with a subject where no file does.
+    - `missing pointer`, an edge the ledger declares where the older record does not
+      name the newer one above its first heading.
+    - `stray pointer`, a pointer forward that the ledger declares no edge for.
+    - `unledgered claim`, a body that says it changes an earlier record where the
+      ledger declares no edge for it.
+    """
+    root = Path(root).resolve()
+    ledger = root / ADR_DIR / LEDGER
+    if not ledger.is_file():
+        return [("missing ledger", f"no ADR ledger is at {ADR_DIR / LEDGER}")]
+
+    files = adr_files(root)
+    if not files:
+        return [("missing records", f"no decision record is under {ADR_DIR}")]
+
+    rows = ledger_rows(ledger)
+    return (
+        row_failures(files, rows)
+        + pointer_failures(files, rows)
+        + claim_failures(files, rows)
+    )
 
 
 class LinkTestCase(unittest.TestCase):
@@ -379,6 +594,217 @@ class LinkTestCase(unittest.TestCase):
             [message for message in self.reported(REPO_ROOT) if "SKILL.md" in message],
             [],
         )
+
+
+class AdrLedgerTestCase(unittest.TestCase):
+    """Four decision records and a ledger, in a temporary directory.
+
+    ADR 0001 is changed by two later records and points at both. ADR 0002 is changed
+    by ADR 0005 and points at it. ADR 0003 is void. So the fixture holds one record
+    with two edges, one gap, and a record with no edge at all, and every test below
+    breaks exactly one of those.
+    """
+
+    LEDGER = (
+        "# The ADR ledger\n\n"
+        "| ADR | Subject | Changed by |\n"
+        "| --- | --- | --- |\n"
+        "| [0001](0001-first.md) | The first one | narrowed by [0004](0004-fourth.md)"
+        ", reversed by [0005](0005-fifth.md) |\n"
+        "| [0002](0002-second.md) | The second one | narrowed by [0005](0005-fifth.md) |\n"
+        "| 0003 | Void. Never used, and no file ever carried this number. | |\n"
+        "| [0004](0004-fourth.md) | The fourth one | — |\n"
+        "| [0005](0005-fifth.md) | The fifth one | — |\n"
+    )
+
+    RECORDS = {
+        "0001-first.md": "# The first one\n\n"
+        "> Narrowed by [ADR 0004](0004-fourth.md). The gate stands.\n"
+        ">\n"
+        "> Reversed by [ADR 0005](0005-fifth.md). The signal stands.\n\n"
+        "## The decision\n\nA rule.\n",
+        "0002-second.md": "# The second one\n\n"
+        "> Narrowed by [ADR 0005](0005-fifth.md). The split stands.\n\n"
+        "## The decision\n\nA rule.\n",
+        "0004-fourth.md": "# The fourth one\n\n"
+        "It narrows [ADR 0001](0001-first.md) on one point.\n",
+        "0005-fifth.md": "# The fifth one\n\n"
+        "This ADR reverses one decision of ADR 0001.\n"
+        "It narrows `0002-second.md` in scope.\n"
+        "It narrows nothing in `0004-fourth.md`.\n",
+    }
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.addCleanup(self.tmp.cleanup)
+
+        self.write(LEDGER, self.LEDGER)
+        for name, text in self.RECORDS.items():
+            self.write(name, text)
+
+    # --- helpers ------------------------------------------------------------
+
+    def write(self, name, text):
+        path = self.root / ADR_DIR / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+        return path
+
+    def reported(self, root=None, kind=None):
+        return [
+            message
+            for found, message in ledger_failures(root or self.root)
+            if kind is None or found == kind
+        ]
+
+    # --- the fixture as written --------------------------------------------
+
+    def test_a_ledger_that_agrees_with_every_record_reports_nothing(self):
+        """No test below can pass by accident, because this one holds first."""
+        self.assertEqual(self.reported(), [])
+
+    # --- the five failure classes, one test each ----------------------------
+
+    def test_a_declared_edge_with_no_pointer_on_the_older_record_is_reported(self):
+        """The class this walk exists for. ADR 0001 loses one of its two pointers,
+        and the ledger still declares both edges."""
+        self.write(
+            "0001-first.md",
+            "# The first one\n\n"
+            "> Narrowed by [ADR 0004](0004-fourth.md). The gate stands.\n\n"
+            "## The decision\n\nA rule.\n",
+        )
+        reported = self.reported(kind="missing pointer")
+
+        self.assertEqual(len(reported), 1, reported)
+        self.assertIn("ADR 0005 changed ADR 0001", reported[0])
+        self.assertIn("0001-first.md", reported[0])
+
+    def test_a_pointer_below_the_first_heading_does_not_count(self):
+        """A reader who opens a retired record must meet the pointer before the
+        decision. So a pointer under a heading is no pointer."""
+        self.write(
+            "0002-second.md",
+            "# The second one\n\n## The decision\n\n"
+            "> Narrowed by [ADR 0005](0005-fifth.md). The split stands.\n",
+        )
+
+        self.assertEqual(len(self.reported(kind="missing pointer")), 1)
+
+    def test_a_pointer_the_ledger_does_not_declare_is_reported(self):
+        """The other direction. ADR 0004 points forward at ADR 0005, and the ledger
+        holds no edge for it."""
+        self.write(
+            "0004-fourth.md",
+            "# The fourth one\n\n"
+            "> Narrowed by [ADR 0005](0005-fifth.md). Something stands.\n\n"
+            "It narrows [ADR 0001](0001-first.md) on one point.\n",
+        )
+        reported = self.reported(kind="stray pointer")
+
+        self.assertEqual(len(reported), 1, reported)
+        self.assertIn("0004-fourth.md points forward at ADR 0005", reported[0])
+
+    def test_a_body_that_states_a_reversal_the_ledger_misses_is_reported(self):
+        """A new record that reverses an old one and skips the ledger. This is what
+        stops the ledger going stale the next time somebody writes an ADR."""
+        self.write(
+            "0005-fifth.md",
+            "# The fifth one\n\nThis ADR reverses ADR 0004 in full.\n",
+        )
+        reported = self.reported(kind="unledgered claim")
+
+        self.assertIn("0005-fifth.md says it changes ADR 0004", reported[0])
+
+    def test_a_number_with_no_row_is_reported_and_so_is_a_wrong_row(self):
+        """Both halves of the row check. A record with no row, then a void note on a
+        number a file carries."""
+        self.write(
+            LEDGER,
+            self.LEDGER.replace(
+                "| [0004](0004-fourth.md) | The fourth one | — |\n", ""
+            ),
+        )
+        self.assertEqual(len(self.reported(kind="missing row")), 1)
+
+        self.write(
+            LEDGER,
+            self.LEDGER.replace(
+                "| [0004](0004-fourth.md) | The fourth one | — |",
+                "| 0004 | Void. Never used. | |",
+            ),
+        )
+        reported = self.reported(kind="wrong row")
+        self.assertEqual(len(reported), 1, reported)
+        self.assertIn("calls ADR 0004 void", reported[0])
+
+    def test_a_gap_with_no_row_at_all_is_reported(self):
+        """A gap with no row at all reads as a deleted file, so it is reported."""
+        self.write(
+            LEDGER,
+            self.LEDGER.replace(
+                "| 0003 | Void. Never used, and no file ever carried this number. | |\n",
+                "",
+            ),
+        )
+        reported = self.reported(kind="missing row")
+
+        self.assertEqual(len(reported), 1, reported)
+        self.assertIn("ADR 0003", reported[0])
+
+    # --- what the claim reader does not read as a claim ----------------------
+
+    def test_a_sentence_that_denies_a_change_is_no_claim(self):
+        """`It narrows nothing in` is in the fixture already, and the walk stays
+        quiet on it. A record that claimed every ADR it mentions would ask for a
+        pointer on every one, and the ledger would then say the opposite of the
+        files."""
+        self.write(
+            "0005-fifth.md",
+            "# The fifth one\n\n"
+            "It narrows nothing in `0004-fourth.md`.\n"
+            "It supersedes no part of [ADR 0004](0004-fourth.md).\n"
+            "This narrows no earlier decision.\n",
+        )
+
+        self.assertEqual(self.reported(kind="unledgered claim"), [])
+
+    def test_a_claim_inside_a_fenced_code_block_is_no_claim(self):
+        """Example output, the same rule the link walk follows."""
+        self.write(
+            "0005-fifth.md",
+            "# The fifth one\n\n```markdown\nIt supersedes ADR 0004 in full.\n```\n",
+        )
+
+        self.assertEqual(self.reported(kind="unledgered claim"), [])
+
+    def test_a_claim_sentence_that_names_two_records_reports_both(self):
+        """`This supersedes ADR 0007 and ADR 0008` is how one real record words it."""
+        self.write(
+            "0005-fifth.md",
+            "# The fifth one\n\nThis supersedes ADR 0003 and ADR 0004.\n",
+        )
+        reported = self.reported(kind="unledgered claim")
+
+        self.assertEqual(len(reported), 2, reported)
+        self.assertIn("ADR 0003", reported[0])
+        self.assertIn("ADR 0004", reported[1])
+
+    # --- the real repo ------------------------------------------------------
+
+    def test_the_adr_ledger_and_every_record_in_this_repo_agree(self):
+        """The whole ledger, all five classes. The message says which class broke.
+
+        A pass here is the invariant `CLAUDE.md` states: a decision that reverses or
+        narrows an earlier one gets a new ADR, and the older file points forward at
+        it.
+        """
+        failures = [
+            f"{found}: {message}" for found, message in ledger_failures(REPO_ROOT)
+        ]
+        if failures:
+            self.fail("\n".join([f"{len(failures)} ledger facts disagree:", *failures]))
 
 
 if __name__ == "__main__":
