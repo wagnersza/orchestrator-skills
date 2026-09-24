@@ -18,6 +18,11 @@ else. So `labelled_items` reads one of those sets by label and the card comes ba
 same command. `board_cards` is the whole-board list, and the `report` verb is its one caller
 (ADR 0064).
 
+**A column is a card on one tracker and a scoped label on the other.** So the other
+tracker's column read is a filter over labels the adapter already holds, and it makes no
+call of its own: no second command, no page to fill and no page-limit refusal.
+`scoped_column` is that filter (ADR 0070).
+
 **The board is also written, at three moments, through one method.** `card_write` moves one
 item's card to one column, and a caller names that column rather than an id. The spawn claim
 writes `In progress`, the tick that writes `to-review` writes `In review`, and the close
@@ -47,9 +52,10 @@ item and one per pull request:
                               "merge_commit": "a1b2c3d",
                               "head": "someone/54-a-branch"}}}
 
-`board` is the `Status` option name on that item's card. It is the one fact a card read
-answers, and a fixture holds it for a read alone: a card write in fixture mode records its
-command and leaves this key as it found it (ADR 0067). `head` is the branch that pull
+`board` is that item's own column, which is the `Status` option name on its card on one
+tracker and its scoped label on the other. One key covers both, because a fixture holds the
+fact and not the wire shape. It is held for a read alone: a card write in fixture mode
+records its command and leaves this key as it found it (ADR 0067). `head` is the branch that pull
 request was opened from, and it is what a caller matches to find the pull request for
 a branch. `title` and `body` are what a queue read asks for, and the body is where the
 `## Parent`, `## Blocked by` and `## Touches` edges live. `parent` is the native
@@ -111,6 +117,15 @@ STATUS_FIELD_NAME = "Status"
 COLUMN_IN_PROGRESS = "In progress"
 COLUMN_IN_REVIEW = "In review"
 COLUMN_DONE = "Done"
+
+# How a board column arrives on the tracker that has no card at all. A column there is a
+# **scoped label** on the item, and the scope is everything up to and including the `::`.
+# `COLUMN_SCOPE` is that prefix, and `SCOPED_COLUMNS` is the four column names in lower
+# case. Both are part of the recipe in `docs/agents/issue-tracker.md`, so this module chose
+# neither. The four names are read for one purpose only, which is the refusal in
+# `scoped_column`: a board built on plain labels rather than scoped ones (ADR 0070).
+COLUMN_SCOPE = "status::"
+SCOPED_COLUMNS = ("to do", "in progress", "in review", "done")
 
 # The field that carries a work item's native parent link, which is one half of the
 # **Parent edge**. The `## Parent` line in the body is the other half, and the descent
@@ -202,6 +217,43 @@ def card_status(entry):
         name = (card.get(STATUS_FIELD) or {}).get("name") or ""
         if name:
             return name
+    return ""
+
+
+def scoped_column(labels):
+    """The board column one item's labels carry, or an empty string.
+
+    **This is the whole board read on the tracker that has no card** (ADR 0070). A column
+    there is a scoped label, `status::to do` and its siblings, and every label already
+    arrives with the item read the adapter makes for its **Work-state label**. So this reads
+    a fact the caller is holding: it runs no command, it has no page to fill, and it has no
+    page-limit refusal.
+
+    The answer is the label with `COLUMN_SCOPE` stripped, so a caller compares a column name
+    whichever tracker it read. A label outside that scope is not a column, and an item with
+    no label in the scope answers empty. Neither one is an error, the same as an item with no
+    card. The tracker keeps one label per scope, so the first match is the only one a
+    supported board holds.
+
+    **One case refuses rather than guesses: a board built on plain column labels.** A plain
+    label carries no scope, so the tracker swaps nothing and two column labels can sit on one
+    item at once. No one of them is then the column. The message names the prefix it expected,
+    and the caller reports the board as unreadable.
+    """
+    for name in labels or []:
+        if name.startswith(COLUMN_SCOPE):
+            column = name[len(COLUMN_SCOPE) :].strip()
+            if column:
+                return column
+    for name in labels or []:
+        if name.strip().lower() in SCOPED_COLUMNS:
+            raise TrackerError(
+                f"the label {name!r} is a column name outside {COLUMN_SCOPE!r}, so this "
+                f"board is not scoped: it is built on plain column labels. A plain label "
+                f"carries no scope, so two column labels can sit on one item at once and "
+                f"neither one is the column. Name the columns {COLUMN_SCOPE}<column>, or "
+                f"name no board in docs/agents/issue-tracker.md"
+            )
     return ""
 
 
@@ -525,9 +577,10 @@ class Tracker:
         other item. So the read is bounded by the work a maintainer approved rather than by
         the size of a board, and the tick lists no board at all.
 
-        The record is the `item_record` shape plus a `board` key, which is the `Status` name
-        on that item's own card. A tracker with no project board answers an empty string
-        there, because the field the card rides is one tracker's own surface.
+        The record is the `item_record` shape plus a `board` key, which is that item's own
+        column. On one tracker it is the `Status` name on the item's card, and on the other it
+        is the scoped label the labels already carry (ADR 0070). An item with no column
+        answers an empty string either way.
 
         The order is by number, the same as `open_items`, so a caller that reads both sees
         one order.
@@ -549,9 +602,10 @@ class Tracker:
                 and label in label_names(record.get("labels"))
             ]
         elif self.cli == GLAB:
-            # No project board on this tracker, so the card is an empty string and the
-            # read asks for no field of one. No parent link either, so the native half of
-            # the **Parent edge** is 0 (ADR 0065).
+            # No card on this tracker, so the column is a scoped label and the read asks
+            # for no field of one. It arrives with the labels this read already carries, so
+            # the column costs no second command (ADR 0070). No parent link either, so the
+            # native half of the **Parent edge** is 0 (ADR 0065).
             found = [
                 {
                     **item_record(
@@ -560,7 +614,7 @@ class Tracker:
                         entry.get("labels"),
                         entry.get("description"),
                     ),
-                    "board": "",
+                    "board": scoped_column(label_names(entry.get("labels"))),
                 }
                 for entry in check_page(
                     read_json(self._glab_list_argv(label), "[]") or [],
@@ -595,11 +649,14 @@ class Tracker:
         named, and that item can wear no label at all. So its card cannot arrive through a
         labelled set, and a whole-board list to answer one card is the read ADR 0064
         removed.
+
+        **On the other tracker the column is a scoped label, so the same one item read
+        answers it** (ADR 0070). `issue` is that read, and it already asks for every label.
         """
         if self.fixture is not None:
             return str(self._item(item).get("board") or "")
         if self.cli == GLAB:
-            return ""
+            return scoped_column(self.issue(item)["labels"])
         return card_status(
             read_json(
                 [

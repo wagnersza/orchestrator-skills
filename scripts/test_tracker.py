@@ -806,8 +806,9 @@ class TrackerTest(unittest.TestCase):
         self.assertIn("Raise ITEM_LIMIT", str(raised.exception))
 
     def test_a_labelled_read_on_the_other_tracker_asks_for_no_card(self):
-        """A project board is one tracker's own surface. So the other tracker's read goes
-        through its API with a label filter, and every card reads as an empty name."""
+        """A card is one tracker's own surface. So the other tracker's read goes through its
+        API with a label filter, and it asks for no card field at all. An item with no label
+        in the column scope has no column, and that is never an error (ADR 0070)."""
         log = self.fake_cli(
             "glab",
             answer=json.dumps(
@@ -862,6 +863,110 @@ class TrackerTest(unittest.TestCase):
         path = self.write_fixture(items={str(ITEM): {"state": "OPEN"}})
 
         self.assertEqual(tracker.Tracker(fixture=path).board_cards("", ""), {})
+
+    # --- a column is a card on one tracker and a scoped label on the other (ADR 0070)
+
+    def glab(self):
+        """The adapter for the tracker whose column is a label."""
+        return tracker.Tracker(cli=tracker.GLAB, host=HOST, repo=REPO)
+
+    def test_a_scoped_label_answers_the_column_with_its_prefix_stripped(self):
+        """A caller compares a column name whichever tracker it read, so the scope comes
+        off. The read is the item read the adapter already makes: one command, no board
+        list, and no second call to answer the column."""
+        log = self.fake_cli(
+            "glab",
+            answer=json.dumps(
+                {"state": "opened", "labels": ["ready-for-agent", "status::to do"]}
+            ),
+        )
+
+        self.assertEqual(self.glab().item_card(ITEM), "to do")
+        self.assertEqual(
+            log.read_text().splitlines(),
+            [f"issue view {ITEM} -F json -R {HOST}/{REPO}"],
+        )
+
+    def test_a_label_outside_the_scope_is_not_a_column(self):
+        """Only a label under the configured scope is a column. Another scope is another
+        fact, and a plain work-state label is never a column."""
+        for labels in (["ready-for-agent", "priority::high"], ["in-progress"], []):
+            self.fake_cli(
+                "glab", answer=json.dumps({"state": "opened", "labels": labels})
+            )
+
+            self.assertEqual(self.glab().item_card(ITEM), "", labels)
+
+    def test_a_labelled_read_on_the_other_tracker_carries_each_item_s_column(self):
+        """The column rides the labels the set already answers, so a whole labelled set
+        costs the one call it cost before. An item with no column answers empty beside one
+        that has a column, and neither is an error."""
+        log = self.fake_cli(
+            "glab",
+            answer=json.dumps(
+                [
+                    {
+                        "iid": ITEM,
+                        "title": "a leaf in a column",
+                        "labels": ["ready-for-agent", "status::in progress"],
+                    },
+                    {
+                        "iid": 9,
+                        "title": "a leaf in no column",
+                        "labels": ["ready-for-agent"],
+                    },
+                ]
+            ),
+        )
+
+        found = self.glab().labelled_items("ready-for-agent")
+
+        # Lowest number first, the same order as every other list read here.
+        self.assertEqual([one["number"] for one in found], [9, ITEM])
+        self.assertEqual([one["board"] for one in found], ["", "in progress"])
+        self.assertEqual(len(log.read_text().splitlines()), 1)
+
+    def test_a_board_built_on_plain_column_labels_refuses_rather_than_guesses(self):
+        """A plain label carries no scope, so the tracker swaps nothing and two column
+        labels sit on one item at once. Neither one is the column, so the read refuses and
+        the caller reports the board as unreadable. The message names the prefix."""
+        self.fake_cli(
+            "glab",
+            answer=json.dumps({"state": "opened", "labels": ["To Do", "In progress"]}),
+        )
+
+        with self.assertRaises(tracker.TrackerError) as raised:
+            self.glab().item_card(ITEM)
+
+        message = str(raised.exception)
+        self.assertIn("not scoped", message)
+        self.assertIn(tracker.COLUMN_SCOPE, message)
+        self.assertIn("'To Do'", message)
+
+    def test_a_scoped_label_wins_over_a_plain_one_so_a_scoped_board_never_refuses(self):
+        """A maintainer who converts a board can leave the old plain label behind. The
+        scoped label is the column, so that leftover costs nothing."""
+        self.fake_cli(
+            "glab",
+            answer=json.dumps(
+                {"state": "opened", "labels": ["Done", "status::in review"]}
+            ),
+        )
+
+        self.assertEqual(self.glab().item_card(ITEM), "in review")
+
+    def test_a_repo_with_no_board_runs_on_the_label_alone_on_both_trackers(self):
+        """A tracker file that names no board is a supported configuration on either
+        tracker. One answers an item with no card, the other an item with no label in the
+        scope, and neither absence raises."""
+        self.fake_cli("gh", answer=json.dumps({"projectItems": []}))
+        self.assertEqual(tracker.Tracker(repo=REPO).item_card(ITEM), "")
+
+        self.fake_cli(
+            "glab",
+            answer=json.dumps({"state": "opened", "labels": ["ready-for-agent"]}),
+        )
+        self.assertEqual(self.glab().item_card(ITEM), "")
 
     # --- both halves of the Parent edge ride one record (ADR 0065)
 
