@@ -211,6 +211,10 @@ here, a reader compares it to the `Status` name the board answers, and a renamed
 one edit in this file. Rationale:
 [`orchestrator/docs/adr/0067-the-board-is-a-mirror-at-three-moments.md`](../../orchestrator/docs/adr/0067-the-board-is-a-mirror-at-three-moments.md).
 
+**A repo on GitLab has a board too, and a column is a label there rather than a card.** Its
+coordinates are their own table, and the rest of this section holds for both trackers. See
+[The GitLab board](#the-gitlab-board).
+
 **`Backlog`, `Ready` and the start column are the maintainer's own lanes, and nothing
 writes one.** The three writes above and the one read never touch the same column, so a card
 the loop wrote and the maintainer drags back stays where they put it.
@@ -278,6 +282,42 @@ moves, and none of them is a repair pass. A take-back is the maintainer removing
 **A repo with no board leaves this section out entirely.** The board read then asks
 nothing, no card write is even attempted, the `ready-for-agent` label alone is the whole
 gate, and that absence is never an error.
+
+### The GitLab board
+
+**On GitLab a column is a scoped label on the issue, and there is no card.** A scoped label
+is a label whose name carries a scope and a value, `status::to do`. GitLab keeps one label
+per scope on an item, so a column move is one label write and the old value comes off
+without being named. Rationale:
+[`orchestrator/docs/adr/0070-a-board-column-is-a-card-or-a-scoped-label.md`](../../orchestrator/docs/adr/0070-a-board-column-is-a-card-or-a-scoped-label.md).
+
+The scope prefix, and the four column names:
+
+| What | Value |
+|------|-------|
+| Scope prefix | `status::` |
+| Start column | `status::to do`, which reads as `to do` |
+| In progress | `status::in progress` |
+| In review | `status::in review` |
+| Done | `status::done` |
+
+**GitLab needs no project number and no owner.** Those two coordinates address a Projects v2
+board, and GitLab has no such object. So a column name is the whole coordinate here, because
+the label is the column. A renamed column is one edit in this table, the same as it is on the
+other tracker.
+
+**The read costs no call of its own.** Every label on an item arrives with the item read the
+adapter already makes, and the column is one of those labels. So there is no board list, no
+page to fill and no page-limit refusal. `scoped_column` in `scripts/tracker.py` is that
+filter, and it answers the label with the prefix stripped.
+
+**A board built on plain column labels reads as unreadable.** A plain label carries no
+scope, so GitLab swaps nothing and two column labels can sit on one item at once. Neither
+one is then the column. The adapter refuses, the message names the prefix it expected, and
+the item stays where it is. Scope the column labels, or name no board at all.
+
+**Only the read is built.** The three write moments of this section are the GitHub half
+today. ADR 0070 covers the column read, and the GitLab column write is a change of its own.
 
 ## Pull requests as a triage surface
 
