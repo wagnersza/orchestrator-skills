@@ -1,0 +1,806 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Layer 5 story gate — #201 the deletions, and 1.0.0</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script>mermaid.initialize({startOnLoad: true, theme: "neutral"});</script>
+<style>
+  .sketch { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.78rem; line-height: 1.5; white-space: pre; }
+</style>
+</head>
+<body class="bg-slate-50 text-slate-800">
+
+<header class="bg-slate-900 text-slate-100">
+  <div class="max-w-5xl mx-auto px-6 py-10">
+    <p class="text-xs uppercase tracking-widest text-slate-400">Layer 5 story gate — advisory, it stops nothing</p>
+    <h1 class="text-3xl font-semibold mt-2">The deletions: the skill body becomes a dispatcher, and 1.0.0 ships</h1>
+    <p class="mt-3 text-slate-300">
+      User story
+      <a class="underline" href="https://github.com/wagnersza/orchestrator-skills/issues/201">#201</a>,
+      children
+      <a class="underline" href="https://github.com/wagnersza/orchestrator-skills/issues/205">#205</a>,
+      <a class="underline" href="https://github.com/wagnersza/orchestrator-skills/issues/88">#88</a>,
+      <a class="underline" href="https://github.com/wagnersza/orchestrator-skills/issues/206">#206</a>
+      and
+      <a class="underline" href="https://github.com/wagnersza/orchestrator-skills/issues/207">#207</a>.
+    </p>
+    <dl class="mt-6 grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm">
+      <div><dt class="text-slate-400">Commit read</dt><dd class="font-mono">569da75</dd></div>
+      <div><dt class="text-slate-400">Version on main</dt><dd class="font-mono">1.0.0</dd></div>
+      <div><dt class="text-slate-400">Candidates</dt><dd>7, of which 5 <span class="font-semibold">Strong</span></dd></div>
+      <div><dt class="text-slate-400">Speculative</dt><dd>0, so nothing was dropped</dd></div>
+    </dl>
+  </div>
+</header>
+
+<main class="max-w-5xl mx-auto px-6 py-10 space-y-10">
+
+<!-- ═══════════ THE OVERALL READ ═══════════ -->
+<section class="bg-white rounded-xl border border-slate-200 p-6 space-y-3">
+  <h2 class="text-xl font-semibold">The overall read</h2>
+  <p>
+    <strong>The story did what it said.</strong>
+    <code class="bg-slate-100 px-1 rounded">orchestrator/SKILL.md</code> is 120 lines and it restates
+    no rule. <code class="bg-slate-100 px-1 rounded">hooks/refuse.py</code> is the best-shaped file
+    in the repo: one function, <code class="bg-slate-100 px-1 rounded">denial(root, command)</code>,
+    returns a reason or an empty string, with three independent predicates behind it and 36 tests
+    against that one call. <code class="bg-slate-100 px-1 rounded">scripts/merge_train.py</code> is
+    200 lines of code that emit one JSON plan and mutate nothing. Those three are deep modules and
+    this report proposes no change to any of them.
+  </p>
+  <p>
+    <strong>The friction the story left is at the edges, not in the seams.</strong> Four of the seven
+    candidates are about things that moved and left no forwarding address: an ADR that was reversed
+    but does not say so, a dispatcher row that dead-ends, a feature with no caller, and a rule
+    written five times. Two are about files that grew past one idea. None of them is a bug.
+  </p>
+  <div class="rounded-lg border border-amber-300 bg-amber-50 p-4">
+    <p class="text-sm text-amber-900"><strong>The one measurement that explains most of this report.</strong>
+      <code class="bg-white px-1 rounded">scripts/worker_state.py</code> is 2794 lines, and its module
+      docstring runs from line 2 to line 466. A reader gets 465 lines of prose about process checks
+      before the first statement, and the queue algorithm they came for starts at line 1663.</p>
+  </div>
+</section>
+
+<!-- ═══════════ MEASUREMENTS ═══════════ -->
+<section class="bg-white rounded-xl border border-slate-200 p-6">
+  <h2 class="text-xl font-semibold">Measured, not estimated</h2>
+  <div class="mt-4 overflow-x-auto">
+    <table class="w-full text-sm">
+      <thead class="text-left text-slate-500 border-b border-slate-200">
+        <tr><th class="py-2 pr-4">File</th><th class="py-2 pr-4">Lines</th><th class="py-2 pr-4">Docstring</th><th class="py-2 pr-4">Code</th><th class="py-2">Tests</th></tr>
+      </thead>
+      <tbody class="font-mono">
+        <tr class="border-b border-slate-100 bg-rose-50"><td class="py-2 pr-4">scripts/worker_state.py</td><td class="py-2 pr-4">2794</td><td class="py-2 pr-4">1048 · 37%</td><td class="py-2 pr-4">~1157</td><td class="py-2">3627 · 140</td></tr>
+        <tr class="border-b border-slate-100"><td class="py-2 pr-4">scripts/tracker.py</td><td class="py-2 pr-4">1136</td><td class="py-2 pr-4">424 · 37%</td><td class="py-2 pr-4">~515</td><td class="py-2">1055 · 49</td></tr>
+        <tr class="border-b border-slate-100"><td class="py-2 pr-4">scripts/close_item.py</td><td class="py-2 pr-4">1072</td><td class="py-2 pr-4">222 · 20%</td><td class="py-2 pr-4">~671</td><td class="py-2">975 · 39</td></tr>
+        <tr class="border-b border-slate-100"><td class="py-2 pr-4">scripts/spawn_item.py</td><td class="py-2 pr-4">857</td><td class="py-2 pr-4">145 · 16%</td><td class="py-2 pr-4">~574</td><td class="py-2">509 · 19</td></tr>
+        <tr class="border-b border-slate-100 bg-emerald-50"><td class="py-2 pr-4">scripts/merge_train.py</td><td class="py-2 pr-4">451</td><td class="py-2 pr-4">149 · 33%</td><td class="py-2 pr-4">~200</td><td class="py-2">389 · 15</td></tr>
+        <tr class="border-b border-slate-100 bg-emerald-50"><td class="py-2 pr-4">hooks/refuse.py</td><td class="py-2 pr-4">441</td><td class="py-2 pr-4">120 · 27%</td><td class="py-2 pr-4">~217</td><td class="py-2">500 · 36</td></tr>
+        <tr class="border-b border-slate-100"><td class="py-2 pr-4">hooks/context.py</td><td class="py-2 pr-4">254</td><td class="py-2 pr-4">67 · 26%</td><td class="py-2 pr-4">~134</td><td class="py-2">365</td></tr>
+        <tr><td class="py-2 pr-4">hooks/record.py</td><td class="py-2 pr-4">207</td><td class="py-2 pr-4">71 · 34%</td><td class="py-2 pr-4">~83</td><td class="py-2">303 · 15</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="mt-4 text-sm text-slate-600">
+    Green rows are the deep modules. The red row is candidate 1.
+    <code class="bg-slate-100 px-1 rounded">orchestrator/SKILL.md</code> is 120 lines,
+    <code class="bg-slate-100 px-1 rounded">orchestrator/CONTEXT.md</code> is 612, the 21 reference
+    files hold 3336 lines between them, and there are 62 ADR files with 0069 as the highest number
+    and 7 numbers unused.
+  </p>
+  <p class="mt-3 text-sm text-slate-600">
+    <strong>Reachability from the dispatcher.</strong> Following links transitively from
+    <code class="bg-slate-100 px-1 rounded">orchestrator/SKILL.md</code> reaches 13 of the 21
+    reference files. Four of the eight misses are reached through a filled-in pattern such as
+    <code class="bg-slate-100 px-1 rounded">references/harnesses/&lt;h&gt;.md</code>, which is fine.
+    Two are not reachable at all and are the subject of candidate 5.
+  </p>
+</section>
+
+<!-- ═══════════ CANDIDATE 1 ═══════════ -->
+<section class="bg-white rounded-xl border-2 border-rose-300 p-6 space-y-4">
+  <div class="flex items-start justify-between gap-4">
+    <h2 class="text-xl font-semibold">1 · <code class="bg-slate-100 px-1 rounded">worker_state.py</code> is two modules sharing one file</h2>
+    <span class="shrink-0 rounded-full bg-rose-600 text-white text-xs font-semibold px-3 py-1">Strong</span>
+  </div>
+  <p class="text-sm text-slate-500 font-mono">scripts/worker_state.py · scripts/test_worker_state.py</p>
+
+  <div>
+    <h3 class="font-semibold text-slate-700">The problem</h3>
+    <p class="mt-1">The file holds two concerns that share almost nothing.</p>
+    <ul class="mt-2 ml-5 list-disc space-y-1 text-sm">
+      <li><strong>The watch.</strong> The process check, the completion signal, the gate record, the
+        stall, the <strong>Position</strong> and the transition writer. Eighteen filesystem and
+        <code class="bg-slate-100 px-1 rounded">subprocess</code> touches.</li>
+      <li><strong>The queue and the start gate.</strong> The start gate and the whole tracker-graph
+        walk, from <code class="bg-slate-100 px-1 rounded">parent_edges</code> to
+        <code class="bg-slate-100 px-1 rounded">queue_plan</code>, plus the board report. This half
+        touches the filesystem <strong>exactly once</strong>, to fire the spawn command. It is
+        otherwise a pure graph algorithm over one tracker read.</li>
+    </ul>
+    <p class="mt-2">The proof the file has no internal order: the <strong>Touch set</strong> block sits
+      in the middle of the watch region, and its only callers are 1200 lines away in the queue half.
+      <code class="bg-slate-100 px-1 rounded">claim</code> sits among the transition writers and has
+      one caller, the spawn. <code class="bg-slate-100 px-1 rounded">main()</code> is 365 lines with
+      23 argument definitions behind six subparsers, so touching one subcommand's flags means reading
+      all six.</p>
+  </div>
+
+  <div>
+    <h3 class="font-semibold text-slate-700">The solution</h3>
+    <p class="mt-1">Split the file at the banner that already divides it. One module keeps the watch
+      and its three subcommands. A second keeps the queue, the start gate and its three subcommands.
+      Move the <strong>Touch set</strong> block and <code class="bg-slate-100 px-1 rounded">claim</code>
+      to the queue module, where their only callers live. The two share the tracker adapter, the
+      duration parser and the argument helpers, and nothing else.</p>
+  </div>
+
+  <div>
+    <h3 class="font-semibold text-slate-700">The benefit</h3>
+    <p class="mt-1"><strong>Locality:</strong> a queue change touches one file with no process-check
+      vocabulary in it, and a stall change touches one file with no story-tree vocabulary in it.
+      <strong>Leverage:</strong> the queue half becomes a pure function of one tracker read, so its
+      tests need no worktree fixture, no fake git repo and no fake agent process. Today they carry
+      all three because they share one suite. About 60 tree-walk tests become fast unit tests over a
+      fixture list. Each <code class="bg-slate-100 px-1 rounded">--help</code> stops carrying the
+      other half's contract.</p>
+  </div>
+
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="rounded-lg border border-slate-200 p-4">
+      <p class="text-xs uppercase tracking-wider text-slate-500 mb-2">Before</p>
+      <pre class="sketch">┌──────────── worker_state.py · 2794 ─────────────┐
+│  465-line docstring, six subcommands            │
+│                                                 │
+│  ready ─┐  phase ─┐  tick ─┐                    │
+│  start ─┤  queue ─┤  report┤   all six, one     │
+│         └─────────┴────────┘   main() of 365    │
+│                                                 │
+│  watch region .......... :490 – :1404           │
+│    ↑ Touch set block sits HERE at :634          │
+│    ↑ its callers are at :1896 and :2039         │
+│  queue region .......... :1491 – :2127          │
+└─────────────────────────────────────────────────┘
+        │                    │
+   filesystem, git      one tracker read
+   18 touches           1 filesystem touch
+
+  test_worker_state.py · 3627 lines · 140 tests
+  every test carries a worktree + git + process fixture</pre>
+    </div>
+    <div class="rounded-lg border border-emerald-300 bg-emerald-50/40 p-4">
+      <p class="text-xs uppercase tracking-wider text-emerald-700 mb-2">After</p>
+      <pre class="sketch">┌── worker_watch ──┐   ┌── worker_queue ──┐
+│  ~1500 lines     │   │  ~1300 lines     │
+│  ready           │   │  start           │
+│  phase           │   │  queue           │
+│  tick            │   │  report          │
+│                  │   │  + Touch set     │
+│                  │   │  + claim         │
+└────────┬─────────┘   └────────┬─────────┘
+         │                      │
+   filesystem, git         (pure graph walk)
+         │                      │
+         └────────┬─────────────┘
+                  ▼
+            tracker adapter
+
+  two suites: ~1500 slow, ~2100 fast
+  no edge between the two boxes</pre>
+    </div>
+  </div>
+
+  <div class="rounded-lg border border-sky-200 bg-sky-50 p-4">
+    <p class="text-sm text-sky-900"><strong>ADR check: no contradiction.</strong> ADR 0018 calls the
+      watch a stateless seam and ADR 0022 narrows it to a per-tick predicate. A split honours both,
+      because the queue half was never part of the watch. ADR 0064 put these six subcommands in one
+      file, but it chose a reading strategy and not a file boundary.</p>
+  </div>
+</section>
+
+<!-- ═══════════ CANDIDATE 2 ═══════════ -->
+<section class="bg-white rounded-xl border-2 border-rose-300 p-6 space-y-4">
+  <div class="flex items-start justify-between gap-4">
+    <h2 class="text-xl font-semibold">2 · The ADR ledger misses 12 forward pointers, and every one is from this wave</h2>
+    <span class="shrink-0 rounded-full bg-rose-600 text-white text-xs font-semibold px-3 py-1">Strong</span>
+  </div>
+  <p class="text-sm text-slate-500 font-mono">orchestrator/docs/adr/ — 0003, 0005, 0015, 0033, 0037, 0045, 0046, 0053, 0054, 0064</p>
+
+  <div>
+    <h3 class="font-semibold text-slate-700">The problem</h3>
+    <p class="mt-1">#207 added the superseded pointer to nine ADRs and missed the newest edges.
+      Fourteen supersede relations are asserted by a newer ADR or by
+      <code class="bg-slate-100 px-1 rounded">CONTEXT.md</code>. Twelve have no pointer on the older
+      file:</p>
+    <pre class="sketch mt-2 bg-slate-50 rounded p-3">0003 → 0066   never mentions it   adversarial review is a verb now
+0005 → 0059   never mentions it   default-heavy reversed to default-medium
+0015 → 0057   never mentions it   close lost steps 1 to 3
+0033 → 0047
+0037 → 0057   never mentions it   no tick calls a train
+0037 → 0066
+0045 → 0062, 0068
+0046 → 0057
+0053 → 0068
+0054 → 0067   never mentions it   board reversed from input to mirror
+0064 → 0067</pre>
+    <p class="mt-2"><strong>ADR 0054 opens with its own title and no warning, and ADR 0067 reversed it
+      three commits ago.</strong> A reader who opens 0054 or 0005 reads a retired decision as current
+      policy. <code class="bg-slate-100 px-1 rounded">CLAUDE.md</code> requires a new ADR for a
+      reversal, and the new ADR exists every time. The old one never points forward, so half the
+      invariant holds. There is also no index: nothing in the repo links ADR 0001, so the only way to
+      find a chain is to grep. Seven numbers are unused and nothing records which are void.</p>
+  </div>
+
+  <div>
+    <h3 class="font-semibold text-slate-700">The solution</h3>
+    <p class="mt-1">Complete the pattern ADR 0028 set: one line under the title of each of those ten
+      files, naming the ADR that narrowed or reversed it and what survives. Add one index page listing
+      every ADR by number with its subject and its superseded-by edge, and note the void numbers
+      there. Then add a test to <code class="bg-slate-100 px-1 rounded">scripts/test_links.py</code>
+      that fails when ADR X claims to narrow ADR Y and Y carries no pointer back.</p>
+  </div>
+
+  <div>
+    <h3 class="font-semibold text-slate-700">The benefit</h3>
+    <p class="mt-1"><strong>Locality:</strong> "this decision is retired" lands on the file a reader
+      opens, instead of being discoverable only from the file that retired it.
+      <strong>Leverage:</strong> the test makes the invariant mechanical, so it cannot rot again.
+      Today the invariant is prose in <code class="bg-slate-100 px-1 rounded">CLAUDE.md</code> with
+      nothing enforcing it, which is why one wave broke it twelve times. The suite goes from "every
+      link resolves" to "every supersede claim is reciprocal".</p>
+  </div>
+
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="rounded-lg border border-slate-200 p-4">
+      <p class="text-xs uppercase tracking-wider text-slate-500 mb-2">Before — one-way edges</p>
+      <div class="mermaid">graph LR
+  A0067["0067 board is a mirror"] -->|reverses| A0054["0054 board is an input"]
+  A0068["0068 flow writes the label"] -->|narrows| A0053["0053 one label family"]
+  A0057["0057 merge is act two"] -->|narrows| A0015["0015 close is a transaction"]
+  A0054 -.->|"no pointer"| X(( ))
+  A0053 -.->|"no pointer"| Y(( ))
+  A0015 -.->|"no pointer"| Z(( ))
+  style A0054 fill:#fecaca
+  style A0053 fill:#fecaca
+  style A0015 fill:#fecaca
+  style X fill:none,stroke:none
+  style Y fill:none,stroke:none
+  style Z fill:none,stroke:none</div>
+    </div>
+    <div class="rounded-lg border border-emerald-300 bg-emerald-50/40 p-4">
+      <p class="text-xs uppercase tracking-wider text-emerald-700 mb-2">After — both ways, plus an index</p>
+      <div class="mermaid">graph LR
+  IDX["index.md<br/>62 ADRs, 7 void numbers"]
+  IDX --> A0054["0054 board is an input"]
+  IDX --> A0067["0067 board is a mirror"]
+  A0067 -->|reverses| A0054
+  A0054 -->|superseded by| A0067
+  TEST["test_links.py<br/>every edge reciprocal"] -.-> A0054
+  TEST -.-> A0067
+  style A0054 fill:#bbf7d0
+  style A0067 fill:#bbf7d0
+  style TEST fill:#e0f2fe</div>
+    </div>
+  </div>
+
+  <div class="rounded-lg border border-sky-200 bg-sky-50 p-4">
+    <p class="text-sm text-sky-900"><strong>ADR check: no contradiction.</strong> This enforces
+      <code class="bg-white px-1 rounded">CLAUDE.md</code>'s own rule rather than changing it.</p>
+  </div>
+</section>
+
+<!-- ═══════════ CANDIDATE 3 ═══════════ -->
+<section class="bg-white rounded-xl border-2 border-rose-300 p-6 space-y-4">
+  <div class="flex items-start justify-between gap-4">
+    <h2 class="text-xl font-semibold">3 · Two unreachable features: the abandon path, and the parent-link command</h2>
+    <span class="shrink-0 rounded-full bg-rose-600 text-white text-xs font-semibold px-3 py-1">Strong</span>
+  </div>
+  <p class="text-sm text-slate-500 font-mono">scripts/close_item.py · scripts/tracker.py · their two test files</p>
+
+  <div>
+    <h3 class="font-semibold text-slate-700">The problem</h3>
+    <p class="mt-1"><code class="bg-slate-100 px-1 rounded">--abandon</code> is a complete second path
+      through the close seam: its own plan builder, two exit codes of its own, 60 lines of module
+      docstring, 42 mentions in the seam and ten tests. <strong>Nothing invokes it.</strong> No seam,
+      no reference file, no ADR, no <code class="bg-slate-100 px-1 rounded">CONTEXT.md</code> term. The
+      case it exists for is live — the spawn refuses at the readiness gate — but that refusal returns
+      an exit code and nothing then abandons the worktree. So by the repo's own rule that every claim
+      traces to a reference file or an ADR, it has no home.</p>
+    <p class="mt-2">The parent-link command in the tracker adapter is the same shape, smaller: zero
+      production callers, five test call sites. <strong>ADR 0065 asserts that one command writes both
+      representations of the parent edge, so it cannot write only one.</strong> Nothing calls that
+      command, so a session writes the two by hand and the guarantee the ADR claims does not hold.</p>
+    <p class="mt-2">The friction: about 200 of the close seam's 1072 lines serve a path no flow
+      reaches, so every reader of the close transaction reads the abandon branch to learn it is not
+      theirs. The seam's <code class="bg-slate-100 px-1 rounded">build</code> function branches on an
+      attribute that may not exist, purely so the dead path cannot break the live one.</p>
+  </div>
+
+  <div>
+    <h3 class="font-semibold text-slate-700">The solution</h3>
+    <p class="mt-1">Pick one per feature. For the abandon path: wire it to the readiness-gate refusal
+      the docstring names, and give it a term plus an ADR — or delete the path, its two exit codes,
+      its ten tests and its docstring. <strong>No flow has asked for it in the two waves since it
+      landed, so delete is the likelier right answer</strong>, and a later item can re-add it with a
+      caller attached. For the parent-link command: have the item-writing flow call it, which is what
+      ADR 0065 assumes, or delete it and amend that ADR, because its claim is currently false.</p>
+  </div>
+
+  <div>
+    <h3 class="font-semibold text-slate-700">The benefit</h3>
+    <p class="mt-1"><strong>Locality:</strong> the close seam drops to about 870 lines that all
+      describe one transaction, and the defensive branch disappears with the coupling it encodes.
+      <strong>Leverage:</strong> the exit-code table shrinks from seven meanings to five, so a caller
+      reads only codes it can receive. <strong>Tests improve by subtraction:</strong> ten tests and
+      five argv assertions stop pinning behaviour nobody can trigger. This is the clearest case of
+      tests asserting implementation in the repo — two of them assert the exact argument list of a
+      command with no caller.</p>
+  </div>
+
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="rounded-lg border border-slate-200 p-4">
+      <p class="text-xs uppercase tracking-wider text-slate-500 mb-2">Before</p>
+      <pre class="sketch">        ┌──── close_item.py · 1072 ────┐
+tick ──►│ close  ──► plan ──► 5 steps   │
+        │                               │
+  ??? ──►│ abandon ──► plan ──► 3 steps  │ ◄── no tail
+        │ exit codes: 7                 │
+        │ build() branches on getattr   │
+        └───────────────────────────────┘
+
+        ┌──── tracker.py ──────────────┐
+        │ 18 public methods            │
+        │   parent_link_argv  ◄── no   │
+        │                     inbound  │
+        └──────────────────────────────┘
+  ADR 0065 claims a guarantee nothing enforces</pre>
+    </div>
+    <div class="rounded-lg border border-emerald-300 bg-emerald-50/40 p-4">
+      <p class="text-xs uppercase tracking-wider text-emerald-700 mb-2">After — the delete reading</p>
+      <pre class="sketch">        ┌──── close_item.py · ~870 ────┐
+tick ──►│ close  ──► plan ──► 5 steps   │
+        │ exit codes: 5                 │
+        │ build() takes args plainly    │
+        └───────────────────────────────┘
+
+        ┌──── tracker.py ──────────────┐
+        │ 17 public methods            │
+        │ every one reachable          │
+        └──────────────────────────────┘
+  or 18, with a new edge in from the
+  item-writing flow, decided on purpose</pre>
+    </div>
+  </div>
+
+  <div class="rounded-lg border border-amber-300 bg-amber-50 p-4">
+    <p class="text-sm text-amber-900"><strong>Contradicts ADR 0065 — and it is worth reopening.</strong>
+      That ADR states the single-command guarantee as a design property. The guarantee is not in
+      force: with no caller, the two representations are written separately today, which is exactly
+      the failure ADR 0065 says the single command prevents. Either the code or the ADR is wrong, and
+      a new ADR narrowing 0065 is this repo's own prescribed move.</p>
+  </div>
+</section>
+
+<!-- ═══════════ CANDIDATE 4 ═══════════ -->
+<section class="bg-white rounded-xl border-2 border-rose-300 p-6 space-y-4">
+  <div class="flex items-start justify-between gap-4">
+    <h2 class="text-xl font-semibold">4 · The hook plane has no shared reader, so two file formats have four parsers</h2>
+    <span class="shrink-0 rounded-full bg-rose-600 text-white text-xs font-semibold px-3 py-1">Strong</span>
+  </div>
+  <p class="text-sm text-slate-500 font-mono">hooks/refuse.py · hooks/record.py · hooks/context.py · scripts/worker_state.py</p>
+
+  <div>
+    <h3 class="font-semibold text-slate-700">The problem</h3>
+    <p class="mt-1">Three readers are byte-identical across all three hooks: the project directory,
+      whether the repo is orchestrated, and the item number. Beyond that:</p>
+    <ul class="mt-2 ml-5 list-disc space-y-1 text-sm">
+      <li>The <code class="bg-slate-100 px-1 rounded">gates:</code> block of the config is parsed
+        twice, with the same 20-line block walk and the same regular expression declared in two
+        files.</li>
+      <li>The work-state label table is parsed twice. The two copies differ by one docstring sentence
+        and one inverted condition.</li>
+      <li><code class="bg-slate-100 px-1 rounded">head_sha</code> is implemented <strong>four
+        times</strong>, and two of them disagree on the failure value. That is a live inconsistency,
+        not only duplication.</li>
+      <li>The <strong>Gate record</strong> format has three independent implementations across two
+        directories: one writer and two readers that disagree on whether to keep every run or only
+        the newest per command. The staleness rule is written twice, each with its own copy of the
+        seven-character prefix constant.</li>
+    </ul>
+    <p class="mt-2">One of the two readers even documents the coupling in prose, pointing at the other
+      copy. <strong>A comment that points at a second copy is the repo telling you where the seam
+      should be.</strong> Adding a key to the gate record line, or a fourth layer, means finding four
+      files across two directories. A change that updates three of four ships a hook that denies a
+      push the tick would have passed.</p>
+  </div>
+
+  <div>
+    <h3 class="font-semibold text-slate-700">The solution</h3>
+    <p class="mt-1">One small module holds what a hook needs to know about a repo: the project root,
+      whether the repo is orchestrated, the item this worktree implements, the gate commands, the
+      work-state labels, and <code class="bg-slate-100 px-1 rounded">HEAD</code>. All three hooks
+      import it. A second small module owns the <strong>Gate record</strong>: the write, the read, the
+      malformed-line rule and the at-<code class="bg-slate-100 px-1 rounded">HEAD</code> test, with
+      one prefix constant. The push denial and the unproven-gates outcome both call it and keep their
+      own message wording, which is the part that legitimately differs. Resolve the
+      <code class="bg-slate-100 px-1 rounded">head_sha</code> disagreement while there.</p>
+  </div>
+
+  <div>
+    <h3 class="font-semibold text-slate-700">The benefit</h3>
+    <p class="mt-1"><strong>Locality:</strong> the gate record format gets one home in code to match
+      the one home it already has in prose. <strong>Leverage:</strong> adding a layer becomes one
+      edit, and the four-way <code class="bg-slate-100 px-1 rounded">head_sha</code> split becomes one
+      function with one documented failure value. <strong>Tests:</strong> today the malformed-line
+      rule is tested twice against two implementations that can drift. After, one suite of about a
+      dozen cases covers the format and both callers inherit it, and the hook suites shrink to the
+      three denials and the one append, which is what they are actually about.</p>
+    <p class="mt-2 text-sm"><strong>The deletion test says deepen.</strong> Deleting any one hook
+      concentrates nothing, because the duplication stays. Deleting the duplicated set and giving it
+      one home concentrates two file formats in one place each.</p>
+  </div>
+
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="rounded-lg border border-slate-200 p-4">
+      <p class="text-xs uppercase tracking-wider text-slate-500 mb-2">Before — six duplicated edges</p>
+      <div class="mermaid">graph TD
+  R["hooks/refuse.py"] --> CFG["orchestrator.md<br/>gates: block"]
+  R --> TRK["issue-tracker.md<br/>label table"]
+  R --> GIT["git HEAD"]
+  R --> REC[".orchestrator/gates-N.jsonl"]
+  D["hooks/record.py"] --> CFG
+  D --> GIT
+  D --> REC
+  C["hooks/context.py"] --> TRK
+  C --> GIT
+  W["scripts/worker_state.py"] --> GIT
+  W --> REC
+  style R fill:#fecaca
+  style D fill:#fecaca
+  style C fill:#fecaca
+  style W fill:#fecaca</div>
+    </div>
+    <div class="rounded-lg border border-emerald-300 bg-emerald-50/40 p-4">
+      <p class="text-xs uppercase tracking-wider text-emerald-700 mb-2">After — one reader each</p>
+      <div class="mermaid">graph TD
+  R["hooks/refuse.py"] --> F["repo_facts"]
+  D["hooks/record.py"] --> F
+  C["hooks/context.py"] --> F
+  F --> CFG["orchestrator.md"]
+  F --> TRK["issue-tracker.md"]
+  F --> GIT["git HEAD"]
+  R --> GR["gate_record"]
+  D --> GR
+  W["scripts/worker_state.py"] --> GR
+  GR --> REC[".orchestrator/gates-N.jsonl"]
+  style F fill:#bbf7d0
+  style GR fill:#bbf7d0</div>
+    </div>
+  </div>
+
+  <div class="rounded-lg border border-sky-200 bg-sky-50 p-4">
+    <p class="text-sm text-sky-900"><strong>ADR check: no contradiction.</strong> ADR 0051 and ADR
+      0052 draw the hook plane boundary by <em>authority</em>, not by file count, and a shared reader
+      refuses nothing and performs nothing. ADR 0060 governs what the manifest names, and a helper
+      module is never named there.</p>
+  </div>
+</section>
+
+<!-- ═══════════ CANDIDATE 5 ═══════════ -->
+<section class="bg-white rounded-xl border-2 border-rose-300 p-6 space-y-4">
+  <div class="flex items-start justify-between gap-4">
+    <h2 class="text-xl font-semibold">5 · The dispatcher's merge-train row dead-ends, and two reference files fell off the graph</h2>
+    <span class="shrink-0 rounded-full bg-rose-600 text-white text-xs font-semibold px-3 py-1">Strong</span>
+  </div>
+  <p class="text-sm text-slate-500 font-mono">orchestrator/SKILL.md · references/reporting.md · references/examples/run.md · references/prompt.template.md</p>
+
+  <div>
+    <h3 class="font-semibold text-slate-700">The problem</h3>
+    <p class="mt-1">The dispatcher routes a merge-train ask to
+      <code class="bg-slate-100 px-1 rounded">references/reporting.md</code>. That file answers the
+      close question well, with a five-row table and the rule against running the close seam by hand.
+      <strong>It never mentions the merge-train seam.</strong> It carries one bullet on how to
+      <em>format</em> a train report and nothing on how to produce one. The seam appears in no
+      reference file at all: only in the glossary, four ADRs, and its own 117-line module docstring.</p>
+    <p class="mt-2">So a session asked to run a train follows the dispatcher to
+      <code class="bg-slate-100 px-1 rounded">reporting.md</code>, finds nothing runnable, and must
+      know to read the glossary's last sentence and then open a Python file. <strong>Four hops, where
+      hop two is a dead end.</strong> The old 1578-line body printed the invocation directly.</p>
+    <p class="mt-2">The same rewrite orphaned the end-to-end worked example. It has 12 inbound links
+      from the README, the glossary, the setup skill and three ADRs — and zero from the skill body,
+      transitively. A session that loads the dispatcher never learns the worked example exists. The
+      prompt template is in the same position, reachable only through the spawn seam, which is
+      defensible but worth stating on purpose rather than by accident.</p>
+  </div>
+
+  <div>
+    <h3 class="font-semibold text-slate-700">The solution</h3>
+    <p class="mt-1">Give the train what the close already has: a short section that names the seam
+      invocation, says the seam mutates nothing, states the park rule in one line, and points at the
+      module docstring for the ordering. Then the dispatcher's promise is kept at the first hop. Add
+      one line to the dispatcher pointing at the worked example, in the spawn section, because that is
+      the flow it walks. Add one line saying the prompt template is the spawn seam's input and not a
+      file a session reads.</p>
+  </div>
+
+  <div>
+    <h3 class="font-semibold text-slate-700">The benefit</h3>
+    <p class="mt-1"><strong>Locality:</strong> a named request in the dispatcher table reaches its
+      answer in one hop, which is the property that makes a dispatcher worth having.
+      <strong>Leverage:</strong> the train's contract stays in the seam docstring where ADR 0037 put
+      it, so this adds a pointer of three or four lines and not a second copy.
+      <strong>Tests:</strong> the link suite already walks every markdown file, so add the
+      reachability assertion — every row target in the dispatch table resolves to a file that names
+      the seam or flow the row promises. That turns "the dispatcher keeps its promises" from a review
+      finding into a gate.</p>
+  </div>
+
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="rounded-lg border border-slate-200 p-4">
+      <p class="text-xs uppercase tracking-wider text-slate-500 mb-2">Before — hop two is a dead end</p>
+      <div class="mermaid">graph LR
+  S["SKILL.md<br/>merge-train row"] --> RP["reporting.md"]
+  RP -.->|"no mention"| MT["merge_train.py"]
+  RP --> CTX["CONTEXT.md"]
+  CTX --> MT
+  EX["examples/run.md<br/>173 lines"]
+  RD["README.md"] --> EX
+  CTX --> EX
+  S -.->|"no link"| EX
+  style RP fill:#fecaca
+  style EX fill:#fef3c7</div>
+    </div>
+    <div class="rounded-lg border border-emerald-300 bg-emerald-50/40 p-4">
+      <p class="text-xs uppercase tracking-wider text-emerald-700 mb-2">After — one hop</p>
+      <div class="mermaid">graph LR
+  S["SKILL.md<br/>merge-train row"] --> RP["reporting.md<br/>+ train section"]
+  RP --> MT["merge_train.py<br/>module docstring"]
+  S --> EX["examples/run.md"]
+  T["test_links.py<br/>dispatch rows resolve"] -.-> S
+  style RP fill:#bbf7d0
+  style EX fill:#bbf7d0
+  style T fill:#e0f2fe</div>
+    </div>
+  </div>
+
+  <div class="rounded-lg border border-amber-300 bg-amber-50 p-4">
+    <p class="text-sm text-amber-900"><strong>Partial tension with ADR 0037 and ADR 0066.</strong> Both
+      moved the train's contract out of the skill body and into the seam docstring. Worth reopening
+      only to the extent of a pointer, not a restatement: the decision that the contract lives in one
+      home is right, and the gap is that no reader can find that home from the entry point.
+      <strong>A home nobody can reach is the same as no home.</strong></p>
+  </div>
+</section>
+
+<!-- ═══════════ CANDIDATE 6 ═══════════ -->
+<section class="bg-white rounded-xl border-2 border-amber-300 p-6 space-y-4">
+  <div class="flex items-start justify-between gap-4">
+    <h2 class="text-xl font-semibold">6 · One rule, five live copies: the start gate table, and a term it drifted on</h2>
+    <span class="shrink-0 rounded-full bg-amber-500 text-white text-xs font-semibold px-3 py-1">Worth exploring</span>
+  </div>
+  <p class="text-sm text-slate-500 font-mono">orchestrator/CONTEXT.md · references/tracker-reads.md · docs/agents/issue-tracker.md · scripts/worker_state.py (twice)</p>
+
+  <div>
+    <h3 class="font-semibold text-slate-700">The problem</h3>
+    <p class="mt-1">The three-row start gate table is stated verbatim in four live places outside the
+      ADRs, once more as a docstring inside the function that implements it, and once as a paraphrase
+      in the dispatcher. Two ADRs also carry it, which is correct — an ADR records a decision as it
+      was made and should not be edited.</p>
+    <p class="mt-2">The four live copies are the problem. ADR 0062 changed this table from two rows to
+      three, so a fourth row means finding five places. <strong>The repo's stated main failure mode is
+      a dangling cross-reference. A silently divergent restatement is the same failure with no link to
+      break, so nothing catches it.</strong></p>
+    <p class="mt-2">The glossary also lost a term. The queue subcommand's docstring calls itself the
+      body of a <strong>Repo automation</strong> tick, using the bold-term convention for a glossary
+      word. The glossary defines <strong>Item automation</strong> and nothing else in that family. The
+      repo-level schedule is real — it runs every minute — so either it needs a term, or the seam
+      should use one the glossary owns.</p>
+  </div>
+
+  <div>
+    <h3 class="font-semibold text-slate-700">The solution</h3>
+    <p class="mt-1">Pick one home and point the rest at it. The glossary's <strong>Ready queue</strong>
+      entry is the natural owner. The reference file and the two docstrings then carry a one-line
+      pointer instead of the table. The tracker config file is a different question: a reader there
+      genuinely needs the rule, so either keep that copy and mark it as the one deliberate mirror, or
+      have it point up too. Then add the term for the repo-level schedule, or change the docstring to
+      a term that exists.</p>
+  </div>
+
+  <div>
+    <h3 class="font-semibold text-slate-700">The benefit</h3>
+    <p class="mt-1"><strong>Locality:</strong> a fourth row lands in one file.
+      <strong>Leverage:</strong> modest but real. The link suite already walks every markdown file, so
+      a test that fails when one table appears under two headings outside the ADR directory makes this
+      class of drift mechanical. <strong>Tests improve by catching a restatement</strong>, which is
+      currently uncatchable.</p>
+  </div>
+
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="rounded-lg border border-slate-200 p-4">
+      <p class="text-xs uppercase tracking-wider text-slate-500 mb-2">Before — five drawings, no edges</p>
+      <pre class="sketch">CONTEXT.md ............ the table
+tracker-reads.md ...... the table
+issue-tracker.md ...... the table
+worker_state.py :40 ... the table
+worker_state.py :1503 . the table
+SKILL.md .............. a paraphrase
+
+  (+ two ADR copies, correctly frozen)
+
+  no link between any of them
+  ADR 0062 added row 3 → 5 edits needed</pre>
+    </div>
+    <div class="rounded-lg border border-emerald-300 bg-emerald-50/40 p-4">
+      <p class="text-xs uppercase tracking-wider text-emerald-700 mb-2">After — one drawing, four pointers</p>
+      <pre class="sketch">CONTEXT.md · Ready queue ◄── the one table
+     ▲     ▲     ▲     ▲
+     │     │     │     │
+ tracker  issue  :40  :1503
+ -reads   -tracker
+          (or a marked
+           deliberate mirror)
+
+  a fourth row → 1 edit
+  + one assertion in test_links.py</pre>
+    </div>
+  </div>
+
+  <div class="rounded-lg border border-sky-200 bg-sky-50 p-4">
+    <p class="text-sm text-sky-900"><strong>ADR check: no contradiction.</strong> ADR 0062 and ADR 0064
+      decide the gate's content, not where it is written down.</p>
+  </div>
+</section>
+
+<!-- ═══════════ CANDIDATE 7 ═══════════ -->
+<section class="bg-white rounded-xl border-2 border-amber-300 p-6 space-y-4">
+  <div class="flex items-start justify-between gap-4">
+    <h2 class="text-xl font-semibold">7 · The tracker adapter carries two interfaces over one concept</h2>
+    <span class="shrink-0 rounded-full bg-amber-500 text-white text-xs font-semibold px-3 py-1">Worth exploring</span>
+  </div>
+  <p class="text-sm text-slate-500 font-mono">scripts/tracker.py · scripts/test_tracker.py</p>
+
+  <div>
+    <h3 class="font-semibold text-slate-700">The problem</h3>
+    <p class="mt-1">The adapter exposes two parallel surfaces. One says "do the tracker operation". The
+      other says "hand me the argument list and I will run it". Production callers, counted outside the
+      module and its tests:</p>
+    <pre class="sketch mt-2 bg-slate-50 rounded p-3">close_argv          prod 0   test 10
+closing_note_argv   prod 0   test  3
+parent_link_argv    prod 0   test  3   ← candidate 3
+pr_read_argv        prod 1   test  2
+pr_for_branch_argv  prod 1   test  1
+label_argv          prod 2   test  4
+comment_argv        prod 3   test  4</pre>
+    <p class="mt-2">The first two are internals of the close writer. They are public purely because
+      the tests read them, <strong>which is the definition of a test asserting implementation rather
+      than behaviour</strong>. One test asserts a literal command list, where the behaviour under test
+      is "a close takes one command on one tracker and two in a fixed order on the other" — which the
+      close writer already expresses.</p>
+    <p class="mt-2">There is a second shape question. About 220 of the adapter's 515 code lines are
+      GitHub Projects GraphQL, and the card write opens by returning early on the other CLI.
+      <strong>One third of the adapter is single-implementation code sitting inside a genuinely
+      two-implementation adapter</strong>, which makes the interface read as if boards were
+      cross-tracker when they are not. The per-CLI branching elsewhere <em>is</em> a real adapter: about
+      20 branches with two live implementations and 37 assertions for the second CLI.</p>
+  </div>
+
+  <div>
+    <h3 class="font-semibold text-slate-700">The solution</h3>
+    <p class="mt-1">Make the argument-list surface private where it has no production caller, and let
+      the tests assert through the close writer, which is what ADR 0069 made the contract. Keep the
+      three that the close plan genuinely <em>prints</em> rather than runs, and say so in a docstring
+      sentence, because right now the two surfaces look like an accident. Separately, consider whether
+      the board block wants its own module behind one narrow entry, so the adapter's remaining surface
+      is the part both trackers implement.</p>
+  </div>
+
+  <div>
+    <h3 class="font-semibold text-slate-700">The benefit</h3>
+    <p class="mt-1"><strong>Locality:</strong> a reader sees one surface per concept, and one clearly
+      labelled second surface for plan printing, with the reason stated. <strong>Leverage:</strong> the
+      argument-list assertions collapse from thirteen call sites on two methods to a handful on the
+      close writer, so changing how a close is spelled on one tracker stops breaking tests that were
+      never about that spelling. <strong>Tests improve from pinning command strings to pinning the
+      ordering guarantee ADR 0069 actually promises.</strong></p>
+  </div>
+
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="rounded-lg border border-slate-200 p-4">
+      <p class="text-xs uppercase tracking-wider text-slate-500 mb-2">Before</p>
+      <pre class="sketch">┌─────── Tracker · 18 public ────────┐
+│ do-it family      argv family      │
+│ item_facts        close_argv   ◄─┐ │
+│ open_items        closing_note ◄─┤ │
+│ labelled_items    parent_link  ◄─┤ │
+│ close_writes ─────────┘          │ │
+│ card_write  ┐                    │ │
+│ board_cards ├ 220 lines, GH only │ │
+│ _card_ids   ┘                    │ │
+└──────────────────────────────────┼─┘
+                                   │
+            13 test assertions ────┘
+            on methods with 0 prod callers</pre>
+    </div>
+    <div class="rounded-lg border border-emerald-300 bg-emerald-50/40 p-4">
+      <p class="text-xs uppercase tracking-wider text-emerald-700 mb-2">After</p>
+      <pre class="sketch">┌─────── Tracker ────────────────────┐
+│ do-it family, public               │
+│ close_writes ◄── tests assert HERE │
+│                                    │
+│ printed-argv family, public and    │
+│ documented as plan output:         │
+│   pr_read_argv, label_argv,        │
+│   comment_argv                     │
+│                                    │
+│ _close_argv, _closing_note  private│
+└────────────┬───────────────────────┘
+             │ one narrow entry
+        ┌────▼──────────┐
+        │ board block   │ one tracker only,
+        └───────────────┘ said out loud</pre>
+    </div>
+  </div>
+
+  <div class="rounded-lg border border-sky-200 bg-sky-50 p-4">
+    <p class="text-sm text-sky-900"><strong>ADR check: no contradiction on the main half.</strong> ADR
+      0040 says the tracker is one adapter behind both seams, and ADR 0069 says the adapter orders a
+      multi-write close. Narrowing the public surface is what that contract implies. The board
+      extraction brushes ADR 0040's one-module framing, and it is worth reopening only if the board
+      grows a second tracker's implementation — so <strong>treat that half as the speculative
+      part</strong>.</p>
+  </div>
+</section>
+
+<!-- ═══════════ TOP RECOMMENDATION ═══════════ -->
+<section class="bg-slate-900 text-slate-100 rounded-xl p-6 space-y-4">
+  <h2 class="text-xl font-semibold">Top recommendation</h2>
+
+  <div class="overflow-x-auto">
+    <table class="w-full text-sm">
+      <thead class="text-left text-slate-400 border-b border-slate-700">
+        <tr><th class="py-2 pr-4">Rank</th><th class="py-2 pr-4">Candidate</th><th class="py-2 pr-4">Rating</th><th class="py-2">Why there</th></tr>
+      </thead>
+      <tbody>
+        <tr class="border-b border-slate-800"><td class="py-2 pr-4 font-mono">1</td><td class="py-2 pr-4">2 · the ADR ledger</td><td class="py-2 pr-4 text-rose-300">Strong</td><td class="py-2">cheapest, and it unblocks judging the rest</td></tr>
+        <tr class="border-b border-slate-800"><td class="py-2 pr-4 font-mono">2</td><td class="py-2 pr-4">1 · split the watch from the queue</td><td class="py-2 pr-4 text-rose-300">Strong</td><td class="py-2">highest leverage, and mechanical</td></tr>
+        <tr class="border-b border-slate-800"><td class="py-2 pr-4 font-mono">3</td><td class="py-2 pr-4">4 · one shared hook reader</td><td class="py-2 pr-4 text-rose-300">Strong</td><td class="py-2">easier after 1 shrinks the second copy's file</td></tr>
+        <tr class="border-b border-slate-800"><td class="py-2 pr-4 font-mono">4</td><td class="py-2 pr-4">3 · the two dead features</td><td class="py-2 pr-4 text-rose-300">Strong</td><td class="py-2">needs the ADR chain readable first</td></tr>
+        <tr class="border-b border-slate-800"><td class="py-2 pr-4 font-mono">5</td><td class="py-2 pr-4">5 · the dispatcher's dead-end row</td><td class="py-2 pr-4 text-rose-300">Strong</td><td class="py-2">small, and it makes the dispatcher honest</td></tr>
+        <tr class="border-b border-slate-800"><td class="py-2 pr-4 font-mono">6</td><td class="py-2 pr-4">6 · the rule in five places</td><td class="py-2 pr-4 text-amber-300">Worth exploring</td><td class="py-2">backlog</td></tr>
+        <tr><td class="py-2 pr-4 font-mono">7</td><td class="py-2 pr-4">7 · the adapter's two surfaces</td><td class="py-2 pr-4 text-amber-300">Worth exploring</td><td class="py-2">backlog</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="rounded-lg bg-slate-800 p-5 space-y-2">
+    <p class="font-semibold text-emerald-300">Do candidate 2 first — and not because it is the biggest.</p>
+    <p class="text-sm text-slate-300">It is the smallest: about ten one-line edits, one index page, and
+      one assertion in a test file that already walks every markdown file. Do it first because
+      <strong>every other candidate argues about a rule whose governing ADR chain is currently
+      misleading.</strong> ADR 0054 reads as current policy and was reversed three commits ago. ADR
+      0015 and ADR 0037 describe a close and a train that both lost steps. You cannot judge candidate
+      5's tension with ADR 0066, or candidate 3's tension with ADR 0065, while six ADRs present retired
+      decisions as live ones. <strong>Fix the reading surface, then decide.</strong></p>
+    <p class="text-sm text-slate-300">Then candidate 1, as the first structural change. It is the only
+      one that touches a 2794-line file, the split boundary is already drawn by a banner in the file,
+      and the call graph confirms it. It also makes candidate 4 easier by shrinking the file that holds
+      the second copy of the gate record reader.</p>
+  </div>
+</section>
+
+<footer class="max-w-5xl mx-auto px-6 pb-12 text-sm text-slate-500 space-y-1">
+  <p>A reading of the code at commit <span class="font-mono">569da75</span>, version
+    <span class="font-mono">1.0.0</span>. The code moves after that, so a card here can go stale. Read
+    the work item instead, because a candidate that became work carries the current facts.</p>
+  <p><strong>Layer 5 is advisory. It holds no exit code, so it fails no push and no merge.</strong> Depth
+    is a judgement, and a hard gate here would stall every story on an opinion.</p>
+</footer>
+
+</main>
+</body>
+</html>
