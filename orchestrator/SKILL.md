@@ -36,8 +36,9 @@ label; a leaf needs `ready-for-agent` and, unless a live story already owns it, 
 card in the start column too. The **Ready queue** and **Board status** entries in
 [`CONTEXT.md`](CONTEXT.md) hold the full gate. A schedule named `orchestrator-queue`
 already asks this every minute and starts at most one item —
-`python3 <plugin root>/scripts/worker_state.py queue --help` holds the roofs and the
-descent, and `start --help` answers the gate for one item. Report per
+`python3 <plugin root>/scripts/worker_queue.py queue --help` holds the roofs and the
+descent, and `python3 <plugin root>/scripts/worker_queue.py start --help` answers the
+gate for one item. Report per
 [`references/reporting.md`](references/reporting.md): every ready item first, then
 enough blocked ones to reach 5, then every item at `to-review` beside them.
 

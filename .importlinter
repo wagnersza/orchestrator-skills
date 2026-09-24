@@ -2,9 +2,9 @@
 # file, and `make full` runs it. The layer model is in
 # orchestrator/references/quality-gates.md.
 #
-# This repo holds two seams under `scripts/`. `close_item.py` owns steps 4 to 8 of a
-# Close transaction (ADR 0015), and `worker_state.py` owns the Worker watch predicate
-# (ADR 0018).
+# This repo holds three seams under `scripts/`. `close_item.py` owns steps 4 to 8 of a
+# Close transaction (ADR 0015), `worker_state.py` owns the Worker watch predicate
+# (ADR 0018), and `worker_queue.py` owns the start gate and the queue tick (ADR 0045).
 #
 # The dependency runs one way: the tick imports the close, and never the reverse. A
 # merged pull request fires the close, and the tick runs it in its own process so that
@@ -12,8 +12,16 @@
 # reached through that one caller, so it never needs the watch and an import back would
 # be a cycle.
 #
-# Both seams import `tracker.py`, the Tracker adapter (ADR 0040). It is a library and
-# not a seam, so it imports neither of its callers.
+# **The watch and the queue are independent.** The watch reads a worktree, a process and
+# a git repository. The queue is a graph walk over one tracker read, and it fires one
+# spawn command through a shell. Neither one needs a name the other holds, so the two
+# never import each other in either direction. What they share sits in `tracker.py`: the
+# tracker commands, the Work-state label family, the label swap and the flags that name
+# one tracker. The rationale is
+# orchestrator/docs/adr/0070-the-watch-and-the-queue-are-two-seams.md.
+#
+# Every seam imports `tracker.py`, the Tracker adapter (ADR 0040). It is a library and
+# not a seam, so it imports none of its callers.
 
 [importlinter]
 root_package = scripts
@@ -25,12 +33,21 @@ source_modules =
     scripts.close_item
 forbidden_modules =
     scripts.worker_state
+    scripts.worker_queue
+
+[importlinter:contract:the-watch-and-the-queue-are-independent]
+name = The worker watch and the queue do not import each other
+type = independence
+modules =
+    scripts.worker_state
+    scripts.worker_queue
 
 [importlinter:contract:the-adapter-imports-no-seam]
-name = The tracker adapter imports neither of its callers
+name = The tracker adapter imports none of its callers
 type = forbidden
 source_modules =
     scripts.tracker
 forbidden_modules =
     scripts.close_item
     scripts.worker_state
+    scripts.worker_queue

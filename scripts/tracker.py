@@ -1,11 +1,18 @@
 #!/usr/bin/env python3
-"""Every tracker command the two seams run or print, behind one adapter.
+"""Every tracker command the seams above run or print, behind one adapter.
 
-`scripts/worker_state.py` asks what state a work item is in, and
-`scripts/close_item.py` closes one. Each seam held its own tracker code until this
-module existed. The first had a `gh` builder and a `glab` builder, and the second
-hardcoded `gh`. So one concept had two interfaces in one repo, and two fixture
-formats came with them (ADR 0040).
+`scripts/worker_state.py` asks what state one worker is in, `scripts/worker_queue.py`
+asks which work item starts next, and `scripts/close_item.py` closes one. Each seam held
+its own tracker code until this module existed. One had a `gh` builder and a `glab`
+builder, and another hardcoded `gh`. So one concept had two interfaces in one repo, and
+two fixture formats came with them (ADR 0040).
+
+**Three things live here because more than one seam needs them, and no seam imports
+another.** The **Work-state label** family and `write_transition` are the first: the watch
+swaps those labels and the queue reads them. The `--repo`, `--tracker-cli`,
+`--tracker-host`, `--gh-fixture` and board flags are the second, so two `main` functions
+build one adapter from one set of names. `UsageExitParser` is the third. A value either
+seam held alone is a value the other cannot reach.
 
 **Every command here is one of the verified reads.** The commands live as prose in
 `orchestrator/references/tracker-reads.md`, and this module is where the same
@@ -65,9 +72,11 @@ In fixture mode a write runs nothing. It appends its command to
 tracker writes a run made.
 """
 
+import argparse
 import json
 import re
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
@@ -111,6 +120,34 @@ STATUS_FIELD_NAME = "Status"
 COLUMN_IN_PROGRESS = "In progress"
 COLUMN_IN_REVIEW = "In review"
 COLUMN_DONE = "Done"
+
+# The **Work-state label** family: one family, four values, and it never stacks. The
+# strings and the swap rule are owned by `docs/agents/issue-tracker.md`, which is this
+# adapter's own reference. The whole family is named here because a swap removes every
+# value it finds on the item, rather than one hardcoded predecessor.
+#
+# **The family lives with the adapter because the watch and the queue read the same
+# four strings.** The watch swaps them on a transition, and the queue reads them to tell an
+# owned item from a free one. Neither of those two files imports the other, so a value
+# either one held alone is a value the other cannot reach (ADR 0040).
+READY_FOR_AGENT = "ready-for-agent"
+IN_PROGRESS = "in-progress"
+
+# The value that means a human is reading the pull request, and the one label a
+# **Position** reads.
+TO_REVIEW = "to-review"
+
+# The value that stops every tick. Only the maintainer removes it, so a paused item costs
+# one cheap read a minute and moves nowhere.
+NEEDS_HUMAN = "needs-human"
+
+WORK_STATES = (READY_FOR_AGENT, IN_PROGRESS, TO_REVIEW, NEEDS_HUMAN)
+
+# A usage error must not land on one of a seam's outcome codes. `argparse` exits 2 by
+# default, which is non-zero, so a flag with a typo reads as a quiet tick and records as a
+# skipped run that nobody sees. 64 is `EX_USAGE`, and it sits outside every contract above
+# a seam (ADR 0022).
+EXIT_USAGE = 64
 
 # The field that carries a work item's native parent link, which is one half of the
 # **Parent edge**. The `## Parent` line in the body is the other half, and the descent
@@ -1134,3 +1171,160 @@ class Tracker:
         proc = subprocess.run(argv, capture_output=True, text=True)
         if proc.returncode != 0:
             raise TrackerError(f"{' '.join(argv)} failed: {proc.stderr.strip()}")
+
+
+# --- the work-state label swap ----------------------------------------------
+
+
+def write_transition(tracker, item, labels, add, comment=""):
+    """Swap the **Work-state label**s on one work item, and answer what it wrote.
+
+    **This is the one function in this repo that writes a work-state label.** It runs in
+    the process that already read `labels`, so no second read can disagree with the first.
+    A second copy of it would add exactly that second read.
+
+    **The removals and the addition are one tracker write.** Both go into one `label_argv`
+    call, so they can never land apart and an item is never left wearing two work states.
+    **The removals are computed from `labels`**, which is what this run read, and never
+    from a hardcoded predecessor. So the one-label answer holds from every legal starting
+    position, including an item that already wears the label the transition adds.
+
+    `comment` is the one comment a transition carries where it has something to say. It is
+    its own write, because a comment is not a label. `needs-human` is the transition that
+    needs one.
+
+    Returns `(removed, added)`: the label names it took off, and the one it put on or an
+    empty list. Nothing to remove and nothing to add is no write at all. So an item
+    already in the right state costs one read and no command.
+    """
+    remove = [name for name in WORK_STATES if name in labels and name != add]
+    added = [add] if add and add not in labels else []
+    if remove or added:
+        tracker.write(tracker.label_argv(item, remove=remove, add=added))
+    if comment:
+        tracker.write(tracker.comment_argv(item, comment))
+    return remove, added
+
+
+def swap_line(item, removed, added):
+    """How one label swap reads, for the line a seam prints."""
+    was = ", ".join(removed) or "no work-state label"
+    now = ", ".join(added) or "the label it already wore"
+    return f"{was} → {now} on work item #{item}"
+
+
+def needs_human(tracker, item, labels, saw):
+    """Write `needs-human` on one work item, plus one comment saying what the seam saw.
+
+    The one label that stops every tick, and the one transition that carries a comment. A
+    label with no reason leaves the maintainer to reconstruct one, so the comment is part
+    of the transition rather than a courtesy.
+
+    **The watch and the queue both write it**, and each one pairs it with its own exit
+    code. The watch writes it when a close cannot run and when a stall has spent its one
+    retry. The queue writes it when a spawn fails. So the line is what this returns, and
+    the code stays with the caller that owns the contract.
+
+    Only the maintainer removes the label.
+    """
+    removed, added = write_transition(
+        tracker, item, labels, NEEDS_HUMAN, comment=f"{NEEDS_HUMAN}: {saw}"
+    )
+    return (
+        f"{NEEDS_HUMAN}: {saw} — applied: {swap_line(item, removed, added)}, with one "
+        f"comment that says what this tick saw"
+    )
+
+
+# --- the CLI surface the seams share ----------------------------------------
+
+
+class UsageExitParser(argparse.ArgumentParser):
+    """An `argparse` parser whose usage errors stay outside the exit contract.
+
+    `add_subparsers` builds each subcommand from `type(self)`, so every subcommand
+    inherits this without naming it.
+    """
+
+    def exit(self, status=0, message=None):
+        if message:
+            self._print_message(message, sys.stderr)
+        sys.exit(EXIT_USAGE if status else status)
+
+
+def add_tracker_arguments(parser):
+    """The four flags that name one tracker, added to one subcommand.
+
+    Every subcommand that reads the tracker takes all four, because a seam's `main` builds
+    one **Tracker adapter** out of them. Written once here, so no two subcommands in this
+    repo can drift apart on the tracker they read (ADR 0040).
+    """
+    parser.add_argument(
+        "--repo",
+        default="",
+        help="the tracker repository the labels and the comments sit on, as OWNER/NAME",
+    )
+    parser.add_argument(
+        "--tracker-cli",
+        default=GH,
+        choices=(GH, GLAB),
+        help="which CLI reads the labels and the comments, and writes the label a "
+        "transition swaps. The caller resolves it from "
+        "docs/agents/issue-tracker.md. This seam passes the name to the tracker "
+        "adapter, which holds every command, so this seam names no tracker",
+    )
+    parser.add_argument(
+        "--tracker-host",
+        default="",
+        metavar="HOST",
+        help="the tracker host, for a server the CLI does not reach by default. Each "
+        "read carries it in the place that read needs. With no host, every read goes "
+        "to the CLI's own default server",
+    )
+    parser.add_argument(
+        "--gh-fixture",
+        help="JSON that stands in for any tracker read, so a label and a position "
+        "need no network and no login (used by the tests). It keeps this name "
+        "because scripts/close_item.py reads the same file in the same format",
+    )
+
+
+def add_board_arguments(parser, column=True):
+    """The coordinates that name one board, added to one subcommand.
+
+    `start` reads one card and `queue` reads one per open item, so both take all three.
+    Written once, so the two can never drift apart on the board they read. With any one of
+    them missing the label alone decides, which is a supported configuration and never an
+    error (ADR 0045).
+
+    `column` is False for `tick`, which writes a card and reads none. The start column is
+    the maintainer's own lane and no tick writes it, so a tick that took that flag would
+    take a flag it cannot use (ADR 0067). The two coordinates below are written once for
+    every subcommand, so a reader and a writer can never name two different boards.
+    """
+    parser.add_argument(
+        "--board-project",
+        default=0,
+        type=int,
+        metavar="NUMBER",
+        help="the project number of the board that holds the card. The caller reads it "
+        "from the Project board section of docs/agents/issue-tracker.md, so this seam "
+        "holds no board of its own. With this flag missing no card is read and none is "
+        "written",
+    )
+    parser.add_argument(
+        "--board-owner",
+        default="",
+        metavar="OWNER",
+        help="the owner the board belongs to, from the same section. With this flag "
+        "missing no card is read and none is written",
+    )
+    if column:
+        parser.add_argument(
+            "--start-column",
+            default="",
+            metavar="NAME",
+            help="the name of the start column, from the same section. It is a name and "
+            "never an option id: a write resolves the id from the name at run time. With "
+            "this flag missing the label alone decides",
+        )
