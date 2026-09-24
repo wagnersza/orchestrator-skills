@@ -1,5 +1,9 @@
 # The stall count is a tracker comment, and no session remembers it
 
+> Superseded by [ADR 0058](0058-one-re-prompt-then-a-human.md). The store survives,
+> because the count is still a tracker comment. A count a session holds dies with that
+> session. What retires is the scope, and it becomes one re-prompt and then a human.
+
 [ADR 0018](0018-the-worker-watch-is-a-stateless-seam.md) put the stall count in one
 place: "The stall counter lives in the session's report to the maintainer, because the
 count is what the maintainer decides against." That held while one session owned one

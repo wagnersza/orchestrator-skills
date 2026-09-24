@@ -1,5 +1,18 @@
 # The tracker is one adapter behind both seams
 
+> Narrowed by [ADR 0057](0057-the-merge-is-the-second-act.md). One adapter still stands
+> behind both seams, and it still imports neither of its callers. What narrows is the
+> independence of the two seams, because the tick imports the close and the close imports
+> nothing.
+>
+> Narrowed by [ADR 0065](0065-the-parent-edge-is-two-representations.md). One adapter
+> still stands behind both seams, and its shape is unchanged. What narrows is its scope,
+> because it now covers the parent edge as well.
+>
+> Narrowed by [ADR 0069](0069-the-adapter-orders-a-multi-write-close.md). One module, one
+> class, one fixture format, and no seam that names a tracker: all four stand. What
+> narrows is one point, because the adapter now owns the order of a multi-write close.
+
 This repo holds two seams that speak to a tracker. `scripts/worker_state.py` asks what
 state a work item is in, and `scripts/close_item.py` closes one. Each seam held its own
 tracker code:

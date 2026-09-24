@@ -1,5 +1,13 @@
 # The story proof runs before the story gate
 
+> Narrowed by [ADR 0053](0053-one-work-state-label-and-a-computed-position.md). The
+> trigger, the fresh worktree, the two durable artifacts and the block on a failed proof
+> all stand. What narrows is one sentence that names a label this repo no longer writes.
+>
+> Narrowed by [ADR 0056](0056-the-tick-applies-the-transition-it-computed.md). The
+> trigger, the fresh worktree, the two durable artifacts and the block on a failed proof
+> all stand. What narrows is one ordering.
+
 Layers 1 to 4 each read one **Work item**, inside one worker worktree. A user story
 finishes when its last child closes, and every child was green on its own. So ten green
 children can leave a feature that does not work as one flow. The login item passes, the

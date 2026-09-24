@@ -1,5 +1,10 @@
 # The board is an input, not a mirror
 
+> Reversed by [ADR 0067](0067-the-board-is-a-mirror-at-three-moments.md). Two parts
+> survive word for word. The board is read in the start column alone, and a drag is intent
+> in every column. What reverses is the part that says nothing writes the board, because a
+> seam writes the card at three moments.
+
 [ADR 0009](0009-labels-drive-board-status.md) made a card's `Status` field a projection of
 the **Work-state labels**. That projection had seven writers. One was code, in
 `scripts/close_item.py`. The other six were instructions in `orchestrator/SKILL.md`: the

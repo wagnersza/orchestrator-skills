@@ -1,5 +1,14 @@
 # Cross-vendor adversarial review, bounded at 3 rounds
 
+> Narrowed by [ADR 0016](0016-the-orchestrator-merges-when-asked.md). Inside the review
+> loop the merge is still a human step. What narrows is the case where the maintainer asks
+> the orchestrator to merge.
+>
+> Narrowed by [ADR 0066](0066-review-and-the-train-are-verbs.md). The cross-vendor rule
+> survives whole. A reviewer runs a different vendor's model, config names that model in
+> `models.review`, and the prompt asks for coverage rather than filtering. What retires is
+> the bound of 3, the `Verdict:` line, the fix round and the effort step per round.
+
 When adversarial review is enabled, a work item that reaches the review state is reviewed by a **second worker running a different-vendor model** (e.g. implement with opus-5, review with gpt-5.6) — a different vendor is more likely to catch what the implementing model rationalised. The review model is named explicitly in config (`models.review`, with its own effort) and the orchestrator asserts its vendor differs from the impl model's.
 
 The reviewer posts a verdict (approve / request-changes + findings). On request-changes the orchestrator re-prompts the **original impl worker** with the findings, then re-reviews — bounded at **3 rounds**. After an approve, or after the 3rd round regardless, the orchestrator gathers evidence and flips the item to **human review**. Merge is always a human step; the orchestrator never auto-merges.
