@@ -4,6 +4,21 @@
 > [ADR 0061](0061-the-board-is-read-before-the-label.md). The card is read first there, so
 > only a card in the start column with no label is reported. The two-facts gate itself and
 > both roofs stand as written here.
+>
+> Narrowed by [ADR 0053](0053-one-work-state-label-and-a-computed-position.md). The two
+> roofs, the descent to a story's children, and the rule that only a human writes
+> `ready-for-agent` all stand. What narrows is one sentence that names a label this repo
+> no longer writes.
+>
+> Reversed by [ADR 0062](0062-a-story-card-authorises-its-run.md). The two roofs stand,
+> the label is still the maintainer's own write, `work on N` still overrides, and the
+> fallback for a tracker with no board holds. What reverses is the gate, because it is no
+> longer one pair of facts asked of every work item.
+>
+> Narrowed by [ADR 0068](0068-an-item-writing-flow-writes-the-start-label.md). No seam and
+> no schedule writes `ready-for-agent`, and the drag stays the authorisation. What narrows
+> is who else may write it, and that is the inline flow that wrote the item's
+> specification.
 
 [ADR 0029](0029-a-work-item-number-is-a-complete-instruction.md) made a work-item number a
 complete instruction, and the maintainer supplies that number. The `work on N` flow then

@@ -1,6 +1,10 @@
 # Labels drive the board; Projects v2 Status is a derived projection
 
 > Superseded by [ADR 0054](0054-the-board-is-an-input-not-a-mirror.md)
+>
+> Narrowed by [ADR 0045](0045-a-story-start-is-automatic-under-two-roofs.md). The five
+> derived columns stay derived, and a human drag is still drift. What narrows is `To do`,
+> because it joins `To merge` as an intent column.
 
 The orchestrator moved work items by **label only** — `ready-for-agent` →
 `in-progress` → `to-review` → closed — and never touched a GitHub Projects v2

@@ -1,5 +1,14 @@
 # The story gate is advisory
 
+> Narrowed by [ADR 0047](0047-the-story-proof-runs-before-the-story-gate.md). Layer 5 is
+> still a step and never a **Gate**, its threshold is still 0 untriaged `Strong`
+> candidates, and it stops nothing. What narrows is when it runs, because it runs second,
+> after the story proof.
+>
+> Narrowed by [ADR 0048](0048-the-story-gate-report-is-a-repo-artifact.md). Layer 5 is
+> still advisory. What narrows is one consequence, because a report in the temporary
+> directory of the OS reaches nobody.
+
 Layers 1 to 4 each read one work item, inside one worker worktree. None of them reads what
 a whole user story left behind. So ten green items can leave a shallow module, with an
 interface as wide as its implementation, and every box is ticked.

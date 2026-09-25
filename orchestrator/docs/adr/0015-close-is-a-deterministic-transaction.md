@@ -1,5 +1,14 @@
 # Closing an item is a deterministic transaction, and code owns its order
 
+> Narrowed by [ADR 0040](0040-the-tracker-is-one-adapter-behind-both-seams.md). The close
+> is still a deterministic transaction, and code still owns its order. What narrows is one
+> ceiling comment, because every `gh` command now sits behind one adapter.
+>
+> Narrowed by [ADR 0057](0057-the-merge-is-the-second-act.md). Steps 4 to 8 stand, in the
+> order this ADR set, and the seam still refuses rather than warns. What retires is steps
+> 1 to 3, and the maintainer holds all three on the tracker. The **Close transaction**
+> entry of [`orchestrator/CONTEXT.md`](../../CONTEXT.md) records the narrowing.
+
 Closing a work item is where this skill loses the maintainer's confidence. An item
 reaches review, the maintainer says "task done, you can merge and close", and eight
 things must then happen in a fixed order. Sometimes one of them does not happen, or

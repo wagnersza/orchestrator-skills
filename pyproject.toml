@@ -24,7 +24,7 @@ max-complexity = 16
 [tool.mypy]
 python_version = "3.11"
 
-# The two seams and their suites carry no type annotations, and this item adds none.
+# The three seams and their suites carry no type annotations, and this item adds none.
 # `mypy --strict` on the command line holds every other check, so a real type fault
 # still stops the gate. The four keys that follow drop the demand for an annotation,
 # and nothing else.

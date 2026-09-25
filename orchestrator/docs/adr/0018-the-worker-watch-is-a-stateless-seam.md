@@ -5,6 +5,18 @@ split below stands, and the seam and its exit-code contract stand. The blocking 
 loop retires, because a watch owned by the session's own shell dies with that shell.
 Read this ADR for the split, and read 0022 for the trigger that replaces the loop.
 
+> Narrowed by [ADR 0023](0023-the-stall-count-is-a-tracker-comment.md). The split stands,
+> and the seam still counts nothing. What narrows is where the stall count lives, and that
+> is a tracker comment.
+>
+> Narrowed by [ADR 0058](0058-one-re-prompt-then-a-human.md). The seam still holds no
+> state between reads, so a restart still costs nothing. What narrows is the count,
+> because it is one literal now.
+>
+> Narrowed by [ADR 0063](0063-the-stall-window-starts-at-the-spawn.md). Two signals, and
+> work product as the only evidence of progress, both stand. What narrows is the list of
+> facts the stall reads, because it gains the spawn time.
+
 An orchestrator session spawns a worker, sends the prompt, and then pays it no more
 attention. Nothing in this skill watches a live worker. The monitor section of
 [`orchestrator/SKILL.md`](../../SKILL.md) is four bullets the maintainer runs by hand,

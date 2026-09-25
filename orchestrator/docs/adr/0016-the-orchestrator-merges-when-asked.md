@@ -1,6 +1,10 @@
 # The orchestrator merges and closes when the maintainer asks it to
 
 > Superseded by [ADR 0057](0057-the-merge-is-the-second-act.md)
+>
+> Narrowed by [ADR 0037](0037-the-merge-queue-is-an-ordered-train.md). Human consent
+> before a merge stands, once per item. What retires is the requirement that the consent
+> arrives as words the maintainer types in a chat turn.
 
 The **Close transaction** ([`orchestrator/CONTEXT.md`](../../CONTEXT.md)) makes the
 orchestrator session the actor for all eight of its steps. The session resolves the

@@ -799,7 +799,7 @@ the tracker rather than a worktree:
 
 ```bash
 --name "orchestrator-queue" --trigger '* * * * *' --workspace "<the main checkout>" \
-  --precheck "python3 <plugin root>/scripts/worker_state.py queue --repo <owner>/<name> --board-project <number> --board-owner <owner> --start-column '<column>' --max-stories <max_stories> --max-workers <max_workers> --parallel-check <parallel_check> --spawn-command '<the spawn_item.py invocation>'"
+  --precheck "python3 <plugin root>/scripts/worker_queue.py queue --repo <owner>/<name> --board-project <number> --board-owner <owner> --start-column '<column>' --max-stories <max_stories> --max-workers <max_workers> --parallel-check <parallel_check> --spawn-command '<the spawn_item.py invocation>'"
 ```
 
 - **The trigger is one tick a minute**, which is the cron form `'* * * * *'`. One item a

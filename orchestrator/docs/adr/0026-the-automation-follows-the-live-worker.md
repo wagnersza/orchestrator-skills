@@ -1,6 +1,10 @@
 # The Item automation follows the live worker, and one per item stands
 
 > Superseded by [ADR 0056](0056-the-tick-applies-the-transition-it-computed.md)
+>
+> Narrowed by [ADR 0063](0063-the-stall-window-starts-at-the-spawn.md). The automation
+> still follows the live worker. What retires is one accepted false stall, the inherited
+> commit of a fresh worktree.
 
 An **Item automation**'s precheck names one worktree and one harness process pattern
 ([ADR 0022](0022-item-automation-replaces-the-blocking-watch.md)). Both are resolved at

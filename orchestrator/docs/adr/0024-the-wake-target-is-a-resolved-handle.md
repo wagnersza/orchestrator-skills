@@ -1,6 +1,10 @@
 # The wake target is a terminal handle, resolved at spawn
 
 > Superseded by [ADR 0056](0056-the-tick-applies-the-transition-it-computed.md)
+>
+> Narrowed by [ADR 0027](0027-the-tick-delivers-its-own-wake.md). The three wake targets,
+> their order, and the resolution of the handle at spawn all stand. What narrows is who
+> delivers the wake.
 
 [ADR 0022](0022-item-automation-replaces-the-blocking-watch.md) gave the relay one
 target: the orchestrator terminal, found **by title**. The first live run of an **Item

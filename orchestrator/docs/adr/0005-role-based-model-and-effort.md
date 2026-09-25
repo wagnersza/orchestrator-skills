@@ -1,5 +1,10 @@
 # Role-based model + effort, not a hardcoded model
 
+> Reversed by [ADR 0059](0059-medium-is-the-default-role.md). The `(Model, Effort)` pair
+> per **Role**, the classification at spawn time, the reported harness clamps and thinking
+> at every effort all stand. What reverses is the default, because a spawn takes
+> **medium** and not **heavy**.
+
 Config named one `model:` for every worker, and effort was never expressed at all
 — so a copy tweak and a schema-changing multi-file feature ran the same model at
 whatever effort the harness happened to default to. Both directions cost: the

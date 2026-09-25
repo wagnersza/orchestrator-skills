@@ -1,5 +1,10 @@
 # One work-state label, and the position is computed
 
+> Narrowed by [ADR 0068](0068-an-item-writing-flow-writes-the-start-label.md). One
+> work-state label family, and a **Position** the tick computes, both stand. What narrows
+> is the rule that only a human writes `ready-for-agent`, because the inline item-writing
+> flow writes it too.
+
 Two label families described one run. The **Work-state labels** said what a work item
 is. The `phase:*` family cached where inside an owned run it sat. Every fact the second
 family cached was already on disk or on the tracker, so the cache can disagree with the

@@ -1,6 +1,10 @@
 # The orchestrator session writes the review state, and the worker stops at its note
 
 > Superseded by [ADR 0056](0056-the-tick-applies-the-transition-it-computed.md)
+>
+> Narrowed by [ADR 0051](0051-a-hook-refuses-and-a-seam-performs.md). The session still
+> writes the review state. What narrows is the work-state half of that one call, because
+> the hook denies it until a seam performs it.
 
 Three files described the end of implementation, and two of them agreed. The last box of
 [`orchestrator/references/checklist.template.md`](../../references/checklist.template.md)

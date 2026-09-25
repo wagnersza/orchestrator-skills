@@ -5,6 +5,10 @@
 > sets rather than a board list there, so it cannot see the card of an unlabelled item. The
 > one-fact clause and `BOARD_UNREAD` both leave the tick, and a `report` verb names the gap.
 > The order of the two facts stands as written here.
+>
+> Narrowed by [ADR 0062](0062-a-story-card-authorises-its-run.md). The card-first order
+> and the report of a forgotten label both stand. What narrows is the report, because it
+> never names a story.
 
 `0045-a-story-start-is-automatic-under-two-roofs.md` gave the queue tick a start
 gate of two facts: the `ready-for-agent` label, and the item's card in the board's
