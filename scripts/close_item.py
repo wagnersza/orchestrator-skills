@@ -35,13 +35,16 @@ The five steps, and what each one does:
 | 7. label and close | one step, so an item cannot close without its label moving |
 | 8. remove the worktree | only with `--execute --teardown`, and then the card moves to `Done` |
 
-**Step 7 writes no board card, and step 8 does.** The card write follows the teardown, so
-a card in `Done` means the worktree is gone (ADR 0067). It rides on step 8 rather than
+**Step 7 writes no board column, and step 8 does.** The column write follows the teardown, so
+a column of `Done` means the worktree is gone (ADR 0067). It rides on step 8 rather than
 standing as a step of its own, because the transaction keeps the numbers 4 to 8.
-`--board-project` and `--board-owner` carry the two coordinates, and with either one
-missing no card moves. **A failed card write is reported in the plan and it never fails
-the close**: every step has already run by then. The board's own built-in **item closed to
-Done** workflow writes the same column for most items, so this write is safe to repeat.
+`--board-project` and `--board-owner` carry the two coordinates on GitHub, and with either one
+missing no card moves. **On GitLab a column is a scoped label and there are no coordinates**,
+so the write always has one and the two flags are not read (ADR 0070). **A failed column
+write is reported in the plan and it never fails the close**: every step has already run by
+then. GitHub's own built-in **item closed to Done** workflow writes the same column for most
+items, so this write is safe to repeat. GitLab ships no such workflow, so there this write is
+the only thing that fills that column.
 
 **`--abandon` is the other path, and an abandon is not a close.** A worker can die
 before its first commit, and then no pull request exists and no merge can ever fire the
@@ -354,15 +357,17 @@ def build_plan(args, tracker):
 
     # --- 8. remove the worktree, and then move the card to `Done`. Two flags, or the
     #        teardown does not run, and the card write goes with it (ADR 0067).
-    steps.append(teardown_step(8, args, worktree, refusal, card=card_target(args)))
+    steps.append(
+        teardown_step(8, args, worktree, refusal, card=card_target(args, tracker))
+    )
 
     return steps, refusal
 
 
-def card_target(args):
-    """The card write that follows the teardown, or `None` where there is none.
+def card_target(args, tracker):
+    """The column write that follows the teardown, or `None` where there is none.
 
-    **The close writes `Done` after the teardown, so a card in `Done` means the worktree is
+    **The close writes `Done` after the teardown, so a column of `Done` means the worktree is
     gone** (ADR 0067). That is why the write rides on step 8 rather than standing as a step
     of its own: the transaction keeps the numbers 4 to 8.
 
@@ -370,12 +375,18 @@ def card_target(args):
     `scripts/worker_state.py` builds its own namespace for a close. An older caller then
     reads as a caller that named no board, and no card moves.
 
-    **The abandon reaches no card write.** Its work item stays open, so `Done` would be a
+    **On GitLab the two coordinates are not the condition, because that tracker has
+    neither** (ADR 0070). A column there is a scoped label on the item. So the column name is
+    the whole coordinate, and this write always has one. The adapter holds every other part of
+    that difference. This is the one place a seam reads the CLI name, because the condition is
+    what differs: no column name and no argv does.
+
+    **The abandon reaches no column write.** Its work item stays open, so `Done` would be a
     lie about an item nobody closed. `build_abandon_plan` passes no card at all.
     """
     project = getattr(args, "board_project", 0)
     owner = getattr(args, "board_owner", "")
-    if not (project and owner):
+    if tracker.cli != GLAB and not (project and owner):
         return None
     return {
         "item": args.issue,
