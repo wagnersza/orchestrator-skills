@@ -667,7 +667,8 @@ class TrackerTest(unittest.TestCase):
 
     def test_a_card_write_with_no_board_reads_nothing_and_writes_nothing(self):
         """A tracker with no project board is a supported configuration, so each missing
-        coordinate answers an empty clause. The other tracker has no such board at all.
+        coordinate answers an empty clause. A caller with no column answers the same way on
+        both trackers, because there is then nothing to write anywhere.
         """
         log = self.fake_card_cli(cards=[(ITEM, "CARD_54", "To do")], options=["Done"])
         column = tracker.COLUMN_DONE
@@ -676,10 +677,102 @@ class TrackerTest(unittest.TestCase):
             (tracker.Tracker(), (ITEM, column, 0, "someone")),
             (tracker.Tracker(), (ITEM, column, 6, "")),
             (tracker.Tracker(), (ITEM, "", 6, "someone")),
-            (tracker.Tracker(cli=tracker.GLAB), (ITEM, column, 6, "someone")),
+            (tracker.Tracker(cli=tracker.GLAB), (ITEM, "", 6, "someone")),
         ):
             self.assertEqual(one.card_write(*args), "")
         self.assertFalse(log.exists(), log.read_text() if log.exists() else "")
+
+    def test_the_column_write_on_the_other_tracker_is_one_scoped_label(self):
+        """The write that has no card behind it (ADR 0070). It goes through the label writer
+        the adapter already holds, so it costs one command and resolves no id. The two board
+        coordinates are not read, because a column name is the whole coordinate there.
+        """
+        log = self.fake_cli("glab")
+
+        line = self.glab().card_write(ITEM, tracker.COLUMN_IN_REVIEW, 0, "")
+
+        self.assertIn(f"work item #{ITEM} to 'In review'", line)
+        self.assertEqual(
+            log.read_text().splitlines(),
+            [f"issue update {ITEM} --label status::in review -R {HOST}/{REPO}"],
+        )
+
+    def test_the_scoped_write_names_no_label_to_remove(self):
+        """GitLab drops the other value of the same scope by itself, so the write adds and
+        removes nothing. That is the "one family, never stacks" rule the **Work-state
+        label** family already follows, kept by the tracker rather than by this module.
+        """
+        log = self.fake_cli("glab")
+
+        for column in (
+            tracker.COLUMN_IN_PROGRESS,
+            tracker.COLUMN_IN_REVIEW,
+            tracker.COLUMN_DONE,
+        ):
+            self.glab().card_write(ITEM, column, 0, "")
+
+        self.assertNotIn("--unlabel", log.read_text())
+        self.assertEqual(
+            log.read_text().splitlines(),
+            [
+                f"issue update {ITEM} --label status::{name} -R {HOST}/{REPO}"
+                for name in ("in progress", "in review", "done")
+            ],
+        )
+
+    def test_a_scoped_write_of_the_same_column_twice_builds_the_same_write(self):
+        """The repeat case, asserted once for all three moments rather than once per call
+        site. The write carries no id and reads nothing first, so the second run builds the
+        very command the first one built and leaves the item wearing the same label.
+
+        The round trip holds too: `scoped_column` reads that label back as the column the
+        caller named, in the lower case `docs/agents/issue-tracker.md` records.
+        """
+        log = self.fake_cli("glab")
+
+        first = self.glab().card_write(ITEM, tracker.COLUMN_DONE, 0, "")
+        second = self.glab().card_write(ITEM, tracker.COLUMN_DONE, 0, "")
+
+        self.assertEqual(first, second)
+        written = log.read_text().splitlines()
+        self.assertEqual(written, [written[0]] * 2)
+        label = f"{tracker.COLUMN_SCOPE}{tracker.COLUMN_DONE.lower()}"
+        self.assertIn(f"--label {label}", written[0])
+        self.assertEqual(tracker.scoped_column([label]), tracker.COLUMN_DONE.lower())
+
+    def test_a_failed_scoped_write_raises_the_way_every_other_write_raises(self):
+        """A board that will not answer is `TrackerError`, so each of the three callers
+        reports it and none of them fails its own step.
+        """
+        self.fake_cli("glab", code=1, stderr="403 Forbidden")
+
+        with self.assertRaises(tracker.TrackerError) as raised:
+            self.glab().card_write(ITEM, tracker.COLUMN_IN_PROGRESS, 0, "")
+
+        self.assertIn("403 Forbidden", str(raised.exception))
+
+    def test_the_start_label_write_works_on_the_other_tracker_too(self):
+        """The `ready-for-agent` write of the column read already worked here, because it
+        goes through the same label writer. This holds that, and it needed no code.
+        """
+        log = self.fake_cli("glab")
+        one = self.glab()
+
+        removed, added = tracker.write_transition(
+            one, ITEM, [tracker.IN_PROGRESS], tracker.READY_FOR_AGENT
+        )
+
+        self.assertEqual(
+            (removed, added), ([tracker.IN_PROGRESS], [tracker.READY_FOR_AGENT])
+        )
+        self.assertEqual(
+            log.read_text().splitlines(),
+            [
+                f"issue update {ITEM} --label {tracker.READY_FOR_AGENT} "
+                f"--unlabel {tracker.IN_PROGRESS} "
+                f"-R {HOST}/{REPO}"
+            ],
+        )
 
     def test_a_card_write_in_fixture_mode_runs_nothing_and_is_recorded(self):
         """A fixture holds no project id and no option id, so the recorded line names the

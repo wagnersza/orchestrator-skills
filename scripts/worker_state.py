@@ -200,12 +200,14 @@ A claim reads `needs-human` first, the same as every other path here, and it ref
 where the item wears it. It reads no worktree and no process, so it needs none of the
 worker flags. Every other form of `tick` still requires all four.
 
-**The card moves with the label, at two of the three moments** (ADR 0067). A claim writes
-`In progress`, and the tick that writes `to-review` writes `In review`. The close writes
-`Done` itself, after its teardown. So `tick` takes the two board coordinates and no start
-column: the start column is the maintainer's own lane, and no tick writes it. **A failed
-card write is reported in the printed line and it stops nothing**, because the board is a
-mirror and the label is the live state.
+**The board column moves with the label, at two of the three moments** (ADR 0067). A claim
+writes `In progress`, and the tick that writes `to-review` writes `In review`. The close
+writes `Done` itself, after its teardown. So `tick` takes the two board coordinates and no
+start column: the start column is the maintainer's own lane, and no tick writes it. **Both
+moments work on both trackers**, because the adapter holds the whole difference between a
+card and a scoped label (ADR 0070). GitLab has neither coordinate, so there the two flags are
+absent and the column still moves. **A failed column write is reported in the printed line
+and it stops nothing**, because the board is a mirror and the label is the live state.
 
 **`needs-human` is a transition with a comment.** The writer puts the label on the item
 and posts one comment saying what the seam saw. A label with no reason leaves the
@@ -1006,16 +1008,19 @@ CARD_COLUMNS = {TO_REVIEW: COLUMN_IN_REVIEW}
 
 
 def card_line(tracker, item, column, board):
-    """Write one work item's card, and answer the clause the caller's line carries.
+    """Write one work item's board column, and answer the clause the caller's line carries.
 
-    **A failed card write is reported and it stops nothing** (ADR 0067). The board is a
+    **A failed column write is reported and it stops nothing** (ADR 0067). The board is a
     mirror of the work, and the work is what the label and the worktree carry. So a board
     that cannot be written leaves a stale card and nothing else: the claim still writes its
-    label, and the transition still lands.
+    label, and the transition still lands. That holds on both trackers, because this catches
+    the one error class every adapter write raises.
 
     `board` is `(project, owner)`. With either one missing, or with no column to write,
     there is no card to move and the clause is empty. That is the same supported
-    configuration the start gate already reads as "the label alone decides".
+    configuration the start gate already reads as "the label alone decides". **The adapter
+    is what reads that pair, and it reads neither value on GitLab.** So this function names no
+    tracker, and the column moves there with no coordinate at all (ADR 0070).
     """
     project, owner = board
     try:
@@ -1172,10 +1177,12 @@ def claim(item, tracker, board=(0, "")):
     `needs-human` answers first here too, so a claim can never restart an item the machine
     was asked to leave alone.
 
-    **The card moves to `In progress` here, and the label follows it** (ADR 0067). The card
-    write comes after the `needs-human` read and before the label, so a paused item's card
-    never moves and a card in the start column always means no worker has taken the item.
-    `board` is `(project, owner)`, and with either one missing no card moves.
+    **The column moves to `In progress` here, and the label follows it** (ADR 0067). The
+    column write comes after the `needs-human` read and before the label, so a paused item's
+    card never moves and a card in the start column always means no worker has taken the item.
+    `board` is `(project, owner)`, and with either one missing no card moves. **On GitLab
+    there is no such pair and the column still moves.** A column there is a scoped label, so
+    the column name is the whole coordinate (ADR 0070).
     """
     try:
         labels, _ = tracker.item_facts(item)

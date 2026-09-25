@@ -31,9 +31,11 @@ call of its own: no second command, no page to fill and no page-limit refusal.
 `scoped_column` is that filter (ADR 0070).
 
 **The board is also written, at three moments, through one method.** `card_write` moves one
-item's card to one column, and a caller names that column rather than an id. The spawn claim
+item's column, and a caller names that column rather than an id. The spawn claim
 writes `In progress`, the tick that writes `to-review` writes `In review`, and the close
-writes `Done` after its teardown (ADR 0067).
+writes `Done` after its teardown (ADR 0067). On the tracker that has no card the write is
+one scoped label. It goes through the label writer this module already holds, so the same
+three moments work on both CLIs (ADR 0070).
 
 **Every list read here refuses rather than truncate.** A page that comes back full can be
 one page of a longer list, so no row on it can be counted and no absent row is absent.
@@ -161,6 +163,10 @@ EXIT_USAGE = 64
 # case. Both are part of the recipe in `docs/agents/issue-tracker.md`, so this module chose
 # neither. The four names are read for one purpose only, which is the refusal in
 # `scoped_column`: a board built on plain labels rather than scoped ones (ADR 0070).
+#
+# **The prefix is read by the write as well as by the read.** `card_write` joins it to the
+# column name in lower case, which is the form this table holds. So a label that write puts on
+# is a label `scoped_column` reads back as the same column.
 COLUMN_SCOPE = "status::"
 SCOPED_COLUMNS = ("to do", "in progress", "in review", "done")
 
@@ -820,33 +826,54 @@ class Tracker:
         return self._cards[1]
 
     def card_write(self, item, column, project, owner):
-        """Move one work item's card to `column`, and answer the clause a caller prints.
+        """Move one work item to `column`, and answer the clause a caller prints.
 
-        **The board is a mirror, and a seam writes the card at the moment the work moves**
-        (ADR 0067). This is that write, and it sits beside the card read above because the
+        **The board is a mirror, and a seam writes the column at the moment the work moves**
+        (ADR 0067). This is that write, and it sits beside the column read above because the
         two are one concept. Three callers reach it: the spawn claim, the tick that writes
-        `to-review`, and the close after its teardown.
+        `to-review`, and the close after its teardown. **All three work on both trackers**,
+        because the branch between a card and a scoped label lives here and in no seam
+        (ADR 0070).
 
-        **A caller holds the column name, and this resolves every id the write needs.** So
-        no configuration file holds a `Status` field id or an option id, and a renamed column
-        is one edit. The resolution costs three reads: the project's own id, the field list
-        that carries the option ids, and the card list that carries this item's card id.
+        **On the tracker that has no card the write is one scoped label** (ADR 0070). It goes
+        through `label_argv`, which is the label writer this module already holds, so the
+        write costs one command and resolves no id. It **adds the label and names none to
+        remove**. That tracker keeps one label per scope, so it drops the other value of the
+        scope itself. That is the same "one family, never stacks" rule the
+        **Work-state label** family follows. The two board coordinates are not read there,
+        because a column name is the whole coordinate where the label is the column.
 
-        **It is safe to call twice with the same column.** The card list already answers the
-        `Status` name, so a card that sits in the target column costs the reads and no write.
-        That is what makes the `Done` write safe beside the board's own
-        **item closed to Done** workflow, which writes the same column for most items.
+        **A caller holds the column name, and on the other tracker this resolves every id the
+        write needs.** So no configuration file holds a `Status` field id or an option id, and
+        a renamed column is one edit. The resolution costs three reads: the project's own id,
+        the field list that carries the option ids, and the card list that carries this item's
+        card id.
 
-        **Three cases answer without raising**, because each one is a supported
-        configuration: a tracker with no project board, an item with no card, and a column
-        name the board does not hold. A command that fails raises `TrackerError`, the way
-        every other write here does, and the caller reports it.
+        **It is safe to call twice with the same column, on either tracker.** The card list
+        already answers the `Status` name, so a card that sits in the target column costs the
+        reads and no write. The scoped write builds the same one command both times, and the
+        second one leaves the item wearing the label the first one put on. That is what makes
+        the `Done` write safe beside the board's own **item closed to Done** workflow, which
+        writes the same column for most items.
+
+        **Four cases answer without raising**, because each one is a supported
+        configuration: a caller with no column, a tracker with no project board, an item with
+        no card, and a column name the board does not hold. A command that fails raises
+        `TrackerError`, the way every other write here does, and the caller reports it.
 
         **In fixture mode the write is recorded and no id is resolved.** A fixture holds no
         project id and no option id, so the recorded line names the item and the column
-        rather than the four ids the live command carries. That line is what a test reads.
+        rather than the four ids the live command carries. The scoped write needs no such
+        stand-in, because it carries no id in the first place. Its recorded line is the very
+        command a live run makes. That line is what a test reads.
         """
-        if self.cli != GH or not (column and project and owner):
+        if not column:
+            return ""
+        if self.cli == GLAB:
+            label = f"{COLUMN_SCOPE}{column.lower()}"
+            self.write(self.label_argv(item, add=[label]))
+            return f"the {label} label moved work item #{item} to {column!r}"
+        if not (project and owner):
             return ""
         if self.path is not None:
             self.write(
