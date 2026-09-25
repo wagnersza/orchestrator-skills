@@ -11,7 +11,7 @@ the manifest. **`.claude-plugin/plugin.json` must hold no `hooks` key.** A key t
 the standard path makes the harness read one file twice, and it then refuses the whole
 plugin
 ([ADR 0060](../docs/adr/0060-the-manifest-names-no-standard-hook-file.md)). Each hook is
-stdlib-only Python with a suite of its own, which is the bar the two seams already hold.
+stdlib-only Python with a suite of its own, which is the bar the seams already hold.
 
 **The plane law is one sentence: a hook answers, and a seam performs.** A hook never
 writes a label, never merges and never spawns. Rationale, the rejected options, the

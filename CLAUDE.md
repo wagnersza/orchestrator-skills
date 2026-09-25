@@ -7,10 +7,12 @@ the layout and [`orchestrator/CONTEXT.md`](orchestrator/CONTEXT.md) for the
 vocabulary.
 
 This repo is mostly markdown skills plus JSON manifests — nothing to build, boot,
-or migrate. The exceptions are two seams, `scripts/close_item.py` (the close
-transaction) and `scripts/worker_state.py` (the worker watch), plus the
-`scripts/tracker.py` adapter they share (the tracker commands), each with a
-stdlib-only test suite: **run the tests when you touch a Python file**, per the
+or migrate. The exceptions are three seams, `scripts/close_item.py` (the close
+transaction), `scripts/worker_state.py` (the worker watch) and
+`scripts/worker_queue.py` (the start gate and the queue tick), plus the
+`scripts/tracker.py` adapter they share (the tracker commands, the work-state label
+swap and the flags that name one tracker), each with a stdlib-only test suite: **run the
+tests when you touch a Python file**, per the
 `evidence` bar in [`docs/agents/orchestrator.md`](docs/agents/orchestrator.md).
 `scripts/test_links.py` puts every Markdown file in the repo under that same suite.
 So **run the tests when you touch a Markdown file too**.

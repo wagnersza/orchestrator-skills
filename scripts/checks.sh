@@ -71,7 +71,7 @@ quick() {
 
 full() {
 	# The template runs the suite here under the coverage tool. This repo drops that
-	# wrapper and keeps the run. Both seams are CLI processes, and the suite drives them
+	# wrapper and keeps the run. Every seam is a CLI process, and the suite drives them
 	# through `subprocess`. So in-process line coverage reads 0% while every test passes.
 	# A number that measures nothing is not a threshold. So `gates.thresholds.coverage`
 	# stays blank, and `pyproject.toml` carries no `fail_under`.

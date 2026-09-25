@@ -53,7 +53,7 @@ decision it made, and every file keeps the text it was written with.
 | [0037](0037-the-merge-queue-is-an-ordered-train.md) | The merge queue is an ordered train a session runs | narrowed by [0053](0053-one-work-state-label-and-a-computed-position.md), narrowed by [0057](0057-the-merge-is-the-second-act.md), narrowed by [0066](0066-review-and-the-train-are-verbs.md) |
 | [0038](0038-the-to-merge-column-is-intent.md) | The To merge column is intent, for one column and in one direction | superseded by [0054](0054-the-board-is-an-input-not-a-mirror.md) |
 | [0039](0039-a-tracker-read-has-a-verified-command-in-the-skill.md) | A tracker read has one verified command, and it lives in the skill | — |
-| [0040](0040-the-tracker-is-one-adapter-behind-both-seams.md) | The tracker is one adapter behind both seams | narrowed by [0057](0057-the-merge-is-the-second-act.md), narrowed by [0065](0065-the-parent-edge-is-two-representations.md), narrowed by [0069](0069-the-adapter-orders-a-multi-write-close.md) |
+| [0040](0040-the-tracker-is-one-adapter-behind-both-seams.md) | The tracker is one adapter behind both seams | narrowed by [0057](0057-the-merge-is-the-second-act.md), narrowed by [0065](0065-the-parent-edge-is-two-representations.md), narrowed by [0069](0069-the-adapter-orders-a-multi-write-close.md), narrowed by [0071](0071-the-watch-and-the-queue-are-two-seams.md) |
 | 0041 | Void. Never used, and no file ever carried this number. | |
 | 0042 | Void. Never used, and no file ever carried this number. | |
 | 0043 | Void. Never used, and no file ever carried this number. | |
@@ -77,9 +77,11 @@ decision it made, and every file keeps the text it was written with.
 | [0061](0061-the-board-is-read-before-the-label.md) | The board is read before the label, so only a card in the start column reports a gap | narrowed by [0064](0064-the-start-gate-reads-two-labelled-sets.md), narrowed by [0062](0062-a-story-card-authorises-its-run.md) |
 | [0062](0062-a-story-card-authorises-its-run.md) | A story card authorises its run, and a child label starts the work | — |
 | [0063](0063-the-stall-window-starts-at-the-spawn.md) | The stall window starts at the spawn, so a fresh worker is never stalled | — |
-| [0064](0064-the-start-gate-reads-two-labelled-sets.md) | The start gate reads two labelled sets, and the whole board is a report | — |
+| [0064](0064-the-start-gate-reads-two-labelled-sets.md) | The start gate reads two labelled sets, and the whole board is a report | narrowed by [0071](0071-the-watch-and-the-queue-are-two-seams.md) |
 | [0065](0065-the-parent-edge-is-two-representations.md) | The parent edge is two representations, and the child read unions both | — |
 | [0066](0066-review-and-the-train-are-verbs.md) | Adversarial review and the merge train are verbs | — |
-| [0067](0067-the-board-is-a-mirror-at-three-moments.md) | The board is a mirror, and a seam writes the card at three moments | — |
+| [0067](0067-the-board-is-a-mirror-at-three-moments.md) | The board is a mirror, and a seam writes the card at three moments | narrowed by [0070](0070-a-board-column-is-a-card-or-a-scoped-label.md) |
 | [0068](0068-an-item-writing-flow-writes-the-start-label.md) | An item-writing flow writes `ready-for-agent`, and the drag stays the authorisation | — |
 | [0069](0069-the-adapter-orders-a-multi-write-close.md) | The adapter orders a multi-write close | — |
+| [0070](0070-a-board-column-is-a-card-or-a-scoped-label.md) | A board column is a card on one tracker and a scoped label on the other | — |
+| [0071](0071-the-watch-and-the-queue-are-two-seams.md) | The watch and the queue are two seams | — |

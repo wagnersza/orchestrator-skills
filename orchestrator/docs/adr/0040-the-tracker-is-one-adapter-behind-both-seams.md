@@ -12,6 +12,10 @@
 > Narrowed by [ADR 0069](0069-the-adapter-orders-a-multi-write-close.md). One module, one
 > class, one fixture format, and no seam that names a tracker: all four stand. What
 > narrows is one point, because the adapter now owns the order of a multi-write close.
+>
+> Narrowed by [ADR 0071](0071-the-watch-and-the-queue-are-two-seams.md). One module, one
+> class, one fixture format, and no seam that names a tracker: all four stand. What grows
+> is the shared surface, because the watch and the queue may not import each other.
 
 This repo holds two seams that speak to a tracker. `scripts/worker_state.py` asks what
 state a work item is in, and `scripts/close_item.py` closes one. Each seam held its own
