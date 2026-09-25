@@ -59,7 +59,7 @@ import unittest
 from pathlib import Path
 
 from scripts import worker_state
-from scripts.tracker import Tracker
+from scripts.tracker import COLUMN_SCOPE, GLAB, Tracker
 from scripts.tracker import write_transition as tracker_writer
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -146,6 +146,11 @@ PREDECESSORS: tuple[list[str], ...] = ([IN_PROGRESS], [READY_FOR_AGENT], [])
 BOARD_PROJECT = 6
 BOARD_OWNER = "someone"
 START_COLUMN = "To do"
+
+# The one coordinate the other tracker needs, which is the repository its writes address. It
+# has no project number and no owner, because a column there is a scoped label on the item
+# and the column name is the whole coordinate (ADR 0070).
+GLAB_REPO = "team/thing"
 
 
 # The stall windows, in the seconds the predicate takes. The command line takes `30m` and
@@ -2006,6 +2011,12 @@ class WorkerStateTestCase(unittest.TestCase):
         """Every card write this case's run made, as a list of argv strings."""
         return [one for one in self.writes() if "project item-edit" in one]
 
+    def columns_written(self):
+        """The same writes on the tracker that has no card, where a column is one scoped
+        label (ADR 0070). The work-state swap of the same run carries no such label, so this
+        filter separates the two families in one write log."""
+        return [one for one in self.writes() if COLUMN_SCOPE in one]
+
     def test_the_claim_moves_the_card_to_in_progress(self):
         """A card in the start column always means no worker has taken the item, so the
         claim moves it out of that column as it writes the label."""
@@ -2107,6 +2118,55 @@ class WorkerStateTestCase(unittest.TestCase):
         self.assertIn("the card write to 'In review' failed", clause)
         self.assertEqual(len(clause.splitlines()), 1, clause)
 
+    def test_both_tick_moments_write_the_column_on_the_other_tracker(self):
+        """The claim and the finish move the column on GitLab too, at the same two moments
+        they move it on GitHub (ADR 0070). A column there is a scoped label, so the write
+        names no board coordinate and this case passes none.
+
+        The refusal half is the same as the case above: a board that will not answer is
+        reported in the line, and the transition still lands.
+        """
+        self.write_fixture(labels=[READY_FOR_AGENT])
+        glab = Tracker(cli=GLAB, repo=GLAB_REPO, fixture=str(self.fixture))
+
+        code, line = worker_state.claim(ITEM, glab, (0, ""))
+
+        self.assertEqual(code, EXIT_APPLIED, line)
+        self.assertIn(f"{READY_FOR_AGENT} → {IN_PROGRESS} on work item #{ITEM}", line)
+        self.assertIn(f"work item #{ITEM} to 'In progress'", line)
+        self.assertEqual(
+            self.columns_written(),
+            [f"glab issue update {ITEM} --label status::in progress -R {GLAB_REPO}"],
+        )
+
+        # The finish, in the same tick that writes `to-review`. A fresh adapter, because
+        # each run of the seam builds its own and this one reads a rewritten fixture.
+        self.set_up_outcome("implementation-complete", IMPL)
+        code, line = worker_state.tick(
+            ITEM,
+            self.worktree,
+            PROCESS_PATTERN,
+            FOUR_HOURS,
+            Tracker(cli=GLAB, repo=GLAB_REPO, fixture=str(self.fixture)),
+            board=(0, ""),
+        )
+
+        self.assertEqual(code, EXIT_APPLIED, line)
+        self.assertIn(f"{IN_PROGRESS} → {TO_REVIEW} on work item #{ITEM}", line)
+        self.assertEqual(
+            self.columns_written(),
+            [f"glab issue update {ITEM} --label status::in review -R {GLAB_REPO}"],
+        )
+
+        # A board that will not answer stops neither moment.
+        self.fake_cli("glab")
+        clause = worker_state.card_line(
+            Tracker(cli=GLAB, repo=GLAB_REPO), ITEM, "In review", (0, "")
+        )
+
+        self.assertIn("the card write to 'In review' failed", clause)
+        self.assertEqual(len(clause.splitlines()), 1, clause)
+
     def test_the_wake_is_gone_with_its_five_flags(self):
         """No delivery is left, so no transition can be lost to one and no fact lives in a
         file a restart cannot read. The subcommand is gone, each flag is a usage error, and
@@ -2129,10 +2189,16 @@ class WorkerStateTestCase(unittest.TestCase):
         self.assertEqual(added, {str(self.root / "gh.json.writes")}, added)
 
     def test_one_function_writes_every_work_state_label(self):
-        """A grep for a label write finds no second path in the whole repo. There is one
-        call to the adapter's label builder, and it sits in the one writer, which lives
-        with the adapter because two seams swap the same four labels. So the removals and
-        the addition cannot drift apart, and a reader has one place to look."""
+        """A grep for a label write finds no path in a seam at all. Every call to the
+        adapter's label builder sits with the adapter, because two seams swap the same four
+        labels. So the removals and the addition cannot drift apart, and a reader has one
+        place to look.
+
+        There are two callers there, and they write two different label families.
+        `write_transition` writes the **Work-state label** family, and `card_write` writes one
+        scoped column label on the tracker that has no card (ADR 0070). Neither one can reach
+        the other's family: the work-state swap computes its removals from `WORK_STATES`, and
+        the column write names no label to remove at all."""
         builders = {}
         for name in ("tracker", "worker_state", "worker_queue"):
             tree = ast.parse((REPO_ROOT / "scripts" / f"{name}.py").read_text())
@@ -2147,8 +2213,8 @@ class WorkerStateTestCase(unittest.TestCase):
 
         self.assertEqual(
             builders,
-            {"tracker": 1, "worker_state": 0, "worker_queue": 0},
-            "one label write, and it sits with the adapter",
+            {"tracker": 2, "worker_state": 0, "worker_queue": 0},
+            "every label write sits with the adapter, and no seam builds one",
         )
 
     def test_the_tick_exit_codes_name_what_happened(self):

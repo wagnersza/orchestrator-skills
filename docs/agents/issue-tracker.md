@@ -316,8 +316,32 @@ scope, so GitLab swaps nothing and two column labels can sit on one item at once
 one is then the column. The adapter refuses, the message names the prefix it expected, and
 the item stays where it is. Scope the column labels, or name no board at all.
 
-**Only the read is built.** The three write moments of this section are the GitHub half
-today. ADR 0070 covers the column read, and the GitLab column write is a change of its own.
+**A GitLab project has no way to declare that it wants no board.** The two GitHub coordinates
+are what a missing board looks like there, and GitLab reads neither. So the three writes below
+always run on this tracker. A project whose maintainer wants no board gains three scoped labels
+that nothing reads, and no read and no gate acts on them.
+
+**The three writes work here too, at the same three moments.** The spawn claim writes
+`status::in progress`, the tick that writes `to-review` writes `status::in review`, and the
+close writes `status::done` after the teardown. Each one is a single label write. It adds the
+label for the target column and names none to remove, because GitLab drops the other value of
+the same scope by itself. So a repeat write of the same column changes nothing, and it needs
+no read of the board first.
+
+**On GitLab this write is the only thing that fills the done column.** GitHub Projects ships
+an **item closed to Done** workflow, so most cards there arrive in that column before the
+close writes it. GitLab has no such workflow. Both trackers end in the same column, and on
+this one the orchestrator's own write is what puts the item there.
+
+**A failed write is reported and it is never fatal**, at all three moments and on both
+trackers. A spawn, a transition and a close each run whole against a board that will not
+answer. The symptom is a stale column and nothing else.
+
+**The `ready-for-agent` write works here with no change of its own**, because it goes through
+the same label writer. That is the **Work-state labels** section above, and it holds a
+separate family from this one. A work-state swap computes its removals from the four work
+states. A column write names no label to remove at all. Neither one can reach the other's
+family.
 
 ## Pull requests as a triage surface
 

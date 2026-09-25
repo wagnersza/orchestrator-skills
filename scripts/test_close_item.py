@@ -39,7 +39,8 @@ from pathlib import Path
 # failed card write has no answer through the command line (ADR 0067). Every other case
 # runs the seam as a subprocess.
 from scripts import close_item
-from scripts.tracker import Tracker
+from scripts.tracker import COLUMN_SCOPE, Tracker
+from scripts.tracker import GLAB as GLAB_CLI
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -564,6 +565,45 @@ class CloseItemTestCase(unittest.TestCase):
         self.assertIsNone(self.step(plan, 5)["card"])
         self.assertEqual(plan["ran"][-1], self.teardown_command())
         self.assertEqual([one for one in self.tracker_writes() if "project" in one], [])
+
+    def test_the_column_moves_to_done_on_the_other_tracker_too(self):
+        """A column on GitLab is a scoped label, so the close writes one after the teardown
+        and names no board coordinate (ADR 0070). This case passes neither, and the write
+        still happens: the column name is the whole coordinate there.
+
+        GitLab ships no built-in item closed to Done workflow, so this write is the only
+        thing that fills that column.
+
+        The refusal half comes last: a board that will not answer leaves one line in the plan
+        and the close still ran whole.
+        """
+        plan = self.close("--execute", "--teardown", *GLAB)
+
+        self.assertEqual([entry["step"] for entry in plan["steps"]], [4, 5, 6, 7, 8])
+        self.assertEqual(self.statuses(plan), ["done"] * 5)
+        # The teardown command ran, and then the column write. That order is the point.
+        self.assertEqual(plan["ran"][-2], self.teardown_command())
+        self.assertIn(f"work item #{ISSUE} to 'Done'", plan["ran"][-1])
+        self.assertEqual(
+            [one for one in self.tracker_writes() if COLUMN_SCOPE in one],
+            [f"glab issue update {ISSUE} --label status::done -R {HOST}/{PROJECT}"],
+        )
+
+        # A board that will not answer is one line and never a failed close.
+        failing = self.root / "glab-bin"
+        failing.mkdir()
+        (failing / "glab").write_text("#!/bin/sh\necho '403 Forbidden' >&2\nexit 1\n")
+        (failing / "glab").chmod(0o755)
+        path = os.environ["PATH"]
+        os.environ["PATH"] = f"{failing}{os.pathsep}{path}"
+        self.addCleanup(os.environ.__setitem__, "PATH", path)
+        card = {"item": ISSUE, "column": "Done", "project": 0, "owner": ""}
+
+        ran = close_item.card_write(card, Tracker(cli=GLAB_CLI, repo=PROJECT))
+
+        self.assertEqual(len(ran), 1, ran)
+        self.assertIn("the card write to 'Done' failed", ran[0])
+        self.assertIn("403 Forbidden", ran[0])
 
     def test_a_failed_card_write_is_reported_and_never_fails_the_close(self):
         """Every step has already run by then, so a board that cannot be written leaves a
