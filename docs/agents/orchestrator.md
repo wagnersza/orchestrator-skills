@@ -63,7 +63,7 @@ setup_cmd:  "python3 --version"   # stdlib-only test suite; nothing to install i
 run_recipe: ""            # no app to boot
 ports:      ""            # no ports (nothing listens)
 db_gate:    ""            # no database
-evidence:   "`make quick` and `make full` green at the pushed HEAD, with the gate record line for each one. The two commands own the test suite now, so no separate run is quoted. `make deep` is blank on the `lite` profile, so it asks for nothing. Plus: the changed skill/reference read end to end for internal consistency, every cross-reference resolved (`scripts/test_links.py` runs inside both gate commands and proves this half, not a reading), and any manifest edit validated as JSON. For a change to a skill body, quote the before/after of each edited block in the review note."
+evidence:   "`make quick` and `make full` green at the pushed HEAD, with the gate record line for each one. The two commands own the test suite now, so no separate run is quoted. `make deep` is blank here, so it asks for nothing. Plus: the changed skill/reference read end to end for internal consistency, every cross-reference resolved (`scripts/test_links.py` runs inside both gate commands and proves this half, not a reading), and any manifest edit validated as JSON. For a change to a skill body, quote the before/after of each edited block in the review note."
 
 # --- quality gates (the layered completion bar) ---
 # The layer model and the Python gate matrix are in references/quality-gates.md.
