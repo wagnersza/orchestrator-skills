@@ -1,7 +1,7 @@
 # The tracker is one adapter behind both seams
 
 **The adapter now sits behind three seams, and it holds more than the commands. See
-[ADR 0070](0070-the-watch-and-the-queue-are-two-seams.md).** Every rule below stands: one
+[ADR 0071](0071-the-watch-and-the-queue-are-two-seams.md).** Every rule below stands: one
 module, one class, one fixture format, and no seam names a tracker. What grew is the
 shared surface, because the watch and the queue may not import each other.
 

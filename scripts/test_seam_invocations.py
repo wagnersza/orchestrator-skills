@@ -24,7 +24,7 @@ with no command to run.
 
 The third half reads the module name. The two worker seams are separate files, and each
 one serves three of the six subcommands
-(`orchestrator/docs/adr/0070-the-watch-and-the-queue-are-two-seams.md`). A line that asks
+(`orchestrator/docs/adr/0071-the-watch-and-the-queue-are-two-seams.md`). A line that asks
 one of them for the other's subcommand is a path that exists and a command that exits 2
 with `invalid choice`. A schedule reads any non-zero code as a quiet tick, so nothing
 reports that fault and the queue stops. `SERVED_BY` holds the pairing, and one
@@ -71,7 +71,7 @@ PATH_FORM = "<plugin root>/scripts/"
 
 # Which module serves each subcommand of the worker seams. The watch reads a worktree and
 # a process; the queue is a graph walk over one tracker read, and the two are separate
-# files (`orchestrator/docs/adr/0070-the-watch-and-the-queue-are-two-seams.md`). A line
+# files (`orchestrator/docs/adr/0071-the-watch-and-the-queue-are-two-seams.md`). A line
 # that names the wrong one is a command that exits 2 with `invalid choice`, which reads as
 # a quiet tick to a schedule.
 SERVED_BY = {

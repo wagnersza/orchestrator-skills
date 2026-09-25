@@ -181,7 +181,7 @@ before sending a prompt.
 flows: `scripts/close_item.py` owns steps 4 to 8 of a **Close transaction** (ADR
 0015), `scripts/worker_state.py` owns the **Worker watch** predicate (ADR
 0018), and `scripts/worker_queue.py` owns the start gate and the queue tick (ADR
-0045, split out by ADR 0070). Each has a test suite. So:
+0045, split out by ADR 0071). Each has a test suite. So:
 
 - `setup_cmd` is a Python availability check, not blank. The suite is
   **stdlib-only** — fixtures are local git repos built in a temp directory, with

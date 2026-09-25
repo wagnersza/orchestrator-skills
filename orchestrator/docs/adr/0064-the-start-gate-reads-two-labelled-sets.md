@@ -1,7 +1,7 @@
 # The start gate reads two labelled sets, and the whole board is a report
 
 **The six subcommands below are two files now. See
-[ADR 0070](0070-the-watch-and-the-queue-are-two-seams.md).** This ADR chose a reading
+[ADR 0071](0071-the-watch-and-the-queue-are-two-seams.md).** This ADR chose a reading
 strategy, and every rule of it stands: `start` and a queue tick still call one gate
 function, so the two cannot disagree about one item. What moved is the file boundary. The
 three subcommands this ADR describes live in `scripts/worker_queue.py`.
