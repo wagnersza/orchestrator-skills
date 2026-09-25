@@ -1,5 +1,9 @@
 # A verb resolves to a skill, in one of two lanes
 
+> Narrowed by [ADR 0016](0016-the-orchestrator-merges-when-asked.md). Every other
+> source-writing verb still takes the worker lane. What narrows is one bounded exception,
+> a conflict the orchestrator resolves inside the item's worktree.
+
 The orchestrator read the user's verb as plain English and improvised. The skills
 that already hold those jobs — `/to-spec`, `/to-tickets`, `/grill-with-docs`,
 `/implement` — sat installed and unused. So `/orchestrator to-spec` produced

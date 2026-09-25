@@ -1,5 +1,23 @@
 # Delegate tracker config to the mattpocock engineering skills
 
+> Narrowed by [ADR 0009](0009-labels-drive-board-status.md). The orchestrator still owns
+> no tracker abstraction, and the label vocabulary still comes from the per-project file.
+> What narrows is the consequence that the orchestrator defines no work-state label.
+>
+> Narrowed by [ADR 0039](0039-a-tracker-read-has-a-verified-command-in-the-skill.md). The
+> split stands. The per-project `docs/agents/issue-tracker.md` still holds the CLI name,
+> the host, the labels and the board coordinates. What narrows is where a verified read
+> command lives, and that is the skill.
+>
+> Narrowed by [ADR 0040](0040-the-tracker-is-one-adapter-behind-both-seams.md). Tracker
+> configuration is still per-repo data in the per-project file. What narrows is the
+> deferral of a second abstraction, because one adapter now sits behind both seams.
+>
+> Narrowed by [ADR 0065](0065-the-parent-edge-is-two-representations.md). The item body
+> still follows the external `to-tickets` template, and the `## Parent` section is
+> unforked. What narrows is the edge itself, because a child now carries two
+> representations of it.
+
 The orchestrator needs a work-item tracker (find ready work, claim it, post review notes, flip states) but the mattpocock engineering skills this project already depends on (`to-tickets`, `to-spec`, `triage`, `/setup-matt-pocock-skills`) already own a tracker abstraction over GitHub / GitLab / local markdown, configured per-repo in `docs/agents/issue-tracker.md`. Rather than build a second tracker abstraction, the orchestrator **reuses that config**: it reads `docs/agents/issue-tracker.md` for the CLI and label vocabulary, and if the file is missing, calls `/setup-matt-pocock-skills` to create it.
 
 ## Considered Options

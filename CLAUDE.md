@@ -52,7 +52,12 @@ So **run the tests when you touch a Markdown file too**.
 - **Every claim in a skill body traces to a reference file or an ADR.** A rule with
   no home rots.
 - **A decision that reverses or narrows an earlier one gets a new ADR** under
-  `orchestrator/docs/adr/`, rather than a silent edit to the old one.
+  `orchestrator/docs/adr/`, rather than a silent edit to the old one. **The older file
+  also gains one pointer forward**, in its preamble, naming the new ADR and what
+  survives. Its decision text stays as it was written. Every edge has a row in
+  [the ADR ledger](orchestrator/docs/adr/README.md), which also names the numbers that
+  are void. `scripts/test_links.py` fails when a row has no pointer behind it, and when a
+  pointer has no row.
 - **Renaming or deleting a reference file means updating every link to it.** A
   dangling cross-reference is this repo's main failure mode.
 - **Bump `version` in `.claude-plugin/plugin.json` when a user story finishes.** The bump

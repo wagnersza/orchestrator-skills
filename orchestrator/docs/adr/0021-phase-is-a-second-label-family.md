@@ -1,6 +1,15 @@
 # Phase is a second label family, not a second state machine
 
 > Superseded by [ADR 0053](0053-one-work-state-label-and-a-computed-position.md)
+>
+> Narrowed by [ADR 0025](0025-the-session-writes-the-review-state.md). A `phase:*` label
+> is still written as the first act of every other transition. What narrows is one point
+> of that ordering.
+>
+> Narrowed by [ADR 0047](0047-the-story-proof-runs-before-the-story-gate.md). Three
+> values, mutually exclusive inside the family, worn beside the work-state label: all
+> three properties stand. What widens is what a `phase:*` label can mark, because it also
+> marks a parent story under proof.
 
 A **Work item** owned by a worker wears `in-progress` from the spawn to the end of the
 review loop. The **Work-state labels** entry of

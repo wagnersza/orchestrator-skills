@@ -1,5 +1,9 @@
 # A readiness gate holds the first prompt, and a process check is its signal
 
+> Narrowed by [ADR 0019](0019-readiness-is-a-tool-agnostic-process-check.md). A live agent
+> process whose working directory is the worktree is still the readiness signal, and the
+> gate still fails closed. What narrows is where the concrete command lives.
+
 An adversarial-review round was lost in silence. The orchestrator cut a worktree,
 launched `codex` in it, and sent the review prompt. The harness never received it.
 `codex` sat behind two first-run dialogs and then exited, so the prompt text landed

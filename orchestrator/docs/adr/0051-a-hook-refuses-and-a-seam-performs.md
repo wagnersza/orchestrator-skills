@@ -1,5 +1,14 @@
 # A hook refuses, and a seam performs
 
+> Narrowed by [ADR 0055](0055-the-label-denial-reads-its-caller.md). The plane law stands.
+> The hook still fails open, it still copies no vocabulary, and it still exits fast where
+> the repo carries no marker. What narrows is one point, because the label denial gains
+> the caller test the teardown denial already held.
+>
+> Reversed by [ADR 0060](0060-the-manifest-names-no-standard-hook-file.md). The plane law
+> stands, and the hook keeps its events, its content and its test suites. What reverses is
+> one paragraph, because the manifest names no standard hook file.
+
 Every rule in this repo is advice. A skill body states it, a checklist repeats it, and
 a review note claims it was kept. So a rule holds where a model remembers it, and it
 is skipped where the model does not. That is the defect behind the original report:

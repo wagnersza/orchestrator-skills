@@ -1,5 +1,9 @@
 # A worker commits in contextualised slices, and this repo owns the rule
 
+> Narrowed by [ADR 0025](0025-the-session-writes-the-review-state.md). A slice is still
+> one logical change, and the branch is still self-consistent at each commit. What narrows
+> is one box of the completion contract, because that box loses its second half.
+
 A worker finished a work item and landed the whole thing as one commit. The PR then
 carried a single blob, in one step with one message: an ADR, a vocabulary entry,
 three reference edits and a manifest bump. `git log` on the branch told the

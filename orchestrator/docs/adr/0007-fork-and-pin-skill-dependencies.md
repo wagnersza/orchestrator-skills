@@ -1,6 +1,10 @@
 # Fork each declared skill dependency and pin the fork's default branch
 
 > Superseded by [ADR 0028](0028-drop-the-fork-and-pin-dial.md)
+>
+> Narrowed by [ADR 0011](0011-delegate-technical-writing-to-simple-english.md). The
+> marketplace CLI is still the only version dial. What narrows is the fork set, and it
+> becomes the declared dependencies installed through a marketplace.
 
 Every skill this repo declares as a dependency — `mattpocock-skills`, `ponytail`,
 `prompt-improver` — was installed straight from someone else's default branch,

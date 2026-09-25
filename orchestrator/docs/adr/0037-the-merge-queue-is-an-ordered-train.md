@@ -1,5 +1,19 @@
 # The merge queue is an ordered train a session runs
 
+> Narrowed by [ADR 0053](0053-one-work-state-label-and-a-computed-position.md). The three
+> ordering steps, the park rule and one full **Close transaction** per item all stand.
+> What narrows is one sentence that names a label this repo no longer writes.
+>
+> Narrowed by [ADR 0057](0057-the-merge-is-the-second-act.md). The three ordering steps,
+> the park rule and one full **Close transaction** per item all stand, and
+> `scripts/merge_train.py` keeps its contract. What narrows is the trigger, because no
+> tick calls a **Merge train**.
+>
+> Narrowed by [ADR 0066](0066-review-and-the-train-are-verbs.md). The ordering keeps its
+> three steps, the park rule and the contract of the seam, and `scripts/merge_train.py` is
+> unchanged. What retires is every path from a schedule to a train, because the train is a
+> verb now.
+
 An owned run ends at the review state. A worker finishes, the **Orchestrator** writes
 `to-review`, and nothing moves until the maintainer types `close 20`. That is
 [ADR 0016](0016-the-orchestrator-merges-when-asked.md) working as designed.

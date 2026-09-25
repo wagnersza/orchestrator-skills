@@ -2,6 +2,8 @@
 
 The orchestrator skill coordinates worker sessions that implement work items. This context defines the vocabulary the skill uses to stay independent of any one workspace tool, agent CLI, or model vendor.
 
+The decisions behind this vocabulary sit in `docs/adr/`. [The ADR ledger](docs/adr/README.md) lists every one of them by number, with the later decision that reversed or narrowed it, and with the numbers that are void. Where an entry below cites an ADR, the ledger says whether a newer one has changed it.
+
 ## Language
 
 **Tool**:

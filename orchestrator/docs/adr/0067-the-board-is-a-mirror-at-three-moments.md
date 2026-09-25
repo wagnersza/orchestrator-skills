@@ -1,5 +1,10 @@
 # The board is a mirror, and a seam writes the card at three moments
 
+> Narrowed by [ADR 0070](0070-a-board-column-is-a-card-or-a-scoped-label.md). One read,
+> three writes, and a card that moves with the work: all three stand. What narrows is how
+> a column is addressed, because on the other tracker a column is a scoped label on the
+> item and not a card field.
+
 `0054-the-board-is-an-input-not-a-mirror.md` took every card write out of this repo. It had
 a good reason. The writes it removed were seven, they were spread across four call sites,
 and each one wrote a column that a **Work-state label** already carried. A derived value

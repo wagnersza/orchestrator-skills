@@ -1,5 +1,17 @@
 # An Item automation replaces the blocking watch, and the seam becomes a predicate
 
+> Narrowed by [ADR 0024](0024-the-wake-target-is-a-resolved-handle.md). The comment
+> fallback and the one-line relay that needs no judgement stay as written. What narrows is
+> how the terminal is found, and that is a handle resolved at spawn.
+>
+> Narrowed by [ADR 0027](0027-the-tick-delivers-its-own-wake.md). The accepted risk, the
+> comment fallback and the precheck flags resolved at spawn are unchanged. What narrows is
+> who delivers the wake, because the tick delivers its own.
+>
+> Narrowed by [ADR 0063](0063-the-stall-window-starts-at-the-spawn.md). The two-fact stall
+> read stands, and the seam still owns no clock. What narrows is the list of facts,
+> because it gains the spawn time.
+
 A **Worker watch** starts as a background process of the orchestrator session's own
 shell (`scripts/worker_state.py watch ... &`). Close the session, restart the
 harness, or reboot the machine, and every watch is gone. Nothing reports that. **A
