@@ -69,8 +69,11 @@ REQUIREMENTS = REPO_ROOT / "orchestrator" / "references" / "requirements.md"
 TEMPLATE = REPO_ROOT / "orchestrator-setup" / "orchestrator.template.md"
 
 # The one writer of the gate record, and the four files that run a gate command: this
-# repo's own pair, and the pair /orchestrator-setup writes for a target repo.
+# repo's own pair, and the pair /orchestrator-setup writes for a target repo. The hook is
+# the writer, and `hooks/gate_record.py` holds the append it calls, because the format has
+# one home in code.
 RECORD_HOOK = REPO_ROOT / "hooks" / "record.py"
+GATE_RECORD = REPO_ROOT / "hooks" / "gate_record.py"
 CHECKS = REPO_ROOT / "scripts" / "checks.sh"
 CHECKS_TEMPLATE = REPO_ROOT / "orchestrator-setup" / "templates" / "checks.sh.template"
 MAKEFILE = REPO_ROOT / "Makefile"
@@ -807,11 +810,19 @@ class GateRecordWriterTestCase(unittest.TestCase):
             self.fail("\n".join(["a gate runner appends to the record:", *reported]))
 
     def test_the_record_hook_is_the_one_writer(self):
-        """The hook holds the append the scripts lost. A pass with no append in the hook
-        reads as a repo where nothing writes the record at all."""
+        """The hook plane holds the append the scripts lost. A pass with no append in it
+        reads as a repo where nothing writes the record at all.
+
+        The append sits in `hooks/gate_record.py`, the format's one home in code, and
+        `hooks/record.py` is the one caller of it. So the test reads both halves."""
         self.assertTrue(
-            re.search(r"""open\(["']a["']""", RECORD_HOOK.read_text(encoding="utf-8")),
-            "hooks/record.py opens the record in append mode",
+            re.search(r"""open\(["']a["']""", GATE_RECORD.read_text(encoding="utf-8")),
+            "hooks/gate_record.py opens the record in append mode",
+        )
+        self.assertIn(
+            "gate_record.append(",
+            RECORD_HOOK.read_text(encoding="utf-8"),
+            "hooks/record.py calls that append",
         )
 
 

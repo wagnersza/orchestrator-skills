@@ -28,6 +28,10 @@ hook prints nothing and exits 0.
 **It fails open.** A command this hook cannot parse is a command it permits. A hook
 that guesses denies correct work, and that is worse than a rule a session breaks.
 
+**What it reads about the repo, it reads through `hooks/repo.py`**, and the gate record
+it reads through `hooks/gate_record.py`. This hook holds no copy of either read, and it
+keeps the wording of every denial it gives.
+
 The plane law is `orchestrator/references/hooks.md` and
 `orchestrator/docs/adr/0051-a-hook-refuses-and-a-seam-performs.md`.
 
@@ -40,22 +44,15 @@ The tests are `hooks/test_refuse.py`, and both gate commands run them:
 """
 
 import json
-import os
-import re
 import shlex
-import subprocess
 import sys
 from pathlib import Path
-from typing import Any
 
-# The two facts that say this repo is orchestrated. Either one is enough.
-CONFIG = Path("docs") / "agents" / "orchestrator.md"
-ORCHESTRATOR_DIR = ".orchestrator"
-
-# The work-state label family, read from the file that owns it. The strings are not
-# copied here, because two copies of a vocabulary drift.
-LABEL_SECTION = "## Work-state labels"
-TABLE_LABEL = re.compile(r"^\|[^|]*\|\s*`([^`]+)`\s*\|")
+try:
+    from . import gate_record, repo
+except ImportError:  # the hook runs as a plain script, with no package around it
+    import gate_record  # type: ignore[no-redef, import-not-found]
+    import repo  # type: ignore[no-redef, import-not-found]
 
 # The flags either tracker CLI writes a label with. A command that carries none of
 # them writes no label, whatever strings it holds.
@@ -86,56 +83,6 @@ OPERATORS = ("&&", "||", ";", "|", "&")
 GIT = "git"
 PUSH = "push"
 GIT_VALUE_FLAGS = ("-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path")
-
-# The three layer keys of the `gates:` block, and one line of that block: the key, then
-# a quoted or a bare value. A trailing comment is not part of the command. Layer 5 is
-# not a Gate, because it has no exit code
-# (`orchestrator/references/quality-gates.md`).
-GATE_LINE = re.compile(
-    r"""^\s+(quick|full|deep):\s*(?:"([^"]*)"|'([^']*)'|([^#\n]*))"""
-)
-
-# Where the record lives, beside the checklist the worker ticks. `hooks/record.py` is
-# its one writer, and the format has one home: the gate record section of
-# `orchestrator/references/quality-gates.md`.
-GATE_RECORD = "gates-{item}.jsonl"
-
-# The shortest `head_sha` that counts as an identification of a commit. A recorded sha
-# can be short, so the comparison is a prefix test. The floor is what stops a
-# one-character value from matching every commit there is.
-SHA_PREFIX = 7
-
-
-def project_dir():
-    """The repository this session opened."""
-    return Path(os.environ.get("CLAUDE_PROJECT_DIR") or Path.cwd())
-
-
-def orchestrated(root):
-    """Whether this repo is one the orchestrator skill runs on."""
-    return (root / CONFIG).is_file() or (root / ORCHESTRATOR_DIR).is_dir()
-
-
-def work_state_labels(root):
-    """The work-state label family, from the file that owns the vocabulary.
-
-    A table row holds the label in its second cell. Where the file is absent, this
-    reads as an empty family and the hook denies no label write.
-    """
-    path = root / "docs" / "agents" / "issue-tracker.md"
-    if not path.is_file():
-        return []
-    labels = []
-    inside = False
-    for line in path.read_text(encoding="utf-8").splitlines():
-        if line.startswith("## "):
-            inside = line.strip() == LABEL_SECTION
-            continue
-        if inside:
-            match = TABLE_LABEL.match(line)
-            if match:
-                labels.append(match.group(1))
-    return labels
 
 
 def tokens(command):
@@ -201,7 +148,7 @@ def label_denial(root, words):
     written = labels_written(words)
     if not written:
         return ""
-    family = work_state_labels(root)
+    family = repo.work_state_labels(root)
     named = [label for label in written if label in family]
     if not named:
         return ""
@@ -263,96 +210,19 @@ def pushes(words):
     return False
 
 
-def item_number(root):
-    """The work item this worktree implements, or an empty string.
-
-    The checklist file names it, so no field of config reaches this hook. A checkout
-    with no checklist proves no gate, because the record belongs to one item.
-    """
-    found = sorted((root / ORCHESTRATOR_DIR).glob("checklist-*.md"))
-    return found[0].stem[len("checklist-") :] if found else ""
-
-
-def gate_commands(root):
-    """Every `(layer, command)` pair the `gates:` block of config names.
-
-    The block is the one source. **A blank command is not a Gate**: a layer the
-    profile dropped names no command, so it is left out here. Otherwise a repo on the
-    `lite` profile, where `deep` is blank, can never push.
-    """
-    path = root / CONFIG
-    if not path.is_file():
-        return []
-    gates = []
-    inside = False
-    for line in path.read_text(encoding="utf-8").splitlines():
-        if line.startswith("gates:"):
-            inside = True
-            continue
-        if inside and line.strip() and not line.startswith((" ", "\t")):
-            break
-        if not inside:
-            continue
-        match = GATE_LINE.match(line)
-        if match:
-            value = next(group for group in match.groups()[1:] if group is not None)
-            if value.strip():
-                gates.append((match.group(1), value.strip()))
-    return gates
-
-
-def latest_runs(path):
-    """`(newest run per command, the first malformed line number)`.
-
-    The last line a command wrote is the one that counts, because a worker runs a
-    command again after it corrects a fault. The walk stops at the first line that is
-    not one JSON object, because one unreadable line puts the lines around it in
-    doubt as well. This is the rule the `gates-unproven` outcome already uses
-    (`scripts/worker_state.py`).
-    """
-    # A line is whatever `json.loads` returns, so the value type is `Any`.
-    latest: dict[str, Any] = {}
-    try:
-        text = path.read_text(encoding="utf-8")
-    except OSError:
-        return latest, 0
-    for number, line in enumerate(text.splitlines(), 1):
-        if not line.strip():
-            continue
-        try:
-            run = json.loads(line)
-        except ValueError:
-            return latest, number
-        if not isinstance(run, dict):
-            return latest, number
-        latest[str(run.get("command", ""))] = run
-    return latest, 0
-
-
-def head_sha(root):
-    """The commit this worktree sits on, or an empty string."""
-    proc = subprocess.run(
-        ["git", "-C", str(root), "rev-parse", "HEAD"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    return proc.stdout.strip() if proc.returncode == 0 else ""
-
-
 def not_green(run, head):
     """Why this run is not a green line at `HEAD`, or an empty string.
 
     Three causes, and each one asks for the same repair: run the command again. A
-    recorded sha reads as a prefix, so a short one matches.
+    recorded sha reads as a prefix, so a short one matches
+    (`hooks/gate_record.py`).
     """
     if run is None:
         return "the record holds no line of it"
-    seen = str(run.get("head_sha") or "")
-    if not head or len(seen) < SHA_PREFIX or not head.startswith(seen):
-        return f"its newest line names another commit, {seen or 'none'}"
-    if run.get("exit") != 0:
-        return f"its newest line exited {run.get('exit')}"
+    if not gate_record.at_head(run["head_sha"], head):
+        return f"its newest line names another commit, {run['head_sha'] or 'none'}"
+    if run["exit"] != 0:
+        return f"its newest line exited {run['exit']}"
     return ""
 
 
@@ -365,20 +235,21 @@ def push_denial(root, words):
     """
     if not pushes(words):
         return ""
-    item = item_number(root)
-    gates = gate_commands(root)
+    item = repo.item_number(root)
+    gates = repo.gate_commands(root)
     if not item or not gates:
         return ""
-    record = root / ORCHESTRATOR_DIR / GATE_RECORD.format(item=item)
-    latest, malformed = latest_runs(record)
+    record = gate_record.path(root, item)
+    found, malformed = gate_record.runs(record)
+    latest = gate_record.newest(found)
     runs = f"Run {', '.join(f'`{command}`' for _, command in gates)}."
     if malformed:
         return (
             f"This command pushes, and line {malformed} of {record} is not one JSON "
-            f"object. So the record proves no gate green at HEAD. {runs} The rule is "
-            "orchestrator/references/hooks.md."
+            f"object with the four keys. So the record proves no gate green at HEAD. "
+            f"{runs} The rule is orchestrator/references/hooks.md."
         )
-    head = head_sha(root)
+    head = repo.head_sha(root)
     faults = []
     for layer, command in gates:
         reason = not_green(latest.get(command), head)
@@ -416,8 +287,8 @@ def main():
         return 0
     if event.get("tool_name") != "Bash":
         return 0
-    root = project_dir()
-    if not orchestrated(root):
+    root = repo.project_dir()
+    if not repo.orchestrated(root):
         return 0
     reason = denial(root, (event.get("tool_input") or {}).get("command") or "")
     if not reason:

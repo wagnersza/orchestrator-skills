@@ -242,7 +242,6 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Any
 
 # Both invocation forms reach the adapter: `python3 <plugin root>/scripts/worker_state.py`
 # puts `scripts/` on the path, and `python3 -m scripts.worker_state` puts the repo root
@@ -284,6 +283,18 @@ except ImportError:  # the type checker reads the package form above
         write_transition,
     )
 
+# The **Gate record** format, from the one module that owns it. The hook plane writes the
+# record and this seam reads it, so the two share the format rather than each holding a
+# parser of its own (`orchestrator/references/hooks.md`). It is a library and not a hook,
+# so it refuses nothing and performs nothing here (ADR 0051).
+try:
+    from hooks import gate_record, repo
+except (
+    ImportError
+):  # `python3 <plugin root>/scripts/worker_state.py` puts `scripts/` first
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    from hooks import gate_record, repo
+
 EXIT_COMPLETE = 0
 EXIT_GONE = 3
 
@@ -324,16 +335,6 @@ RE_PROMPTED = re.compile(r"^\s*" + re.escape(RE_PROMPT), re.MULTILINE)
 RE_PROMPTS = 1
 
 BOX = re.compile(r"^\s*[-*+]\s*\[([ xX])\]")
-
-# The four keys one line of the **Gate record** carries. A line that drops one of them
-# is malformed: a run nobody can date, or cannot tie to a commit, proves nothing. The
-# format has one home, `references/quality-gates.md` (ADR 0036).
-GATE_KEYS = ("command", "exit", "utc", "head_sha")
-
-# The shortest `head_sha` that counts as an identification of a commit. A gate command
-# can record a short sha, so the comparison is a prefix test. The floor is what stops a
-# one-character value from matching every commit there is.
-SHA_PREFIX = 7
 
 UNITS = {"s": 1, "m": 60, "h": 3600}
 
@@ -513,68 +514,6 @@ def re_prompts_in(bodies):
 # --- the Gate record (ADR 0036) ---------------------------------------------
 
 
-def gate_record_path(worktree, item):
-    """Where a worker's **Gate record** lives, beside its **Checklist**."""
-    return Path(worktree) / ORCHESTRATOR_DIR / f"gates-{item}.jsonl"
-
-
-def gate_runs(path):
-    """`(runs, malformed)` for the **Gate record** at `path`.
-
-    `runs` holds one dict per readable line, in the order a gate command appended
-    them. So the newest run of a command is the last one in the list, and no line
-    has to be sorted by its `utc` value.
-
-    `malformed` is the number of the first line that is not one JSON object with the
-    four keys, or 0 where every line reads. A blank line is how a text file ends, so
-    it is neither a run nor a fault. The walk stops at the first malformed line,
-    because one unreadable line puts the lines around it in doubt as well.
-    """
-    # A line is whatever `json.loads` returns, so the value type is `Any`. The walk
-    # that follows narrows it to the four keys.
-    runs: list[dict[str, Any]] = []
-    try:
-        text = Path(path).read_text()
-    except OSError:
-        return runs, 0
-    for number, line in enumerate(text.splitlines(), 1):
-        if not line.strip():
-            continue
-        try:
-            run = json.loads(line)
-        except ValueError:
-            return runs, number
-        if not isinstance(run, dict) or any(key not in run for key in GATE_KEYS):
-            return runs, number
-        try:
-            run["exit"] = int(run["exit"])
-        except (TypeError, ValueError):
-            return runs, number
-        run["command"] = str(run["command"])
-        run["head_sha"] = str(run["head_sha"])
-        runs.append(run)
-    return runs, 0
-
-
-def head_sha(worktree):
-    """The commit the worktree is on, or an empty string where there is none."""
-    proc = subprocess.run(
-        ["git", "-C", str(worktree), "rev-parse", "--verify", "--quiet", "HEAD"],
-        capture_output=True,
-        text=True,
-    )
-    return proc.stdout.strip() if proc.returncode == 0 else ""
-
-
-def at_head(recorded, head):
-    """Whether a recorded `head_sha` names the commit `head`.
-
-    A gate command can write a short sha, so this is a prefix test and never an
-    equality. `SHA_PREFIX` is the floor under it.
-    """
-    return bool(head) and len(recorded) >= SHA_PREFIX and head.startswith(recorded)
-
-
 def unproven_gates(worktree, item, required):
     """Why the **Gate record** does not prove this finish, or an empty string.
 
@@ -582,16 +521,22 @@ def unproven_gates(worktree, item, required):
     four different repairs: a missing file, a missing line, a non-zero exit, and a
     green run against a stale commit. The line names which one it was.
 
+    The read, the malformed-line rule and the at-`HEAD` test come from
+    `hooks/gate_record.py`, which is the format's one home. **This caller needs every
+    run and not one per command**, because its stale line names the newest recorded sha
+    whether or not that run sits at `HEAD`. The wording of each line stays here, because
+    that is the part a maintainer reads.
+
     With no `--require-gate` there is nothing to prove, so nothing is read and this
     returns nothing. A caller that names no layer keeps the behaviour it had before
     the flag existed (ADR 0036).
     """
     if not required:
         return ""
-    path = gate_record_path(worktree, item)
-    runs, malformed = gate_runs(path)
+    path = gate_record.path(worktree, item)
+    runs, malformed = gate_record.runs(path)
     if malformed:
-        keys = ", ".join(GATE_KEYS)
+        keys = ", ".join(gate_record.KEYS)
         return (
             f"a malformed line — {path} line {malformed} is not one JSON object with "
             f"the keys {keys}, so this tick cannot read the record"
@@ -601,27 +546,30 @@ def unproven_gates(worktree, item, required):
             f"a missing file — there is no gate record at {path}, so no gate run has "
             f"left a trace at all"
         )
-    head = head_sha(worktree)
+    head = repo.head_sha(worktree)
     if not head:
         return (
             f"a stale head_sha — {worktree} has no readable HEAD, so no run in {path} "
             f"ties to a commit"
         )
+    short = head[: gate_record.SHA_PREFIX]
     for command in required:
         mine = [run for run in runs if run["command"] == command]
         if not mine:
             return f"a missing line — {path} holds no run of {command!r}"
-        at_this_commit = [run for run in mine if at_head(run["head_sha"], head)]
+        at_this_commit = [
+            run for run in mine if gate_record.at_head(run["head_sha"], head)
+        ]
         if not at_this_commit:
             return (
                 f"a stale head_sha — the newest run of {command!r} in {path} names "
-                f"{mine[-1]['head_sha']}, and HEAD is {head[:SHA_PREFIX]}"
+                f"{mine[-1]['head_sha']}, and HEAD is {short}"
             )
         code = at_this_commit[-1]["exit"]
         if code != 0:
             return (
                 f"a non-zero exit — the newest run of {command!r} in {path} exited "
-                f"{code} at HEAD {head[:SHA_PREFIX]}"
+                f"{code} at HEAD {short}"
             )
     return ""
 

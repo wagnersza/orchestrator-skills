@@ -14,6 +14,10 @@ hook prints nothing and exits 0, which costs the session nothing.
 position, and whether the gate record is green at `HEAD`. An orchestrator session
 owns no work item, so it gets the plugin root and the role alone.
 
+**What it reads about the repo, it reads through `hooks/repo.py`**, and the gate record
+it reads through `hooks/gate_record.py`. This hook holds no copy of either read, and it
+keeps the wording of every line it prints.
+
 The plane law is `orchestrator/references/hooks.md` and
 `orchestrator/docs/adr/0051-a-hook-refuses-and-a-seam-performs.md`. This hook
 refuses nothing and performs nothing. It answers with one block of context.
@@ -27,88 +31,19 @@ The tests are `hooks/test_context.py`, and both gate commands run them:
 """
 
 import json
-import os
-import re
-import subprocess
 import sys
-from pathlib import Path
 
-# The two facts that say this repo is orchestrated. Either one is enough: a main
-# checkout carries the config, and a worker worktree carries the checklist
-# directory. A directory with neither is a repo this plugin has nothing to say
-# about.
-CONFIG = Path("docs") / "agents" / "orchestrator.md"
-ORCHESTRATOR_DIR = ".orchestrator"
+try:
+    from . import gate_record, repo
+except ImportError:  # the hook runs as a plain script, with no package around it
+    import gate_record  # type: ignore[no-redef, import-not-found]
+    import repo  # type: ignore[no-redef, import-not-found]
 
-# The work-state label family, read from the file that owns it. The strings are not
-# copied here, because two copies of a vocabulary drift
-# (`docs/agents/issue-tracker.md`).
-LABEL_SECTION = "## Work-state labels"
-TABLE_LABEL = re.compile(r"^\|[^|]*\|\s*`([^`]+)`\s*\|")
-
-# The checklist and the gate record of one work item, beside each other in the
-# worktree the worker owns.
+# The checklist of one work item, beside the gate record in the worktree the worker
+# owns. `hooks/gate_record.py` names the record itself.
 CHECKLIST = "checklist-{item}.md"
-GATE_RECORD = "gates-{item}.jsonl"
 TICKED = "- [x]"
 UNTICKED = "- [ ]"
-
-
-def project_dir():
-    """The repository this session opened.
-
-    The harness passes it, and the working directory answers where it did not.
-    """
-    return Path(os.environ.get("CLAUDE_PROJECT_DIR") or Path.cwd())
-
-
-def plugin_root():
-    """The directory this plugin is installed in.
-
-    The harness passes it to every hook. This file sits one level under that root,
-    so the parent answers where the variable is unset.
-    """
-    return Path(
-        os.environ.get("CLAUDE_PLUGIN_ROOT") or Path(__file__).resolve().parent.parent
-    )
-
-
-def orchestrated(root):
-    """Whether this repo is one the orchestrator skill runs on."""
-    return (root / CONFIG).is_file() or (root / ORCHESTRATOR_DIR).is_dir()
-
-
-def item_number(root):
-    """The work item this worktree implements, or an empty string.
-
-    The checklist file names it, so no field of config reaches this hook. A
-    directory with no checklist is not a worker's worktree.
-    """
-    found = sorted((root / ORCHESTRATOR_DIR).glob("checklist-*.md"))
-    return found[0].stem[len("checklist-") :] if found else ""
-
-
-def work_state_labels(root):
-    """The work-state label family, from the file that owns the vocabulary.
-
-    A table row holds the label in its second cell. Where the file is absent or
-    holds no such table, this reads as an empty family and the caller says so.
-    """
-    path = root / "docs" / "agents" / "issue-tracker.md"
-    if not path.is_file():
-        return []
-    labels = []
-    inside = False
-    for line in path.read_text(encoding="utf-8").splitlines():
-        if line.startswith("## "):
-            inside = line.strip() == LABEL_SECTION
-            continue
-        if not inside:
-            continue
-        match = TABLE_LABEL.match(line)
-        if match:
-            labels.append(match.group(1))
-    return labels
 
 
 def label_of(root, item):
@@ -118,12 +53,12 @@ def label_of(root, item):
     cannot be reached is a named gap, and never a silent one, because a session
     that reads no reason assumes the item wears nothing.
     """
-    sys.path.insert(0, str(plugin_root()))
+    sys.path.insert(0, str(repo.plugin_root()))
     try:
         from scripts import tracker
     except ImportError as exc:  # pragma: no cover - a broken install
         return "", f"the tracker adapter did not import ({exc})"
-    family = work_state_labels(root)
+    family = repo.work_state_labels(root)
     if not family:
         return "", "docs/agents/issue-tracker.md names no work-state label"
     try:
@@ -138,7 +73,7 @@ def label_of(root, item):
 
 def checklist_position(root, item):
     """How far the checklist is, as `<ticked> of <total>`."""
-    path = root / ORCHESTRATOR_DIR / CHECKLIST.format(item=item)
+    path = root / repo.ORCHESTRATOR_DIR / CHECKLIST.format(item=item)
     if not path.is_file():
         return ""
     text = path.read_text(encoding="utf-8")
@@ -146,45 +81,30 @@ def checklist_position(root, item):
     return f"{ticked} of {ticked + text.count(UNTICKED)}"
 
 
-def head_sha(root):
-    """The commit this worktree sits on, or an empty string."""
-    proc = subprocess.run(
-        ["git", "-C", str(root), "rev-parse", "HEAD"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    return proc.stdout.strip() if proc.returncode == 0 else ""
-
-
 def gate_verdict(root, item):
     """Whether every gate command in the record is green at `HEAD`.
 
-    The last line each command wrote is the one that counts, because a worker runs
-    a command again after it corrects a fault. A short sha reads as a prefix, so
-    either form matches. A missing line, a malformed line, a non-zero exit or a
-    stale sha each read as not green, and the answer names which.
+    The newest line each command wrote is the one that counts, because a worker runs
+    a command again after it corrects a fault. A missing line, a malformed line, a
+    non-zero exit or a stale sha each read as not green, and the answer names which.
+
+    Every command the record holds is read, and no command is required. A worker that
+    ran one layer so far is not yet green, and it is not at fault either.
     """
-    path = root / ORCHESTRATOR_DIR / GATE_RECORD.format(item=item)
-    if not path.is_file():
+    record = gate_record.path(root, item)
+    if not record.is_file():
         return "no gate command left a line yet"
-    latest = {}
-    for line in path.read_text(encoding="utf-8").splitlines():
-        if not line.strip():
-            continue
-        try:
-            entry = json.loads(line)
-        except ValueError:
-            return "the record holds a line that is not JSON"
-        latest[entry.get("command", "")] = entry
+    runs, malformed = gate_record.runs(record)
+    if malformed:
+        return "the record holds a line that is not JSON with the four keys"
+    latest = gate_record.newest(runs)
     if not latest:
         return "no gate command left a line yet"
-    head = head_sha(root)
-    for command, entry in sorted(latest.items()):
-        if entry.get("exit") != 0:
-            return f"`{command}` exited {entry.get('exit')}"
-        seen = str(entry.get("head_sha") or "")
-        if not head or not seen or not (head.startswith(seen) or seen.startswith(head)):
+    head = repo.head_sha(root)
+    for command, run in sorted(latest.items()):
+        if run["exit"] != 0:
+            return f"`{command}` exited {run['exit']}"
+        if not gate_record.at_head(run["head_sha"], head):
             return f"`{command}` ran against another commit"
     return ""
 
@@ -193,9 +113,9 @@ def facts(root):
     """The lines this hook injects, in the order a session reads them."""
     lines = [
         "The orchestrator plugin root is "
-        f"`{plugin_root()}`. Substitute it into every seam invocation.",
+        f"`{repo.plugin_root()}`. Substitute it into every seam invocation.",
     ]
-    item = item_number(root)
+    item = repo.item_number(root)
     if not item:
         lines.append(
             "This session owns no work item, so there are no item facts. It is an "
@@ -234,8 +154,8 @@ def main():
         json.load(sys.stdin)
     except ValueError:
         return 0
-    root = project_dir()
-    if not orchestrated(root):
+    root = repo.project_dir()
+    if not repo.orchestrated(root):
         return 0
     print(
         json.dumps(
