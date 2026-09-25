@@ -8,7 +8,7 @@ worktree. So `python3 -m scripts.worker_state` finds no module there, and the se
 unreachable as documented. The sanctioned form carries the resolved plugin root
 (`orchestrator/docs/adr/0034-the-seam-invocation-carries-a-resolved-plugin-root.md`).
 
-Two halves, one question each.
+Three halves, one question each.
 
 The first half is the ban. Every Markdown file in the repo goes through it, and it
 reports each line that prints `python3 -m scripts.<module>`. The module form is banned
@@ -21,6 +21,14 @@ that reports success and reads the wrong file.
 The second half is the positive. The repo prints the sanctioned form at least once. So
 the ban cannot be satisfied by deleting every invocation, which would leave a session
 with no command to run.
+
+The third half reads the module name. The two worker seams are separate files, and each
+one serves three of the six subcommands
+(`orchestrator/docs/adr/0071-the-watch-and-the-queue-are-two-seams.md`). A line that asks
+one of them for the other's subcommand is a path that exists and a command that exits 2
+with `invalid choice`. A schedule reads any non-zero code as a quiet tick, so nothing
+reports that fault and the queue stops. `SERVED_BY` holds the pairing, and one
+case proves that map covers every subcommand each module's own `main` declares.
 
 **The walk reads fenced code blocks.** A command lives inside one, so a walk that skips
 them reads no invocation at all. That is the opposite of `test_links.py`, where a link
@@ -61,6 +69,25 @@ MODULE_FORM = re.compile(r"python3\s+-m\s+scripts\.(\w+)")
 # a placeholder in a skill body, the same way `<the path from op 2>` is.
 PATH_FORM = "<plugin root>/scripts/"
 
+# Which module serves each subcommand of the worker seams. The watch reads a worktree and
+# a process; the queue is a graph walk over one tracker read, and the two are separate
+# files (`orchestrator/docs/adr/0071-the-watch-and-the-queue-are-two-seams.md`). A line
+# that names the wrong one is a command that exits 2 with `invalid choice`, which reads as
+# a quiet tick to a schedule.
+SERVED_BY = {
+    "ready": "worker_state",
+    "phase": "worker_state",
+    "tick": "worker_state",
+    "start": "worker_queue",
+    "queue": "worker_queue",
+    "report": "worker_queue",
+}
+
+# One invocation of either worker seam, and the first word after it. The optional quote is
+# for the shell form that quotes the path around a variable. Group 1 is the module and
+# group 2 is the word that follows, which is a subcommand or a flag.
+WORKER_CALL = re.compile(r"scripts/(worker_state|worker_queue)\.py[\"']?\s+(\w+)")
+
 
 def markdown_files(root):
     """Every Markdown file under `root`, minus the directories that hold no prose."""
@@ -94,8 +121,38 @@ def scan(root):
     return failures
 
 
+def mislaid(root):
+    """Return every line under `root` that asks one worker seam for the other's work.
+
+    Each item names the file, the line number, the subcommand and the module that serves
+    it. A line that names the wrong module is not a broken import: the file runs, and
+    `argparse` exits 2 with `invalid choice`. A schedule reads any non-zero code as a
+    quiet tick, so nothing reports the fault and the queue stops.
+
+    A word that is no subcommand is skipped, so `worker_state.py --help` and
+    `worker_state.py ready --worktree ...` each answer once and only on the subcommand.
+    """
+    root = Path(root).resolve()
+    failures = []
+    for path in markdown_files(root):
+        try:
+            where = str(path.relative_to(root))
+        except ValueError:
+            where = str(path)
+        text = path.read_text(encoding="utf-8")
+        for number, line in enumerate(text.splitlines(), 1):
+            for module, word in WORKER_CALL.findall(line):
+                serves = SERVED_BY.get(word)
+                if serves and serves != module:
+                    failures.append(
+                        f"{where}:{number} asks {module}.py for {word!r}, and "
+                        f"{serves}.py is the module that serves it"
+                    )
+    return failures
+
+
 class SeamInvocationTestCase(unittest.TestCase):
-    """Five small Markdown files in a temporary directory. The five cases are:
+    """Six small Markdown files in a temporary directory. The six cases are:
 
     - the bare module form, which fails everywhere but the plugin root
     - the module form behind a prefix that makes it run, which is still banned
@@ -103,6 +160,8 @@ class SeamInvocationTestCase(unittest.TestCase):
     - the `tick` subcommand under both forms, because an Item automation stores that
       one and runs it a minute later, in a shell that saw no assignment
     - `python3 -m pytest scripts/`, which names a directory and not the package
+    - one subcommand asked of each worker module, crossed in both directions, plus the
+      two correct pairings and a bare `--help` that names no subcommand
     """
 
     def setUp(self):
@@ -130,6 +189,16 @@ class SeamInvocationTestCase(unittest.TestCase):
             "```\n",
         )
         self.write("suite.md", "```bash\npython3 -m pytest scripts/ -q\n```\n")
+        self.write(
+            "split.md",
+            "```bash\n"
+            f"python3 {PATH_FORM}worker_state.py queue --repo OWNER/NAME\n"
+            f"python3 {PATH_FORM}worker_queue.py ready --worktree /a/tree\n"
+            f"python3 {PATH_FORM}worker_queue.py queue --repo OWNER/NAME\n"
+            f"python3 {PATH_FORM}worker_state.py ready --worktree /a/tree\n"
+            f"python3 {PATH_FORM}worker_state.py --help\n"
+            "```\n",
+        )
 
     # --- helpers ------------------------------------------------------------
 
@@ -142,6 +211,10 @@ class SeamInvocationTestCase(unittest.TestCase):
     def reported_in(self, name):
         """Every failure reported against one fixture file."""
         return [message for message in scan(self.root) if message.startswith(name)]
+
+    def mislaid_in(self, name):
+        """Every wrong-module failure reported against one fixture file."""
+        return [message for message in mislaid(self.root) if message.startswith(name)]
 
     # --- the ban ------------------------------------------------------------
 
@@ -207,7 +280,59 @@ class SeamInvocationTestCase(unittest.TestCase):
         for directory in sorted(SKIP_DIRS):
             self.assertEqual(self.reported_in(directory), [], directory)
 
+    # --- each subcommand on the module that serves it ------------------------
+
+    def test_a_subcommand_asked_of_the_wrong_worker_module_is_reported(self):
+        """Two crossed lines, one per direction. The message names the subcommand and the
+        module that serves it, because those two are the whole repair."""
+        reported = self.mislaid_in("split.md")
+
+        self.assertEqual(len(reported), 2, reported)
+        self.assertIn("split.md:2", reported[0])
+        self.assertIn("asks worker_state.py for 'queue'", reported[0])
+        self.assertIn("worker_queue.py is the module", reported[0])
+        self.assertIn("split.md:3", reported[1])
+        self.assertIn("asks worker_queue.py for 'ready'", reported[1])
+
+    def test_a_correct_pairing_and_a_bare_help_are_not_reported(self):
+        """The three quiet lines of that same fixture, so the test above passes on the
+        pairing rather than on the words. `--help` names no subcommand at all, and the walk
+        answers once per invocation and only on a subcommand."""
+        reported = self.mislaid_in("split.md")
+
+        for line in ("split.md:4", "split.md:5", "split.md:6"):
+            self.assertEqual([one for one in reported if line in one], [], line)
+
+    def test_every_subcommand_of_both_worker_seams_is_mapped(self):
+        """A guard against a quiet pass. A map that is missing a subcommand reports no
+        failure for it, so this reads the two modules' own choices and compares them."""
+        for module in ("worker_state", "worker_queue"):
+            source = (REPO_ROOT / "scripts" / f"{module}.py").read_text(
+                encoding="utf-8"
+            )
+            served = sorted(
+                word for word, where in SERVED_BY.items() if where == module
+            )
+            for word in served:
+                self.assertIn(f'add_parser(\n        "{word}"', source, word)
+            self.assertEqual(len(served), 3, module)
+
     # --- the real repo ------------------------------------------------------
+
+    def test_no_markdown_file_in_this_plugin_asks_the_wrong_worker_module(self):
+        """The whole tree. Every invocation names the module that serves the subcommand
+        it asks for, so the split left no line that exits 2 with `invalid choice`."""
+        failures = mislaid(REPO_ROOT)
+
+        if failures:
+            self.fail(
+                "\n".join(
+                    [
+                        f"{len(failures)} seam invocations name the wrong module:",
+                        *failures,
+                    ]
+                )
+            )
 
     def test_no_markdown_file_in_this_plugin_prints_an_unreachable_invocation(self):
         """The whole tree. The message names every line that has to change."""

@@ -87,12 +87,21 @@ from pathlib import Path
 # there (ADR 0034).
 try:
     from . import worker_state
-    from .tracker import GH, GLAB, Tracker, TrackerError
+    from .tracker import (
+        GH,
+        GLAB,
+        IN_PROGRESS,
+        NEEDS_HUMAN,
+        Tracker,
+        TrackerError,
+    )
 except ImportError:  # the type checker reads the package form above
     import worker_state  # type: ignore[no-redef, import-not-found]
     from tracker import (  # type: ignore[no-redef, import-not-found]
         GH,
         GLAB,
+        IN_PROGRESS,
+        NEEDS_HUMAN,
         Tracker,
         TrackerError,
     )
@@ -470,9 +479,9 @@ def build_plan(args, tracker, config, pair):
         )
     else:
         labels, _ = tracker.item_facts(args.item)
-        if worker_state.NEEDS_HUMAN in labels:
+        if NEEDS_HUMAN in labels:
             reason = (
-                f"work item #{args.item} carries the {worker_state.NEEDS_HUMAN} "
+                f"work item #{args.item} carries the {NEEDS_HUMAN} "
                 f"label, so no claim runs and no prompt is sent until the "
                 f"maintainer clears it"
             )
@@ -480,15 +489,14 @@ def build_plan(args, tracker, config, pair):
             steps.append(
                 step(5, "in-progress label", label_and_send, STATUS_REFUSED, reason)
             )
-        elif worker_state.IN_PROGRESS in labels:
+        elif IN_PROGRESS in labels:
             steps.append(
                 step(
                     5,
                     "in-progress label",
                     label_and_send,
                     STATUS_DONE,
-                    f"work item #{args.item} already carries "
-                    f"{worker_state.IN_PROGRESS}",
+                    f"work item #{args.item} already carries {IN_PROGRESS}",
                 )
             )
         else:

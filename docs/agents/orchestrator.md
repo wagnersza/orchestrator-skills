@@ -52,8 +52,9 @@ tracker:  # read from docs/agents/issue-tracker.md (GitHub / gh); do NOT redefin
 
 # --- project recipe (the completion contract's project-specific parts) ---
 setup_cmd:  "python3 --version"   # stdlib-only test suite; nothing to install in the
-                                  # worktree. The tests for scripts/close_item.py and
-                                  # scripts/worker_state.py run under
+                                  # worktree. The tests for scripts/close_item.py,
+                                  # scripts/worker_state.py and scripts/worker_queue.py
+                                  # run under
                                   # `python3 -m pytest scripts/ -q`, which is what layer 2
                                   # and layer 3 both call. `python3 -m unittest discover
                                   # -s scripts -q` runs the same tests by hand.
@@ -176,10 +177,11 @@ manifests. There is nothing to boot, no schema, and no port — so `run_recipe`,
 `ports`, and `db_gate` stay blank and the orchestrator drops their checklist steps
 before sending a prompt.
 
-**It is no longer markdown-only.** Two seams hold the deterministic halves of two
+**It is no longer markdown-only.** Three seams hold the deterministic halves of three
 flows: `scripts/close_item.py` owns steps 4 to 8 of a **Close transaction** (ADR
-0015), and `scripts/worker_state.py` owns the **Worker watch** predicate (ADR
-0018). Each has a test suite. So:
+0015), `scripts/worker_state.py` owns the **Worker watch** predicate (ADR
+0018), and `scripts/worker_queue.py` owns the start gate and the queue tick (ADR
+0045, split out by ADR 0071). Each has a test suite. So:
 
 - `setup_cmd` is a Python availability check, not blank. The suite is
   **stdlib-only** — fixtures are local git repos built in a temp directory, with

@@ -150,10 +150,10 @@ class TrackerTest(unittest.TestCase):
         path.write_text(json.dumps(items))
         return path
 
-    # --- one fixture format, read by every fact the two seams ask for
+    # --- one fixture format, read by every fact the seams ask for
 
     def test_one_fixture_record_answers_every_fact_about_one_item(self):
-        """A test author writes one record, and both seams read it."""
+        """A test author writes one record, and every seam reads it."""
         path = self.write_fixture(
             items={
                 str(ITEM): {
