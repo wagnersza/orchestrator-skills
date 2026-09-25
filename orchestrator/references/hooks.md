@@ -28,6 +28,33 @@ supersession of ADR 0034 and every accepted risk:
 
 Every term in bold is defined in [`../CONTEXT.md`](../CONTEXT.md).
 
+## Two libraries, and no second copy of a read
+
+Two more files ship beside the three hooks, and neither one is a hook. The manifest names
+no event for them, they refuse nothing and they perform nothing, so the plane law holds
+([ADR 0051](../docs/adr/0051-a-hook-refuses-and-a-seam-performs.md),
+[ADR 0060](../docs/adr/0060-the-manifest-names-no-standard-hook-file.md)).
+
+| Module | What it owns | Who calls it |
+|---|---|---|
+| `hooks/repo.py` | the repo facts: the project directory, the plugin root, the marker, the item number, the gate commands of **Config**, the work-state label family, and `head_sha` | all three hooks, and `scripts/worker_state.py` for `head_sha` |
+| `hooks/gate_record.py` | the **Gate record**: the append, the read, the malformed-line rule, the at-`HEAD` test, and the one seven-character sha floor | `hooks/record.py` writes it. `hooks/refuse.py`, `hooks/context.py` and `scripts/worker_state.py` read it |
+
+**A read has one home, and a message has none.** Each caller words its own line, because a
+denial, a session-start fact and a tick outcome each speak to a different reader. What the
+callers share is the file name, the four keys, the parse, the sha floor and
+`git rev-parse`.
+
+**A read keeps every run, in the order a gate command appended them.** The newest run of a
+command is then the last one in the list. The push denial and the session-start fact each
+read that one. The `gates-unproven` outcome needs the whole list, because its message names
+the newest recorded sha whether or not that run sits at `HEAD`.
+
+**`head_sha` answers an empty string where it cannot read a commit.** That is the one
+failure value. It used to be `unknown` in the record hook, and `unknown` is exactly as long
+as the sha floor, so a reader took it for a sha that names another commit. An empty value
+is falsy, which is what every caller already tests for.
+
 ## `record.py` is the one named exception
 
 Every other hook only answers, and this one writes a file. The reason is stated and not
@@ -58,8 +85,10 @@ The check asks one question per gate command that the `gates:` block of **Config
 with a non-blank command: is there a line with exit `0` at the current `HEAD`? Four
 answers read as not green, and they are the four the `gates-unproven` outcome already
 uses: a missing line, a malformed line, a non-zero exit and a stale `head_sha`
-([`quality-gates.md`](quality-gates.md)). **The newest line of a command is the
-verdict**, because a worker runs a command again after it corrects a fault.
+([`quality-gates.md`](quality-gates.md)). **This denial and that outcome read the record
+through one module**, `hooks/gate_record.py`, so the four answers cannot drift apart. **The
+newest line of a command is the verdict**, because a worker runs a command again after it
+corrects a fault.
 
 **A blank command is not a Gate.** A layer the profile dropped names no command, so it
 drops out of this check too. Otherwise a repo on the `lite` profile can never push,
@@ -113,6 +142,9 @@ No hook copies a vocabulary or a command into itself. A rule with two homes drif
 | the teardown verb | `worktree remove` or `worktree rm`, operation 10 of [`tools/_operations.md`](tools/_operations.md) |
 | the commit a run saw | `git rev-parse HEAD` in the worktree |
 
+**Each of those reads lives in `hooks/repo.py`**, and no hook keeps a private copy of one.
+The **Gate record** reads and its write live in `hooks/gate_record.py` in the same way.
+
 **Layer 5 names no gate command.** The `story` key holds a verb with no exit code, so
 it is not a **Gate** and it never reaches the record
 ([`quality-gates.md`](quality-gates.md)). A blank key is a dropped layer, and it
@@ -151,7 +183,13 @@ One suite per hook: `hooks/test_context.py`, `hooks/test_refuse.py` and
 `hooks/test_record.py`. A test drives its hook as a process. The input is the JSON that
 the event carries. The test asserts the exit code and what the hook emitted. No test
 reaches for a helper inside a hook, so the suite holds the contract a live session
-holds. Both gate commands run them, beside the two seam suites.
+holds. Both gate commands run them, beside the three seam suites.
+
+**The shared format has a suite of its own**, `hooks/test_gate_record.py`. It imports
+`hooks/gate_record.py` and calls it, because a library's contract is what it returns and
+not a payload. The **Gate record** is tested once there, and its four callers inherit it.
+So each hook suite covers the denials and the append, and no hook suite tests the format
+a second time.
 
 Each suite covers three cases:
 
