@@ -2,7 +2,7 @@
 // shape carries `issue_dependencies_summary`.
 
 import type { Sh } from "../sh.ts";
-import { IN_PROGRESS, READY, type Filter, type Id, type Issue, type Tracker } from "./tracker.ts";
+import { IN_PROGRESS, READY, type Filter, type Id, type Issue, type Pr, type Tracker } from "./tracker.ts";
 
 type Raw = {
   number: number;
@@ -17,6 +17,13 @@ type Raw = {
 };
 
 const REPO = "repos/{owner}/{repo}";
+
+// The PRs GitHub links as closing an issue. Only GraphQL has this link.
+const CLOSING_PRS = "query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo)"
+  + "{issue(number:$number){closedByPullRequestsReferences(first:20,includeClosedPrs:true)"
+  + "{nodes{number url state}}}}}";
+
+type RawPr = { number: number; url: string; state: string };
 
 // A `Blocked by: #12, #14` line anywhere in the body.
 const BLOCKED_BY_LINE = /^[ \t]*blocked by:(.*)$/gim;
@@ -131,6 +138,28 @@ export function github(sh: Sh, cwd: string): Tracker {
         [...labels.filter((l) => l !== IN_PROGRESS), READY],
         assignees.filter((a) => a !== login),
       ]);
+    },
+
+    setState(id, from, to) {
+      if (fetch(id).labels.some((label) => label.name === to)) return;
+      edit(id, (labels, assignees) => [[...labels.filter((l) => l !== from), to], assignees]);
+    },
+
+    comment(id, body) {
+      gh(["api", "-X", "POST", `${path(id)}/comments`, "--input", "-"], JSON.stringify({ body }));
+    },
+
+    prFor(id): Pr | null {
+      const [repo, number] = id.includes("#") ? id.split("#") : [undefined, id];
+      const [owner, name] = repo ? repo.split("/") : ["{owner}", "{repo}"];
+      const reply = JSON.parse(gh([
+        "api", "graphql", "-f", `query=${CLOSING_PRS}`,
+        "-F", `owner=${owner}`, "-F", `repo=${name}`, "-F", `number=${number}`,
+      ])) as { data: { repository: { issue: { closedByPullRequestsReferences: { nodes: RawPr[] } } } } };
+      const prs = reply.data.repository.issue.closedByPullRequestsReferences.nodes;
+      const pr = prs.find((p) => p.state === "OPEN") ?? prs.at(-1);
+      if (!pr) return null;
+      return { ref: `${repo ?? ""}#${pr.number}`, url: pr.url, open: pr.state === "OPEN" };
     },
 
     // JSON, because outside a terminal `--comments` prints the comments and not the body.

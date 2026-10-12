@@ -1,16 +1,17 @@
 // The v2 entry point: `node scripts/orchestrator.ts <subcommand>`. Node >= 22.18 runs it
-// directly, with no build step. Today it has two subcommands, `status` and `start`.
+// directly, with no build step. Today it has three subcommands, `status`, `start` and
+// `tick`.
 //
 // Every dependency comes in through `main`, so a test drives the script exactly as the
 // skill calls it, with a fake process runner in place of the real one.
 
-import { readFileSync, realpathSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { mkdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 import { sh as realSh, type Result, type Sh } from "./sh.ts";
 import { github } from "./trackers/github.ts";
-import { READY, type Issue, type Tracker } from "./trackers/tracker.ts";
+import { IN_PROGRESS, NEEDS_HUMAN, READY, READY_FOR_HUMAN, type Id, type Issue, type Tracker } from "./trackers/tracker.ts";
 
 const ROLES = ["heavy", "medium", "light"] as const;
 
@@ -142,6 +143,11 @@ function worktreeName(id: string): string {
   return `issue-${id.replace(/^.*#/, "")}`;
 }
 
+// The issue a Task title or a worktree name `issue-N` names, or undefined.
+function issueNamed(name: string | null | undefined): Id | undefined {
+  return /^issue-(\d+)$/.exec(name ?? "")?.[1];
+}
+
 function readRun(root: string): string {
   let text: string;
   try {
@@ -231,6 +237,253 @@ function start(config: Config, tracker: Tracker, sh: Sh, cwd: string, args: Star
   return 0;
 }
 
+// The tick lock. A live tick holds it for seconds, so one older than five minutes is
+// left over from a crash.
+const LOCK_PATH = join(".orchestrator", "tick.lock");
+const STALE_MS = 5 * 60 * 1000;
+
+// Take the lock, or return false where a live tick holds it.
+function takeLock(root: string): boolean {
+  const path = join(root, LOCK_PATH);
+  mkdirSync(dirname(path), { recursive: true });
+  if (createLock(path)) return true;
+  let age: number;
+  try {
+    age = Date.now() - statSync(path).mtimeMs;
+  } catch {
+    return createLock(path);
+  }
+  if (age < STALE_MS) return false;
+  rmSync(path, { force: true });
+  return createLock(path);
+}
+
+// Create the lock file exclusively, or return false where it exists.
+function createLock(path: string): boolean {
+  try {
+    writeFileSync(path, `${process.pid}\n`, { flag: "wx" });
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "EEXIST") return false;
+    throw error;
+  }
+}
+
+// One `orca orchestration --json` call's `result`, or an error with orca's message.
+function orca<T>(sh: Sh, cwd: string, args: string[]): T {
+  const call = sh("orca", ["orchestration", ...args, "--json"], { cwd });
+  if (call.code !== 0) throw new Error(`orca orchestration ${args[0]} failed: ${orcaError(call)}`);
+  return (JSON.parse(call.stdout) as { result: T }).result;
+}
+
+type Message = {
+  id: string;
+  type: string;
+  subject?: string;
+  body?: string;
+  from_handle?: string;
+  payload?: string | null;
+};
+
+type Task = { id: string; task_title?: string | null; result?: string | null };
+
+type Worker = {
+  dispatchId: string;
+  taskId?: string;
+  resource?: { worktreeId?: string } | null;
+  projection?: { liveness?: { verdict?: string } };
+};
+
+// What the tick reads from orca before it acts: each Task by id, and each Dispatch,
+// newest first, with the issue it works on.
+type Observed = { tasks: Map<string, Task>; workers: Worker[]; issueOf: (task?: string, dispatch?: string) => Id | undefined };
+
+function observe(sh: Sh, cwd: string, run: string): Observed {
+  const tasks = new Map(orca<{ tasks: Task[] }>(sh, cwd, ["task-list", "--run", run]).tasks.map((t) => [t.id, t]));
+  const workers: Worker[] = [];
+  let cursor: string | null | undefined;
+  do {
+    const page = orca<{ workers: Worker[]; page?: { nextCursor?: string | null } }>(
+      sh, cwd, ["worker-list", "--run", run, ...(cursor ? ["--cursor", cursor] : [])],
+    );
+    workers.push(...page.workers);
+    cursor = page.page?.nextCursor;
+  } while (cursor);
+  const byDispatch = new Map(workers.map((w) => [w.dispatchId, w]));
+  // By Task title, then by worktree name, and never by a message's text.
+  const issueOf = (task?: string, dispatch?: string) => {
+    const worker = dispatch ? byDispatch.get(dispatch) : undefined;
+    return issueNamed(tasks.get(task ?? worker?.taskId ?? "")?.task_title)
+      ?? issueNamed(basename(worker?.resource?.worktreeId ?? ""));
+  };
+  return { tasks, workers, issueOf };
+}
+
+// A message's payload, which orca sends as a JSON string.
+function payloadOf(message: Message): { taskId?: string; dispatchId?: string; outcome?: string; options?: string[] } {
+  try {
+    return JSON.parse(message.payload ?? "{}") ?? {};
+  } catch {
+    return {};
+  }
+}
+
+// The worker's own text as a Markdown quote.
+function quote(message: Message): string {
+  const text = message.body?.trim() || message.subject?.trim() || "(no text)";
+  return text.split("\n").map((line) => `> ${line}`.trimEnd()).join("\n");
+}
+
+const RESUME = "Answer here, then relabel `ready-for-agent` to resume. The worktree is kept.";
+
+type Transition = { to: string; why: string; comment?: string; orca?: "worker-release" | "worker-stop" };
+
+// The transition one mailbox message asks for, or null for a type the tick ignores.
+function transitionFor(tracker: Tracker, id: Id, message: Message): Transition | null {
+  const payload = payloadOf(message);
+  if (message.type === "worker_done" && payload.outcome === "succeeded") {
+    const pr = tracker.prFor(id);
+    if (pr?.open) return { to: READY_FOR_HUMAN, why: `worker_done succeeded, PR ${pr.ref}`, orca: "worker-release" };
+    return {
+      to: NEEDS_HUMAN,
+      why: "worker_done succeeded with no open PR",
+      comment: `The worker reported success, but no open PR closes this issue. Its report:\n\n${quote(message)}\n\n${RESUME}`,
+      orca: "worker-release",
+    };
+  }
+  if (message.type === "worker_done") {
+    return {
+      to: NEEDS_HUMAN,
+      why: "worker_done failed",
+      comment: `The worker reported a failure:\n\n${quote(message)}\n\n${RESUME}`,
+      orca: "worker-release",
+    };
+  }
+  if (message.type === "question") {
+    const options = payload.options?.length ? `\n\nIts options: ${payload.options.map((o) => `\`${o}\``).join(", ")}.` : "";
+    return {
+      to: NEEDS_HUMAN,
+      why: "question",
+      comment: `The worker asked a question, and the tick stopped it:\n\n${quote(message)}${options}\n\n${RESUME}`,
+      orca: "worker-stop",
+    };
+  }
+  if (message.type === "escalation") {
+    return {
+      to: NEEDS_HUMAN,
+      why: "escalation",
+      comment: `The worker escalated, and the tick stopped it:\n\n${quote(message)}\n\n${RESUME}`,
+      orca: "worker-stop",
+    };
+  }
+  return null;
+}
+
+// Apply one transition to an in-progress issue. The orca call and the comment come
+// first and the label last, so a replay before the label redoes them, and a replay
+// after it finds the issue out of in-progress and writes nothing.
+function apply(tracker: Tracker, sh: Sh, cwd: string, issue: Issue, step: Transition, dispatch: string | undefined, deps: Deps): void {
+  const ref = tracker.ref(issue.id);
+  const done: string[] = [];
+  if (step.orca && dispatch) {
+    const call = sh("orca", ["orchestration", step.orca, "--dispatch", dispatch, "--json"], { cwd });
+    if (call.code === 0) done.push(step.orca === "worker-stop" ? `stopped ${dispatch}` : `released ${dispatch}`);
+    else deps.err(`tick: ${ref}: orca ${step.orca} ${dispatch} failed: ${orcaError(call)}`);
+  }
+  if (step.comment) {
+    tracker.comment(issue.id, step.comment);
+    done.push("commented");
+  }
+  tracker.setState(issue.id, IN_PROGRESS, step.to);
+  deps.out(`${ref}: ${IN_PROGRESS} -> ${step.to} (${step.why})${done.length ? `; ${done.join(", ")}` : ""}`);
+}
+
+// The in-progress issue `id` names, or null with a line saying why the tick skips it.
+function inProgress(tracker: Tracker, id: Id, what: string, deps: Deps): Issue | null {
+  const issue = tracker.view(id);
+  if (issue.open && issue.labels.includes(IN_PROGRESS)) return issue;
+  deps.out(`${tracker.ref(id)}: ${what} changes nothing, the issue is not ${IN_PROGRESS}`);
+  return null;
+}
+
+// Drain the Run's mailbox without waiting. Each batch is acknowledged only after every
+// message in it is applied, so a crash replays the batch, and the replay is a no-op.
+function drain(tracker: Tracker, sh: Sh, cwd: string, run: string, seen: Observed, deps: Deps): Set<string> {
+  const handled = new Set<string>();
+  const handle = orca<{ run: { coordinator_handle?: string | null } }>(sh, cwd, ["run-show", "--id", run]).run.coordinator_handle;
+  if (!handle) throw new Error(`orca Run ${run} has no coordinator terminal, so its mailbox cannot be read`);
+  const check = ["check", "--run", run, "--terminal", handle];
+  let batch = orca<{ deliveryId?: string | null; messages?: Message[] }>(sh, cwd, check);
+  while (batch.deliveryId) {
+    for (const message of batch.messages ?? []) {
+      const payload = payloadOf(message);
+      const dispatch = payload.dispatchId
+        ?? (message.from_handle?.startsWith("dispatch:") ? message.from_handle.slice("dispatch:".length) : undefined);
+      if (!["worker_done", "question", "escalation"].includes(message.type)) continue;
+      if (dispatch) handled.add(dispatch);
+      const id = seen.issueOf(payload.taskId, dispatch);
+      if (id === undefined) {
+        deps.err(`tick: ${message.id} (${message.type}) names no issue-N Task or worktree, so it is skipped`);
+        continue;
+      }
+      const issue = inProgress(tracker, id, `${message.type} ${message.id}`, deps);
+      const step = issue && transitionFor(tracker, id, message);
+      if (issue && step) apply(tracker, sh, cwd, issue, step, dispatch, deps);
+    }
+    batch = orca(sh, cwd, [...check, "--ack", batch.deliveryId]);
+  }
+  return handled;
+}
+
+// The newest Dispatch of each issue that exited with no worker_done moves the issue to
+// needs-human. An older Dispatch is a worker an earlier claim already replaced.
+function catchDeaths(tracker: Tracker, sh: Sh, cwd: string, seen: Observed, handled: Set<string>, deps: Deps): void {
+  const newest = new Map<Id, Worker>();
+  for (const worker of seen.workers) {
+    const id = seen.issueOf(undefined, worker.dispatchId);
+    if (id !== undefined && !newest.has(id)) newest.set(id, worker);
+  }
+  for (const [id, worker] of newest) {
+    if (worker.projection?.liveness?.verdict !== "exited" || handled.has(worker.dispatchId)) continue;
+    if (reported(seen.tasks.get(worker.taskId ?? ""))) continue;
+    const issue = tracker.view(id);
+    if (!issue.open || !issue.labels.includes(IN_PROGRESS)) continue;
+    apply(tracker, sh, cwd, issue, {
+      to: NEEDS_HUMAN,
+      why: "worker exited without reporting",
+      comment: `The worker exited without sending worker_done, so it left no report. ${RESUME}`,
+    }, undefined, deps);
+  }
+}
+
+// A Task its worker settled with worker_done, whose report orca keeps as the result.
+function reported(task: Task | undefined): boolean {
+  try {
+    return (JSON.parse(task?.result ?? "null") as { provenance?: string } | null)?.provenance === "worker_report";
+  } catch {
+    return false;
+  }
+}
+
+// The precheck of the orca automation. It observes the workers and moves their issues'
+// state labels, and it exits non-zero on every path, so the automation's agent never
+// runs.
+function tick(tracker: Tracker, sh: Sh, cwd: string, run: string | undefined, deps: Deps): number {
+  if (!takeLock(cwd)) {
+    deps.err(`tick: another tick holds ${LOCK_PATH}, so this one exits`);
+    return 1;
+  }
+  try {
+    const id = run ?? readRun(cwd);
+    const seen = observe(sh, cwd, id);
+    const handled = drain(tracker, sh, cwd, id, seen, deps);
+    catchDeaths(tracker, sh, cwd, seen, handled, deps);
+  } finally {
+    rmSync(join(cwd, LOCK_PATH), { force: true });
+  }
+  return 1;
+}
+
 // The ready queue, then each other open ready-for-agent issue with its reason.
 function status(tracker: Tracker, out: (line: string) => void): number {
   const me = tracker.me();
@@ -257,7 +510,8 @@ export type Deps = {
   err: (line: string) => void;
 };
 
-const USAGE = "usage: orchestrator.ts status | start N [--role heavy|medium|light] [--note TEXT] [--run ID]";
+const USAGE = "usage: orchestrator.ts status | start N [--role heavy|medium|light] [--note TEXT] [--run ID] "
+  + "| tick [--run ID]";
 
 // The `start` arguments, or null where they do not parse.
 function startArgs(argv: string[]): StartArgs | null {
@@ -278,10 +532,20 @@ function startArgs(argv: string[]): StartArgs | null {
   return { id: (positionals[0] ?? "").replace("#", ""), role, note: values.note, run: values.run };
 }
 
+// The `tick` arguments, or null where they do not parse.
+function tickArgs(argv: string[]): { run?: string } | null {
+  try {
+    return parseArgs({ args: argv, options: { run: { type: "string" } } }).values;
+  } catch {
+    return null;
+  }
+}
+
 export function main(argv: string[], deps: Deps): number {
   const [command, ...rest] = argv;
   const args = command === "start" ? startArgs(rest) : null;
-  if (!(command === "status" && rest.length === 0) && !args) {
+  const ticking = command === "tick" ? tickArgs(rest) : null;
+  if (!(command === "status" && rest.length === 0) && !args && !ticking) {
     deps.err(USAGE);
     return 2;
   }
@@ -289,6 +553,7 @@ export function main(argv: string[], deps: Deps): number {
     const config = readConfig(deps.cwd);
     const tracker = trackerFor(config, deps.sh, deps.cwd);
     if (args) return start(config, tracker, deps.sh, deps.cwd, args, deps);
+    if (ticking) return tick(tracker, deps.sh, deps.cwd, ticking.run, deps);
     return status(tracker, deps.out);
   } catch (error) {
     deps.err(`error: ${(error as Error).message}`);

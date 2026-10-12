@@ -15,6 +15,9 @@ export type Issue = {
   body: string;
 };
 
+// The pull request (or merge request) that closes an issue, as `ref` prints it.
+export type Pr = { ref: string; url: string; open: boolean };
+
 // Open issues that carry `label`.
 export type Filter = { label: string };
 
@@ -31,6 +34,12 @@ export interface Tracker {
   claim(id: Id): void;
   // Undo a claim whose worker did not start, in one write.
   unclaim(id: Id): void;
+  // Swap state label `from` for `to` in one write. An issue that already holds `to`
+  // gets no write.
+  setState(id: Id, from: string, to: string): void;
+  comment(id: Id, body: string): void;
+  // The open PR that closes `id`, else the newest closed or merged one, else null.
+  prFor(id: Id): Pr | null;
   // The shell command a worker runs to read the issue and every comment.
   viewCommand(id: Id): string;
   // The template step that hands the work back for review, with `prSkill` naming the
@@ -42,3 +51,7 @@ export interface Tracker {
 export const READY = "ready-for-agent";
 // The state label of a claimed issue.
 export const IN_PROGRESS = "in-progress";
+// The state label of an issue whose worker opened a PR for review.
+export const READY_FOR_HUMAN = "ready-for-human";
+// The state label of an issue whose worker failed, asked, escalated or died.
+export const NEEDS_HUMAN = "needs-human";

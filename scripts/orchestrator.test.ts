@@ -3,7 +3,7 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -59,7 +59,7 @@ function issue(number: number, fixture: Fixture = {}) {
   };
 }
 
-const USAGE = "usage: orchestrator.ts status | start N [--role heavy|medium|light] [--note TEXT] [--run ID]";
+const USAGE = "usage: orchestrator.ts status | start N [--role heavy|medium|light] [--note TEXT] [--run ID] | tick [--run ID]";
 const ME = "gh api user --jq .login";
 const LIST = "gh api --paginate --slurp repos/{owner}/{repo}/issues?state=open&labels=ready-for-agent&per_page=100";
 const VIEW = (n: number) => `gh api repos/{owner}/{repo}/issues/${n}`;
@@ -209,7 +209,7 @@ test("status exits 1 with gh's own message when gh fails", () => {
 });
 
 test("an unknown subcommand prints the usage and exits 2", () => {
-  for (const argv of [[], ["tick"], ["status", "extra"]]) {
+  for (const argv of [[], ["merge"], ["status", "extra"]]) {
     const result = run(argv, {});
     assert.equal(result.code, 2);
     assert.deepEqual(result.err, [USAGE]);
@@ -466,4 +466,368 @@ test("start refuses arguments it cannot read, with the usage", () => {
     assert.deepEqual(result.err, [USAGE]);
     assert.deepEqual(result.calls, []);
   }
+});
+
+const RUN = "run_1";
+const COORDINATOR = "term_4f0ec745-92e8-4178-b33c-e0b32e2792db";
+const ORCA = (...args: string[]) => `orca orchestration ${args.join(" ")} --json`;
+const RUN_SHOW = ORCA("run-show", "--id", RUN);
+const TASKS = ORCA("task-list", "--run", RUN);
+const WORKERS = ORCA("worker-list", "--run", RUN);
+const CHECK = ORCA("check", "--run", RUN, "--terminal", COORDINATOR);
+const ACK = (delivery: string) => ORCA("check", "--run", RUN, "--terminal", COORDINATOR, "--ack", delivery);
+const RELEASE = (n: number) => ORCA("worker-release", "--dispatch", `ctx_${n}`);
+const STOP = (n: number) => ORCA("worker-stop", "--dispatch", `ctx_${n}`);
+const COMMENT = (n: number) => `gh api -X POST repos/{owner}/{repo}/issues/${n}/comments --input -`;
+const CLOSING_PRS = "query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo)"
+  + "{issue(number:$number){closedByPullRequestsReferences(first:20,includeClosedPrs:true)"
+  + "{nodes{number url state}}}}}";
+const PRS = (n: number) => `gh api graphql -f query=${CLOSING_PRS} -F owner={owner} -F repo={repo} -F number=${n}`;
+const TICK = ["tick", "--run", RUN];
+
+// An `orca orchestration --json` receipt around `result`, as orca printed them for the
+// manual proof on run_b4cfa6c0dc58.
+function receipt(result: unknown) {
+  return { id: "3da4edb0-6347-43cc-bcce-aaa35ee9f725", ok: true, result, _meta: { runtimeId: "56165fca" } };
+}
+
+// A `task-list` row for issue `n`. A reported Task holds the worker_done report orca kept.
+function task(n: number, fixture: { title?: string; reported?: boolean } = {}) {
+  return {
+    id: `task_${n}`,
+    run_id: RUN,
+    task_title: fixture.title ?? `issue-${n}`,
+    display_name: fixture.title ?? `issue-${n}`,
+    status: fixture.reported ? "completed" : "dispatched",
+    result: fixture.reported
+      ? JSON.stringify({ provenance: "worker_report", outcome: "succeeded", messageId: `msg_${n}` })
+      : null,
+  };
+}
+
+// A `worker-list` row for issue `n`'s Dispatch `ctx_<dispatch>`.
+function worker(n: number, fixture: { dispatch?: number; liveness?: string; worktree?: string } = {}) {
+  const dispatch = `ctx_${fixture.dispatch ?? n}`;
+  const worktreeId = `b33c1c8a::/Users/me/orca/workspaces/repo/${fixture.worktree ?? `issue-${n}`}`;
+  return {
+    dispatchId: dispatch,
+    taskId: `task_${n}`,
+    runId: RUN,
+    workerState: "running",
+    terminalState: "active",
+    resource: { id: `wtr_${n}`, worktreeId, ownerDispatchId: dispatch },
+    projection: {
+      dispatchId: dispatch,
+      workspace: { id: worktreeId, kind: "folder_or_worktree" },
+      liveness: { verdict: fixture.liveness ?? "alive", source: "resource_release" },
+    },
+  };
+}
+
+// A mailbox message from issue `n`'s worker, shaped like msg_d85f0a8f3b6b and
+// msg_6fad840dcc3c from the manual proof.
+function message(n: number, type: string, fixture: { outcome?: string; body?: string; options?: string[] } = {}) {
+  return {
+    id: `msg_${type}_${n}`,
+    run_id: RUN,
+    from_handle: type === "question" ? `dispatch:ctx_${n}` : `term_worker_${n}`,
+    to_handle: `run:${RUN}`,
+    subject: type === "question" ? "Question" : "Report",
+    body: fixture.body ?? `${type} text from issue ${n}`,
+    type,
+    payload: JSON.stringify({
+      taskId: `task_${n}`,
+      dispatchId: `ctx_${n}`,
+      ...(fixture.outcome ? { outcome: fixture.outcome } : {}),
+      ...(fixture.options ? { options: fixture.options } : {}),
+    }),
+  };
+}
+
+function batch(delivery: string | null, messages: unknown[] = []) {
+  return receipt({ runId: RUN, deliveryId: delivery, count: messages.length, messages, acknowledged: null });
+}
+
+function prs(...nodes: [number, string][]) {
+  return {
+    data: { repository: { issue: { closedByPullRequestsReferences: { nodes: nodes.map(([number, state]) => ({
+      number, url: `https://github.com/wagnersza/orchestrator-skills/pull/${number}`, state,
+    })) } } } },
+  };
+}
+
+type TickFixture = {
+  messages?: unknown[];
+  tasks?: unknown[];
+  workers?: unknown[];
+  issues?: Record<number, string[]>;
+};
+
+// The replies a tick needs: one batch, its ack, and each issue holding its labels.
+function tickReplies(fixture: TickFixture = {}, extra: Record<string, unknown> = {}) {
+  const issues = Object.entries(fixture.issues ?? {}).flatMap(([n, labels]) => [
+    [VIEW(Number(n)), issue(Number(n), { labels, assignees: ["me"] })],
+    [PATCH(Number(n)), issue(Number(n), { labels: ["patched"], assignees: ["me"] })],
+    [COMMENT(Number(n)), { id: 1 }],
+  ]);
+  return {
+    [RUN_SHOW]: receipt({ run: { id: RUN, coordinator_handle: COORDINATOR } }),
+    [TASKS]: receipt({ runId: RUN, tasks: fixture.tasks ?? [] }),
+    [WORKERS]: receipt({ workers: fixture.workers ?? [], page: { limit: 100, hasMore: false, nextCursor: null } }),
+    [CHECK]: batch(fixture.messages ? "delivery_1" : null, fixture.messages),
+    [ACK("delivery_1")]: batch(null),
+    ...Object.fromEntries(issues),
+    ...extra,
+  };
+}
+
+function comments(result: { calls: string[]; inputs: (string | undefined)[] }): string[] {
+  return result.calls.flatMap((line, i) =>
+    line.includes("-X POST") ? [(JSON.parse(result.inputs[i] ?? "") as { body: string }).body] : []);
+}
+
+function lockAt(cwd: string): string {
+  return join(cwd, ".orchestrator", "tick.lock");
+}
+
+test("tick moves a worker_done with an open PR to ready-for-human, releases the worker, then acks", () => {
+  const result = run(TICK, tickReplies(
+    { messages: [message(10, "worker_done", { outcome: "succeeded" })], tasks: [task(10)], workers: [worker(10)], issues: { 10: ["in-progress"] } },
+    { [PRS(10)]: prs([12, "OPEN"]), [RELEASE(10)]: receipt({ released: true }) },
+  ));
+  assert.deepEqual(result.err, []);
+  assert.equal(result.code, 1);
+  assert.deepEqual(result.out, ["#10: in-progress -> ready-for-human (worker_done succeeded, PR #12); released ctx_10"]);
+  assert.deepEqual(result.calls, [TASKS, WORKERS, RUN_SHOW, CHECK, VIEW(10), PRS(10), RELEASE(10), PATCH(10), ACK("delivery_1")]);
+  assert.deepEqual(patches(result), [{ labels: ["ready-for-human"], assignees: ["me"] }]);
+  assert.deepEqual(comments(result), []);
+});
+
+test("tick moves a worker_done with no open PR to needs-human, with the worker's report", () => {
+  const result = run(TICK, tickReplies(
+    { messages: [message(10, "worker_done", { outcome: "succeeded", body: "Done." })], tasks: [task(10)], issues: { 10: ["in-progress"] } },
+    { [PRS(10)]: prs([12, "CLOSED"]), [RELEASE(10)]: receipt({}) },
+  ));
+  assert.equal(result.code, 1);
+  assert.deepEqual(result.out, ["#10: in-progress -> needs-human (worker_done succeeded with no open PR); released ctx_10, commented"]);
+  assert.deepEqual(patches(result), [{ labels: ["needs-human"], assignees: ["me"] }]);
+  assert.deepEqual(comments(result), [
+    "The worker reported success, but no open PR closes this issue. Its report:\n\n> Done.\n\n"
+      + "Answer here, then relabel `ready-for-agent` to resume. The worktree is kept.",
+  ]);
+});
+
+test("tick moves a failed worker_done to needs-human and posts the worker's own reason", () => {
+  const result = run(TICK, tickReplies(
+    { messages: [message(10, "worker_done", { outcome: "failed", body: "The suite fails on main.\n\nSee CI." })], tasks: [task(10)], issues: { 10: ["in-progress", "docs"] } },
+    { [RELEASE(10)]: receipt({}) },
+  ));
+  assert.equal(result.code, 1);
+  assert.deepEqual(result.out, ["#10: in-progress -> needs-human (worker_done failed); released ctx_10, commented"]);
+  assert.deepEqual(result.calls.slice(4), [VIEW(10), RELEASE(10), COMMENT(10), PATCH(10), ACK("delivery_1")]);
+  assert.deepEqual(patches(result), [{ labels: ["docs", "needs-human"], assignees: ["me"] }]);
+  assert.deepEqual(comments(result), [
+    "The worker reported a failure:\n\n> The suite fails on main.\n>\n> See CI.\n\n"
+      + "Answer here, then relabel `ready-for-agent` to resume. The worktree is kept.",
+  ]);
+});
+
+test("tick moves a question to needs-human, posts it with its options, and stops the worker", () => {
+  const result = run(TICK, tickReplies(
+    {
+      messages: [message(10, "question", { body: "Keep the old flag?", options: ["keep", "drop"] })],
+      tasks: [task(10)],
+      issues: { 10: ["in-progress"] },
+    },
+    { [STOP(10)]: receipt({ stopped: true }) },
+  ));
+  assert.deepEqual(result.err, []);
+  assert.equal(result.code, 1);
+  assert.deepEqual(result.out, ["#10: in-progress -> needs-human (question); stopped ctx_10, commented"]);
+  assert.deepEqual(result.calls.slice(4), [VIEW(10), STOP(10), COMMENT(10), PATCH(10), ACK("delivery_1")]);
+  assert.deepEqual(comments(result), [
+    "The worker asked a question, and the tick stopped it:\n\n> Keep the old flag?\n\nIts options: `keep`, `drop`.\n\n"
+      + "Answer here, then relabel `ready-for-agent` to resume. The worktree is kept.",
+  ]);
+  assert.equal(result.calls.some((c) => c.includes("worktree")), false);
+});
+
+test("tick moves an escalation to needs-human and stops the worker", () => {
+  const result = run(TICK, tickReplies(
+    { messages: [message(10, "escalation", { body: "I need repo admin." })], tasks: [task(10)], issues: { 10: ["in-progress"] } },
+    { [STOP(10)]: receipt({}) },
+  ));
+  assert.equal(result.code, 1);
+  assert.deepEqual(result.out, ["#10: in-progress -> needs-human (escalation); stopped ctx_10, commented"]);
+  assert.match(comments(result)[0] ?? "", /^The worker escalated, and the tick stopped it:\n\n> I need repo admin\.\n\n/);
+});
+
+test("tick maps a message to its issue by worktree name when the Task title is not issue-N", () => {
+  const result = run(TICK, tickReplies(
+    {
+      messages: [message(10, "escalation")],
+      tasks: [task(10, { title: "a free-text title naming #99" })],
+      workers: [worker(10, { worktree: "issue-11" })],
+      issues: { 11: ["in-progress"] },
+    },
+    { [STOP(10)]: receipt({}) },
+  ));
+  assert.deepEqual(result.out, ["#11: in-progress -> needs-human (escalation); stopped ctx_10, commented"]);
+});
+
+test("tick skips a message that names no issue, ignores status mail, and acks the batch", () => {
+  const result = run(TICK, tickReplies({
+    messages: [message(10, "escalation"), message(12, "status"), message(12, "heartbeat")],
+    tasks: [task(10, { title: "not an issue" })],
+  }));
+  assert.equal(result.code, 1);
+  assert.deepEqual(result.err, ["tick: msg_escalation_10 (escalation) names no issue-N Task or worktree, so it is skipped"]);
+  assert.deepEqual(result.calls, [TASKS, WORKERS, RUN_SHOW, CHECK, ACK("delivery_1")]);
+});
+
+test("tick writes nothing for a replayed message whose issue already left in-progress", () => {
+  for (const labels of [["needs-human"], ["ready-for-human"]]) {
+    const result = run(TICK, tickReplies({
+      messages: [message(10, "question"), message(10, "worker_done", { outcome: "succeeded" })],
+      tasks: [task(10)],
+      issues: { 10: labels },
+    }));
+    assert.equal(result.code, 1);
+    assert.deepEqual(result.err, []);
+    assert.deepEqual(result.out, [
+      "#10: question msg_question_10 changes nothing, the issue is not in-progress",
+      "#10: worker_done msg_worker_done_10 changes nothing, the issue is not in-progress",
+    ]);
+    assert.deepEqual(result.calls, [TASKS, WORKERS, RUN_SHOW, CHECK, VIEW(10), ACK("delivery_1")]);
+  }
+});
+
+test("tick acks nothing when a transition fails to write, so the next tick replays it", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "orch-"));
+  const result = run(TICK, tickReplies(
+    { messages: [message(10, "question")], tasks: [task(10)], issues: { 10: ["in-progress"] } },
+    { [STOP(10)]: receipt({}), [PATCH(10)]: { fail: { code: 1, stdout: "", stderr: "HTTP 502" } } },
+  ), cwd);
+  assert.equal(result.code, 1);
+  assert.deepEqual(result.err, [`error: ${PATCH(10)} failed: HTTP 502`]);
+  assert.equal(result.calls.includes(ACK("delivery_1")), false);
+  assert.equal(existsSync(lockAt(cwd)), false);
+});
+
+test("tick drains every batch, acking each one after its messages", () => {
+  const result = run(TICK, tickReplies(
+    { messages: [message(10, "question")], tasks: [task(10), task(11)], issues: { 10: ["in-progress"], 11: ["in-progress"] } },
+    {
+      [STOP(10)]: receipt({}),
+      [STOP(11)]: receipt({}),
+      [ACK("delivery_1")]: batch("delivery_2", [message(11, "escalation")]),
+      [ACK("delivery_2")]: batch(null),
+    },
+  ));
+  assert.deepEqual(result.out, [
+    "#10: in-progress -> needs-human (question); stopped ctx_10, commented",
+    "#11: in-progress -> needs-human (escalation); stopped ctx_11, commented",
+  ]);
+  assert.deepEqual(result.calls.filter((c) => c.includes(" check ") || c.includes("PATCH")), [
+    CHECK, PATCH(10), ACK("delivery_1"), PATCH(11), ACK("delivery_2"),
+  ]);
+});
+
+test("tick still moves the issue when orca cannot stop the worker, and says so", () => {
+  const result = run(TICK, tickReplies(
+    { messages: [message(10, "question")], tasks: [task(10)], issues: { 10: ["in-progress"] } },
+    { [STOP(10)]: { fail: { code: 1, stdout: JSON.stringify({ ok: false, error: { message: "dispatch_not_found" } }), stderr: "" } } },
+  ));
+  assert.equal(result.code, 1);
+  assert.deepEqual(result.err, ["tick: #10: orca worker-stop ctx_10 failed: dispatch_not_found"]);
+  assert.deepEqual(result.out, ["#10: in-progress -> needs-human (question); commented"]);
+  assert.deepEqual(patches(result), [{ labels: ["needs-human"], assignees: ["me"] }]);
+});
+
+test("tick moves an issue whose newest worker exited without worker_done to needs-human", () => {
+  const result = run(TICK, tickReplies({
+    tasks: [task(10), task(11, { reported: true }), task(12), task(13)],
+    workers: [
+      worker(10, { liveness: "exited" }),
+      worker(11, { liveness: "exited" }),
+      worker(12, { dispatch: 120 }),
+      worker(12, { dispatch: 121, liveness: "exited" }),
+      worker(13, { liveness: "exited" }),
+    ],
+    issues: { 10: ["in-progress"], 13: ["needs-human"] },
+  }));
+  assert.deepEqual(result.err, []);
+  assert.equal(result.code, 1);
+  assert.deepEqual(result.out, ["#10: in-progress -> needs-human (worker exited without reporting); commented"]);
+  assert.deepEqual(result.calls, [TASKS, WORKERS, RUN_SHOW, CHECK, VIEW(10), COMMENT(10), PATCH(10), VIEW(13)]);
+  assert.deepEqual(comments(result), [
+    "The worker exited without sending worker_done, so it left no report. "
+      + "Answer here, then relabel `ready-for-agent` to resume. The worktree is kept.",
+  ]);
+});
+
+test("tick does not call a worker dead when this tick read its worker_done", () => {
+  const result = run(TICK, tickReplies(
+    { messages: [message(10, "question")], tasks: [task(10)], workers: [worker(10, { liveness: "exited" })], issues: { 10: ["in-progress"] } },
+    { [STOP(10)]: receipt({}) },
+  ));
+  assert.deepEqual(result.out, ["#10: in-progress -> needs-human (question); stopped ctx_10, commented"]);
+  assert.equal(comments(result).length, 1);
+});
+
+test("tick reads every worker-list page", () => {
+  const result = run(TICK, tickReplies({ tasks: [task(10)], issues: { 10: ["in-progress"] } }, {
+    [WORKERS]: receipt({ workers: [], page: { nextCursor: "c2" } }),
+    [ORCA("worker-list", "--run", RUN, "--cursor", "c2")]: receipt({ workers: [worker(10, { liveness: "exited" })], page: { nextCursor: null } }),
+  }));
+  assert.deepEqual(result.out, ["#10: in-progress -> needs-human (worker exited without reporting); commented"]);
+});
+
+test("tick exits at once while another tick holds the lock, and leaves its lock alone", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "orch-"));
+  mkdirSync(join(cwd, ".orchestrator"));
+  writeFileSync(lockAt(cwd), "4242\n");
+  const result = run(TICK, tickReplies(), cwd);
+  assert.equal(result.code, 1);
+  assert.deepEqual(result.err, ["tick: another tick holds .orchestrator/tick.lock, so this one exits"]);
+  assert.deepEqual(result.calls, []);
+  assert.equal(readFileSync(lockAt(cwd), "utf8"), "4242\n");
+});
+
+test("tick takes over a lock older than five minutes, and removes it when done", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "orch-"));
+  mkdirSync(join(cwd, ".orchestrator"));
+  writeFileSync(lockAt(cwd), "4242\n");
+  const sixMinutesAgo = new Date(Date.now() - 6 * 60 * 1000);
+  utimesSync(lockAt(cwd), sixMinutesAgo, sixMinutesAgo);
+  const result = run(TICK, tickReplies(), cwd);
+  assert.equal(result.code, 1);
+  assert.deepEqual(result.err, []);
+  assert.deepEqual(result.calls, [TASKS, WORKERS, RUN_SHOW, CHECK]);
+  assert.equal(existsSync(lockAt(cwd)), false);
+});
+
+test("tick exits non-zero on every path, and never leaves its lock behind", () => {
+  const cases: [string, string[], Record<string, unknown>, number][] = [
+    ["a quiet tick", TICK, tickReplies(), 1],
+    ["no Run", ["tick"], tickReplies(), 1],
+    ["orca fails", TICK, tickReplies({}, { [TASKS]: { fail: { code: 1, stdout: "", stderr: "orca is not running" } } }), 1],
+    ["a Run with no coordinator", TICK, tickReplies({}, { [RUN_SHOW]: receipt({ run: { id: RUN, coordinator_handle: null } }) }), 1],
+    ["bad arguments", ["tick", "10"], {}, 2],
+  ];
+  for (const [name, argv, replies, code] of cases) {
+    const cwd = mkdtempSync(join(tmpdir(), "orch-"));
+    const result = run(argv, replies, cwd);
+    assert.equal(result.code, code, name);
+    assert.notEqual(result.code, 0, name);
+    assert.equal(existsSync(lockAt(cwd)), false, name);
+  }
+});
+
+test("node runs the tick directly, and it exits non-zero", () => {
+  const script = join(import.meta.dirname, "orchestrator.ts");
+  const cwd = mkdtempSync(join(tmpdir(), "orch-"));
+  const result = spawnSync(process.execPath, [script, "tick"], { cwd, encoding: "utf8" });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /^error: no orca Run: /);
 });
