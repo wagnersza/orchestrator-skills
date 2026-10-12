@@ -3,3 +3,6 @@
 
 # Python bytecode from running the seam's test suite.
 __pycache__/
+
+# The dev-only TypeScript tools for the v2 typecheck. npm ci rebuilds them.
+node_modules/

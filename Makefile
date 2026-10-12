@@ -19,9 +19,19 @@
 
 .PHONY: quick full
 
-# layers 1 and 2 — format, lint, types, tests, complexity.
-quick:
+# layers 1 and 2 — format, lint, types, tests, complexity. The v1 Python suite runs
+# first, then the v2 TypeScript typecheck and tests, so v1 keeps working until the
+# cutover.
+quick: node_modules
 	scripts/checks.sh quick
+	npm run --silent typecheck
+	npm test --silent
+
+# The dev-only TypeScript tools. npm ci runs again only when the manifest or the lock
+# file is newer than node_modules.
+node_modules: package.json package-lock.json
+	npm ci
+	touch node_modules
 
 # layer 3 — the suite, import boundaries, secrets.
 full:
