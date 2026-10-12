@@ -27,7 +27,18 @@ export interface Tracker {
   blockers(id: Id): Id[];
   // How a line printed for a human names the issue, such as "#349".
   ref(id: Id): string;
+  // Assign me, add in-progress and remove ready-for-agent, in one write.
+  claim(id: Id): void;
+  // Undo a claim whose worker did not start, in one write.
+  unclaim(id: Id): void;
+  // The shell command a worker runs to read the issue and every comment.
+  viewCommand(id: Id): string;
+  // The template step that hands the work back for review, with `prSkill` naming the
+  // skill that writes the body.
+  reviewStep(id: Id, base: string, prSkill: string): string;
 }
 
 // The state label a human sets to hand an issue to the loop.
 export const READY = "ready-for-agent";
+// The state label of a claimed issue.
+export const IN_PROGRESS = "in-progress";
