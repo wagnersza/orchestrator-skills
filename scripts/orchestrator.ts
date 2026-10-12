@@ -465,10 +465,31 @@ function reported(task: Task | undefined): boolean {
   }
 }
 
-// The precheck of the orca automation. It observes the workers and moves their issues'
-// state labels, and it exits non-zero on every path, so the automation's agent never
-// runs.
-function tick(tracker: Tracker, sh: Sh, cwd: string, run: string | undefined, deps: Deps): number {
+// The label that marks a parent. A parent takes no worker and no slot. Native children
+// are not read yet, so the label is the only marker.
+const PARENT = "user-story";
+
+// Start the ready queue's issues, in queue order, into the free slots: `max_workers` minus
+// the live in-progress issues that are not parents. An issue that is not eligible keeps
+// its place in the queue, and an issue whose worker does not start frees its slot again.
+function fill(config: Config, tracker: Tracker, sh: Sh, cwd: string, run: string, deps: Deps): void {
+  const taken = tracker.list({ label: IN_PROGRESS }).filter((issue) => !issue.labels.includes(PARENT)).length;
+  let free = config.max_workers - taken;
+  if (free <= 0) return;
+  const queue = tracker.list({ label: READY });
+  if (queue.length === 0) return;
+  const me = tracker.me();
+  for (const issue of queue) {
+    if (free <= 0) return;
+    if (issue.labels.includes(PARENT) || whyNotEligible(tracker, issue, me) !== null) continue;
+    if (start(config, tracker, sh, cwd, { id: issue.id, run }, deps) === 0) free--;
+  }
+}
+
+// The precheck of the orca automation. It observes the workers, moves their issues'
+// state labels, then fills the free slots from the ready queue. It exits non-zero on
+// every path, so the automation's agent never runs.
+function tick(config: Config, tracker: Tracker, sh: Sh, cwd: string, run: string | undefined, deps: Deps): number {
   if (!takeLock(cwd)) {
     deps.err(`tick: another tick holds ${LOCK_PATH}, so this one exits`);
     return 1;
@@ -478,6 +499,7 @@ function tick(tracker: Tracker, sh: Sh, cwd: string, run: string | undefined, de
     const seen = observe(sh, cwd, id);
     const handled = drain(tracker, sh, cwd, id, seen, deps);
     catchDeaths(tracker, sh, cwd, seen, handled, deps);
+    fill(config, tracker, sh, cwd, id, deps);
   } finally {
     rmSync(join(cwd, LOCK_PATH), { force: true });
   }
@@ -575,7 +597,7 @@ export function main(argv: string[], deps: Deps): number {
     const config = readConfig(deps.cwd);
     const tracker = trackerFor(config, deps.sh, deps.cwd);
     if (args) return start(config, tracker, deps.sh, deps.cwd, args, deps);
-    if (ticking) return tick(tracker, deps.sh, deps.cwd, ticking.run, deps);
+    if (ticking) return tick(config, tracker, deps.sh, deps.cwd, ticking.run, deps);
     return status(config, tracker, deps.sh, deps.cwd, deps.out);
   } catch (error) {
     deps.err(`error: ${(error as Error).message}`);
