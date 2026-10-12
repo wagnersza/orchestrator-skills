@@ -1,0 +1,613 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>orchestrator v2 — the plan</title>
+<style>
+  :root {
+    --bg: #fbfaf7; --fg: #1d1d1b; --muted: #6b6a66; --line: #e3e0d8;
+    --card: #ffffff; --accent: #2f5d8a; --add: #1f7a3f; --del: #a3322b; --mod: #8a6a12;
+    --code: #f3f1ec;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #161614; --fg: #e9e7e1; --muted: #9a978f; --line: #33322e;
+      --card: #1e1e1b; --accent: #7fb0e0; --add: #6fcf8f; --del: #f08a80; --mod: #e0c060;
+      --code: #26261f;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+         font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif; }
+  main { max-width: 980px; margin: 0 auto; padding: 48px 24px 96px; }
+  h1 { font-size: 2.1rem; margin: 0 0 4px; letter-spacing: -0.01em; }
+  h2 { font-size: 1.35rem; margin: 56px 0 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+  h3 { font-size: 1.05rem; margin: 28px 0 8px; }
+  p, li { max-width: 72ch; }
+  .lede { color: var(--muted); font-size: 1.1rem; margin: 0 0 24px; }
+  code, pre { font: 13.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+  code { background: var(--code); padding: 1px 5px; border-radius: 4px; }
+  pre { background: var(--code); padding: 14px 16px; border-radius: 8px; overflow-x: auto; }
+  pre code { background: none; padding: 0; }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 14.5px; }
+  th, td { text-align: left; vertical-align: top; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 600; font-size: 13px; text-transform: uppercase; letter-spacing: .04em; }
+  nav { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px 20px; }
+  nav ol { margin: 0; padding-left: 20px; columns: 2; }
+  nav a { color: var(--accent); text-decoration: none; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; margin: 16px 0; }
+  .stat { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
+  .stat b { display: block; font-size: 1.6rem; }
+  .stat span { color: var(--muted); font-size: 13.5px; }
+  .tag { display: inline-block; font-size: 12px; font-weight: 600; padding: 1px 8px; border-radius: 999px; border: 1px solid; }
+  .add { color: var(--add); } .del { color: var(--del); } .mod { color: var(--mod); }
+  .lbl { font: 600 12.5px ui-monospace, Menlo, monospace; padding: 2px 8px; border-radius: 6px; color: #fff; white-space: nowrap; }
+  .l-rfa { background: #2f7d4f; } .l-ip { background: #c78a1a; } .l-rfh { background: #2f5d8a; }
+  .l-nh { background: #a3322b; } .l-done { background: #6b6a66; }
+  svg text { fill: var(--fg); font: 13px -apple-system, sans-serif; }
+  svg .muted { fill: var(--muted); font-size: 11.5px; }
+  svg .box { fill: var(--card); stroke: var(--line); stroke-width: 1.5; }
+  svg .edge { stroke: var(--muted); stroke-width: 1.5; fill: none; }
+  .note { border-left: 3px solid var(--accent); padding: 4px 14px; margin: 14px 0; color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+
+<h1>orchestrator v2</h1>
+<p class="lede">A rewrite from scratch, not a refactor. One loop driven by an orca automation that costs no tokens. The tracker's state labels are the only state. Harnesses, trackers and model roles stay configurable, and the plan cuts everything else. The plan came out of the grilling session on 2026-10-12.</p>
+
+<nav>
+  <ol>
+    <li><a href="#why">Why v2</a></li>
+    <li><a href="#shape">The shape in one picture</a></li>
+    <li><a href="#labels">State labels: the only state</a></li>
+    <li><a href="#tick">The tick</a></li>
+    <li><a href="#parents">Parents and children</a></li>
+    <li><a href="#roles">Roles, harnesses, models</a></li>
+    <li><a href="#trackers">Trackers</a></li>
+    <li><a href="#worker">The worker contract</a></li>
+    <li><a href="#merge">Merge and teardown</a></li>
+    <li><a href="#script">The script</a></li>
+    <li><a href="#setup">Setup and config</a></li>
+    <li><a href="#skill">The skill surface</a></li>
+    <li><a href="#files">File-by-file changes</a></li>
+    <li><a href="#docs">Glossary and ADRs</a></li>
+    <li><a href="#tokens">Token economy</a></li>
+    <li><a href="#slices">Build order</a></li>
+    <li><a href="#risks">Risks and open edges</a></li>
+    <li><a href="#decisions">Decision log</a></li>
+  </ol>
+</nav>
+
+<!-- ============================================================ -->
+<h2 id="why">1. Why v2</h2>
+
+<p>v1 works, but it carries a lot of machinery around the core loop: a per-item automation plus a queue automation, a 1,500-line worker watch, a close transaction, a merge train, a board mirror, five quality-gate layers, adversarial review, a prompt-improver pass, a simple-english pass, and 65 ADRs. It also rebuilds signals that orca now gives for free: done, stuck, and asking a question. v2 keeps what v1 got right (many harnesses, many trackers, configurable model roles, a precheck tick that costs no tokens) and cuts the rest.</p>
+
+<div class="grid">
+  <div class="stat"><b>~39.6k → ~3k</b><span>lines tracked in git (v1 → v2 target)</span></div>
+  <div class="stat"><b>13 → 5</b><span>Python modules → TypeScript modules behind one entry point</span></div>
+  <div class="stat"><b>65 → 5</b><span>ADRs (v1 lives on in the <code>v1.0.0</code> tag)</span></div>
+  <div class="stat"><b>3 → 2</b><span>skills (orchestrator + orchestrator-setup; playwright-cli dropped)</span></div>
+  <div class="stat"><b>0</b><span>agent tokens per tick</span></div>
+  <div class="stat"><b>5 · 3 · 3</b><span>harnesses · trackers · roles, all still configurable</span></div>
+</div>
+
+<table>
+  <tr><th>Concern</th><th>v1</th><th>v2</th></tr>
+  <tr><td>Workspace tool</td><td>orca / cmux / herdr</td><td><b>orca only</b>. The supervised mailbox the loop rests on is an orca feature</td></tr>
+  <tr><td>Harness</td><td>claude / codex / pi / copilot / cursor</td><td><b>Same five</b>, picked per role, with flags and clamps in one <code>harnesses.ts</code> table</td></tr>
+  <tr><td>Tracker</td><td>GitHub / GitLab / local markdown, behind <code>tracker.py</code></td><td><b>Same three</b>, behind one small interface with three backends</td></tr>
+  <tr><td>Model choice</td><td>heavy / medium / light / review roles, picked per spawn from prose signals</td><td><b>heavy / medium / light</b>, each a <code>{harness, model, effort}</code>, picked per spawn by a label or the Touches count. No review role</td></tr>
+  <tr><td>Setup</td><td><code>orchestrator-setup</code> skill</td><td><b><code>orchestrator-setup</code> skill</b>, rewritten: interview + dependencies + skills into every harness, then <code>orchestrator.ts install</code></td></tr>
+  <tr><td>Loop</td><td>a queue automation plus one automation per item; Python seams</td><td>One automation per repo; its precheck <em>is</em> the tick</td></tr>
+  <tr><td>Done / stuck signal</td><td>checklist file, terminal idle state, PR existence, re-prompt once</td><td>orca orchestration mailbox: <code>worker_done</code>, <code>ask</code>, liveness. No re-prompt</td></tr>
+  <tr><td>State</td><td>labels plus the Projects board plus checklist files</td><td>The tracker's state labels only (plus one Run id)</td></tr>
+  <tr><td>Prompt</td><td>143-line template + <code>prompt-improver</code> + skill routing</td><td>~10-line template; the worker runs the mattpocock <code>implement</code> skill and writes the PR with <code>pr</code></td></tr>
+  <tr><td>Review</td><td>Cross-vendor adversarial review on demand</td><td>mattpocock <code>code-review</code>, run inside the worker by <code>implement</code>. <b>Adversarial review is deferred</b></td></tr>
+  <tr><td>Merge</td><td>The maintainer merges on the tracker, and no session merges (ADR 0057)</td><td>The human says <code>merge N</code> and the session merges; a merge made on the tracker works too</td></tr>
+  <tr><td>Extra deps</td><td><code>simple-english</code>, <code>prompt-improver</code>, <code>playwright-cli</code>, <code>ponytail</code>, <code>codebase-memory-mcp</code></td><td>none</td></tr>
+</table>
+
+<!-- ============================================================ -->
+<h2 id="shape">2. The shape in one picture</h2>
+
+<svg viewBox="0 0 940 380" width="100%" role="img" aria-label="Architecture: orca automation runs the tick, which talks to the tracker and orca orchestration; workers run in worktrees">
+  <defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0L10,5L0,10z" fill="#8a877f"/></marker></defs>
+
+  <rect class="box" x="20" y="20" width="250" height="78" rx="10"/>
+  <text x="36" y="46" font-weight="600">Human</text>
+  <text x="36" y="66" class="muted">labels ready-for-agent · reviews PR</text>
+  <text x="36" y="84" class="muted">says "work on N" / "merge N" / "status"</text>
+
+  <rect class="box" x="20" y="150" width="250" height="78" rx="10"/>
+  <text x="36" y="176" font-weight="600">Main session (SKILL.md)</text>
+  <text x="36" y="196" class="muted">four verbs, each one script call</text>
+  <text x="36" y="214" class="muted">no implementation, no polling</text>
+
+  <rect class="box" x="345" y="20" width="250" height="78" rx="10"/>
+  <text x="361" y="46" font-weight="600">orca automation</text>
+  <text x="361" y="66" class="muted">orchestrator-tick · every minute</text>
+  <text x="361" y="84" class="muted">precheck always exits ≠ 0 → no agent</text>
+
+  <rect class="box" x="345" y="150" width="250" height="78" rx="10"/>
+  <text x="361" y="176" font-weight="600">scripts/orchestrator.ts</text>
+  <text x="361" y="196" class="muted">install · tick · start · status · merge</text>
+  <text x="361" y="214" class="muted">trackers/* · harnesses.ts · Node 24</text>
+
+  <rect class="box" x="670" y="20" width="250" height="78" rx="10"/>
+  <text x="686" y="46" font-weight="600">Tracker</text>
+  <text x="686" y="66" class="muted">github (gh) · gitlab (glab) · local .scratch/</text>
+  <text x="686" y="84" class="muted">state labels, blockers, children, PR/MR</text>
+
+  <rect class="box" x="670" y="150" width="250" height="78" rx="10"/>
+  <text x="686" y="176" font-weight="600">orca orchestration Run</text>
+  <text x="686" y="196" class="muted">worker-start · mailbox · worker-list</text>
+  <text x="686" y="214" class="muted">worker-stop · worker-release</text>
+
+  <rect class="box" x="345" y="285" width="575" height="78" rx="10"/>
+  <text x="361" y="311" font-weight="600">Workers — one per issue, worktree <tspan font-family="monospace">issue-N</tspan>, harness from its role</text>
+  <text x="361" y="331" class="muted">claude · codex · cursor · pi · copilot → implement skill (tdd → code-review → commit) → PR/MR via pr skill</text>
+  <text x="361" y="349" class="muted">orca orchestration ask when blocked · worker_done succeeded | failed at the end</text>
+
+  <path class="edge" d="M145,98 L145,150" marker-end="url(#a)"/>
+  <path class="edge" d="M270,189 L345,189" marker-end="url(#a)"/>
+  <path class="edge" d="M470,98 L470,150" marker-end="url(#a)"/>
+  <path class="edge" d="M595,180 C630,180 630,60 670,60" marker-end="url(#a)"/>
+  <path class="edge" d="M595,195 L670,195" marker-end="url(#a)"/>
+  <path class="edge" d="M795,228 L795,285" marker-end="url(#a)"/>
+</svg>
+
+<p><b>The automation decides <em>when</em>, the script decides <em>what</em>, and orca and the tracker hold the facts.</b> The main session never waits on workers. It answers four verbs and goes idle.</p>
+
+<!-- ============================================================ -->
+<h2 id="labels">3. State labels: the only state</h2>
+
+<p>At any moment an issue carries exactly one <b>state label</b>. On GitHub and GitLab it is a label; on the local tracker it is the <code>Status:</code> line. A transition swaps one for another in a single tracker call. Every transition is written by the script, never by a worker.</p>
+
+<svg viewBox="0 0 940 230" width="100%" role="img" aria-label="State label machine">
+  <defs><marker id="b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0L10,5L0,10z" fill="#8a877f"/></marker></defs>
+  <rect x="20"  y="90" width="150" height="44" rx="8" fill="#2f7d4f"/><text x="95"  y="117" text-anchor="middle" style="fill:#fff;font-family:monospace">ready-for-agent</text>
+  <rect x="260" y="90" width="150" height="44" rx="8" fill="#c78a1a"/><text x="335" y="117" text-anchor="middle" style="fill:#fff;font-family:monospace">in-progress</text>
+  <rect x="510" y="20" width="160" height="44" rx="8" fill="#2f5d8a"/><text x="590" y="47"  text-anchor="middle" style="fill:#fff;font-family:monospace">ready-for-human</text>
+  <rect x="510" y="160" width="160" height="44" rx="8" fill="#a3322b"/><text x="590" y="187" text-anchor="middle" style="fill:#fff;font-family:monospace">needs-human</text>
+  <rect x="770" y="20" width="150" height="44" rx="8" fill="#6b6a66"/><text x="845" y="47"  text-anchor="middle" style="fill:#fff">closed / resolved</text>
+
+  <path class="edge" d="M170,112 L260,112" marker-end="url(#b)"/><text x="215" y="104" text-anchor="middle" class="muted">claim</text>
+  <path class="edge" d="M410,104 C460,90 470,45 510,42" marker-end="url(#b)"/><text x="430" y="62" class="muted">worker_done ✓</text>
+  <path class="edge" d="M410,120 C460,135 470,180 510,182" marker-end="url(#b)"/><text x="400" y="170" class="muted">failed · ask · exited</text>
+  <path class="edge" d="M670,42 L770,42" marker-end="url(#b)"/><text x="720" y="34" text-anchor="middle" class="muted">merge N</text>
+  <path class="edge" d="M510,196 C300,230 120,200 95,134" marker-end="url(#b)" stroke-dasharray="4 4"/><text x="250" y="222" class="muted">human answers on the issue, relabels</text>
+</svg>
+
+<table>
+  <tr><th>Transition</th><th>Trigger</th><th>Writes</th></tr>
+  <tr><td><span class="lbl l-rfa">ready-for-agent</span> → <span class="lbl l-ip">in-progress</span></td><td>tick or <code>start N</code> finds an eligible issue and a free slot</td><td><code>tracker.claim(N)</code>: assign me + <code>in-progress</code> − <code>ready-for-agent</code>; then <code>worker-start</code></td></tr>
+  <tr><td><span class="lbl l-ip">in-progress</span> → <span class="lbl l-rfh">ready-for-human</span></td><td><code>worker_done --outcome succeeded</code> in the mailbox, and the PR/MR is open (or, on local, the branch has commits ahead of base)</td><td>state swap; <code>worker-release</code></td></tr>
+  <tr><td><span class="lbl l-ip">in-progress</span> → <span class="lbl l-nh">needs-human</span></td><td><code>worker_done --outcome failed</code>, an <code>ask</code> or escalation, or liveness <code>exited</code> with no <code>worker_done</code></td><td>state swap; an issue comment holding the worker's own text; <code>worker-stop</code>; <b>worktree kept</b></td></tr>
+  <tr><td><span class="lbl l-nh">needs-human</span> → <span class="lbl l-rfa">ready-for-agent</span></td><td>the human answers in an issue comment and relabels</td><td>human act. The next claim reuses worktree <code>issue-N</code> with a fresh worker that reads the latest comments</td></tr>
+  <tr><td><span class="lbl l-rfh">ready-for-human</span> → <span class="lbl l-done">closed</span></td><td><code>merge N</code>, or the tick sees the PR/MR already merged</td><td>teardown (see <a href="#merge">§9</a>)</td></tr>
+</table>
+
+<div class="note">No automatic re-prompt. v1 re-prompted a stalled worker once before calling a human. v2 sends every stuck signal straight to <code>needs-human</code>, so no tokens are spent on a worker that has already lost its way.</div>
+
+<h3>Eligibility, exactly</h3>
+<pre><code>eligible(issue) =
+     issue is open
+  && issue.state == "ready-for-agent"
+  && (issue.assignees is empty || issue.assignees == [me])
+  && tracker.blockers(issue) are all closed</code></pre>
+<p>The assignee check is the lock between two humans: one human's orchestrator never takes an issue claimed by the other's.</p>
+
+<!-- ============================================================ -->
+<h2 id="tick">4. The tick</h2>
+
+<p>One orca automation per repo, <code>orchestrator-tick</code>, cron <code>* * * * *</code>. Its <code>--precheck</code> is <code>node &lt;abs&gt;/scripts/orchestrator.ts tick</code>. <b>The precheck exits non-zero on every path</b>, so orca records each run as skipped and never starts the automation's agent. This is the v1 trick, kept on purpose.</p>
+
+<pre><code>tick():
+  if !acquireLock(".orchestrator/tick.lock")    // stale after 5 min
+    exit 1
+  try
+    cfg     = readConfig("docs/agents/orchestrator.md")
+    tracker = trackers[cfg.tracker]
+    run     = readRunId(".orchestrator/run.json")
+
+    // 1. observe: drain the mailbox (non-blocking), then apply each message
+    for msg in orca orchestration check --run run --json:
+      N = issueOf(msg.dispatch)                 // from the Task title "issue-N"
+      match msg.type:
+        worker_done succeeded -> toReadyForHuman(N); worker-release
+        worker_done failed    -> toNeedsHuman(N, msg.summary); worker-stop
+        question | escalation -> toNeedsHuman(N, msg.body);    worker-stop
+      ack msg
+
+    // 2. catch silent deaths
+    for row in orca orchestration worker-list --run run --json:
+      if row.liveness == exited and no worker_done for row.dispatch
+        toNeedsHuman(N, "worker exited without reporting")
+
+    // 3. merged on the tracker?
+    for N in tracker.list(state = ready-for-human):
+      if tracker.isMerged(N) -> teardown(N)
+
+    // 4. parents
+    for P in tracker.parents(state = in-progress):
+      if all tracker.children(P) closed -> tracker.close(P, summary)
+
+    // 5. fill free slots
+    free = cfg.max_workers - count(in-progress, excluding parents)
+    for issue in eligibleQueue() while free > 0:
+      if tracker.isParent(issue) -> claimParent(issue)   // no worker, no slot
+      else                       -> start(issue); free--
+  finally
+    releaseLock()
+  exit 1                                        // always: no agent runs</code></pre>
+
+<p>The order inside a tick matters. Observing first frees slots before filling them, so a worker that finished this minute makes room for the next issue in the same tick.</p>
+
+<!-- ============================================================ -->
+<h2 id="parents">5. Parents and children</h2>
+
+<p>A <b>parent</b> is an issue that has children, the shape <code>/to-tickets</code> produces. The <code>user-story</code> label also marks one. A parent never gets a worker of its own.</p>
+
+<ol>
+  <li>The human puts <span class="lbl l-rfa">ready-for-agent</span> on the parent. The tick claims it: assign me, <span class="lbl l-ip">in-progress</span>. The parent takes no worker slot.</li>
+  <li><b>A child starts only if it carries its own <span class="lbl l-rfa">ready-for-agent</span></b>, meaning it already holds all the context an agent needs, and only once nothing blocks it. A child without the label waits, even when unblocked.</li>
+  <li>Each child then follows the leaf flow: its own worktree, its own role, its own PR to <code>base</code>, its own review and merge.</li>
+  <li>When a child merges, its dependents unblock, and the next tick starts them if they carry the label.</li>
+  <li>When every child is closed, the tick closes the parent with a summary comment that lists the PR of each child.</li>
+</ol>
+
+<div class="note">So the label on a child is the human's "this one has enough context" and the label on the parent is the human's "run this story". A labelled child runs whether or not its parent is claimed. The parent's claim only makes the story's progress visible and closes it at the end.</div>
+
+<!-- ============================================================ -->
+<h2 id="roles">6. Roles, harnesses, models</h2>
+
+<p>Three <b>roles</b>, each a <code>{harness, model, effort}</code> set in config. The role is picked <b>per spawn</b> and <b>deterministically</b>, because the tick has no agent to judge with:</p>
+
+<pre><code>role(issue, manual?) =
+  manual --role given                    -> that role       // "work on N" may pass one
+  issue has label cfg.role_labels.heavy  -> heavy
+  issue has label cfg.role_labels.light  -> light
+  issue's "## Touches" block lists ≥ 3   -> heavy          // v1's countable signal
+  otherwise                              -> medium</code></pre>
+
+<p>A manual <code>work on N</code> lets the main agent read the issue and pass <code>--role</code>. That is the only time a role costs tokens, and only when the human asks in person.</p>
+
+<h3><code>scripts/harnesses.ts</code> — one row per harness</h3>
+<p>This one table replaces v1's five <code>references/harnesses/*.md</code> files. Each row holds: how orca starts it, the yolo flag, the model flag, the effort map with its clamps, how a prompt names a skill, and the agent id the <code>skills</code> CLI uses.</p>
+<table>
+  <tr><th>Harness</th><th>Start path</th><th>Yolo</th><th>Model / effort</th><th>Clamp</th><th>Names a skill as</th></tr>
+  <tr><td><code>claude</code></td><td><code>worker-start --agent claude --model --effort</code></td><td><code>--dangerously-skip-permissions</code></td><td><code>--model</code> · <code>--effort</code></td><td>none</td><td><code>/implement</code></td></tr>
+  <tr><td><code>codex</code></td><td><code>worker-start --agent codex --model --effort</code></td><td><code>--dangerously-bypass-approvals-and-sandbox</code></td><td><code>--model</code> · <code>-c model_reasoning_effort=</code></td><td><code>xhigh</code>/<code>max</code> → <code>high</code></td><td>"use the <code>implement</code> skill"</td></tr>
+  <tr><td><code>cursor</code></td><td><code>worker-start --agent cursor --model</code></td><td><code>--force</code></td><td>effort baked into the model id</td><td>per catalog</td><td>"use the <code>implement</code> skill"</td></tr>
+  <tr><td><code>pi</code></td><td><code>terminal create --command "pi …"</code> → <code>worker-start --terminal</code></td><td><code>-t read,bash,edit,write,grep,find,ls</code></td><td><code>--model</code> · <code>--thinking</code></td><td><code>max</code> → <code>xhigh</code></td><td>"use the <code>implement</code> skill"</td></tr>
+  <tr><td><code>copilot</code></td><td><code>terminal create --command "copilot …"</code> → <code>worker-start --terminal</code></td><td><code>--allow-all</code></td><td><code>--model</code> · <code>--effort</code></td><td>none</td><td>"use the <code>implement</code> skill"</td></tr>
+</table>
+<div class="note">orca's <code>worker-start --agent</code> knows <code>claude</code>, <code>codex</code>, <code>cursor</code> and <code>opencode</code>, but not <code>pi</code> or <code>copilot</code>. Those two start in a terminal the script creates, and are then bound with <code>worker-start --terminal</code>. Slice 5 has to prove that path gets the same supervised mailbox (see <a href="#risks">§17</a>).</div>
+<p>The script clamps an effort and reports the clamp. It refuses a config that pairs a model with a harness that cannot launch it, such as an openai model under <code>claude</code>.</p>
+
+<!-- ============================================================ -->
+<h2 id="trackers">7. Trackers</h2>
+
+<p>One interface, three backends, each a small module under <code>scripts/trackers/</code>. These follow the mattpocock conventions in <code>docs/agents/issue-tracker.md</code>:</p>
+
+<pre><code>interface Tracker {
+  list(filter): Issue[]          view(id): Issue        comment(id, body)
+  claim(id)                      setState(id, from, to) close(id, body)
+  blockers(id): Id[]             isParent(id): bool     children(id): Id[]
+  prFor(id): Pr | null           isMerged(id): bool     merge(id)            // refuses on its own preconditions
+}</code></pre>
+
+<table>
+  <tr><th></th><th>github (<code>gh</code>)</th><th>gitlab (<code>glab</code>)</th><th>local (<code>.scratch/</code>)</th></tr>
+  <tr><td>Issue id</td><td><code>#N</code></td><td><code>#N</code></td><td><code>&lt;feature&gt;/NN</code>; the worktree is <code>issue-&lt;feature&gt;-NN</code></td></tr>
+  <tr><td>State label</td><td>label</td><td>label</td><td><code>Status:</code> line</td></tr>
+  <tr><td>Claim</td><td><code>--add-assignee @me</code></td><td><code>--assignee @me</code></td><td><code>Assignee: &lt;git user.name&gt;</code> line</td></tr>
+  <tr><td>Blockers</td><td>native <code>issue_dependencies_summary.blocked_by</code>, or a <code>Blocked by: #n</code> line</td><td>native <code>/blocked_by</code> links, or a <code>Blocked by:</code> line</td><td><code>Blocked by: NN</code> line</td></tr>
+  <tr><td>Parent / children</td><td>native sub-issues, or a <code>Part of #P</code> line</td><td>child items, or a <code>Part of #P</code> line</td><td>the feature's <code>spec.md</code> / <code>map.md</code> → <code>issues/*.md</code></td></tr>
+  <tr><td>Comment</td><td><code>gh issue comment</code></td><td><code>glab issue note</code></td><td>append under <code>## Comments</code></td></tr>
+  <tr><td>Review surface</td><td>a PR with <code>Closes #N</code></td><td>an MR with <code>Closes #N</code></td><td>the branch itself; the worker writes the <code>pr</code>-skill body under <code>## Comments</code></td></tr>
+  <tr><td>Merge</td><td><code>gh pr merge --squash --delete-branch</code></td><td><code>glab mr merge --squash --remove-source-branch</code></td><td><code>git merge --squash</code> into <code>base</code> in the main checkout, then a commit</td></tr>
+  <tr><td>Done</td><td>closed by <code>Closes #N</code></td><td>closed by <code>Closes #N</code></td><td><code>Status: resolved</code> (the mattpocock word)</td></tr>
+</table>
+
+<p>The <code>tracker</code> field in config names the backend. Setup derives it from <code>docs/agents/issue-tracker.md</code>, so the human never states the tracker twice.</p>
+
+<!-- ============================================================ -->
+<h2 id="worker">8. The worker contract</h2>
+
+<p>The script calls <code>orca orchestration worker-start --spec &lt;rendered&gt; --task-title issue-N --worktree new-top-level --name issue-N --base-branch &lt;base&gt; …&lt;harness start flags&gt; --run &lt;run&gt;</code>. On resume it calls <code>--worktree name:issue-N</code> instead. Orca injects its own lifecycle preamble (Task and Dispatch IDs, the exact <code>worker_done</code> and <code>ask</code> commands), so our template only has to say what the work is.</p>
+
+<pre><code>You are working on issue {ref}: "{title}", on branch issue-{N}.
+
+1. Read the issue and every comment: {tracker.viewCommand}
+2. {harness.skill("implement")} on it.
+3. Commit in slices: one logical change per commit, Conventional Commits.
+4. {tracker.reviewStep}
+     github → Push, open a PR (not a draft) against {base}. Write its body
+              with {harness.skill("pr")}, and put "Closes #{N}" in it.
+     gitlab → the same, as a merge request.
+     local  → Leave the work on branch issue-{N}. Write the
+              {harness.skill("pr")} body under "## Comments" in {path}.
+5. Never change the issue's state or labels, and never merge.
+6. If you are blocked on a decision only a human can make, use the
+   orchestration `ask` command from your preamble and stop.
+7. When finished, send worker_done --outcome succeeded with the PR/MR URL
+   (or branch name), or --outcome failed with the reason.
+{resume? "This issue was resumed. Read the latest comments first: they answer why you stopped."}
+{note?}</code></pre>
+
+<ul>
+  <li><b>No issue body is pasted in.</b> The worker reads it itself, so the prompt stays small and is never stale.</li>
+  <li><b>No test or review step in the template.</b> <code>implement</code> already runs the suite, then <code>code-review</code>.</li>
+  <li><b>Skill names are rendered per harness</b> (<code>{harness.skill(…)}</code>): <code>/implement</code> on claude, "use the <code>implement</code> skill" elsewhere. Setup installs those skills into every harness the config names (<a href="#setup">§11</a>).</li>
+  <li><b><code>{note}</code></b> comes from a manual <code>start N --note "…"</code>. It is the one place the main agent still adds its own words to a prompt.</li>
+</ul>
+
+<!-- ============================================================ -->
+<h2 id="merge">9. Merge and teardown</h2>
+
+<p>This <b>reverses v1's ADR 0057</b> ("no session merges"). In v2, the human's explicit <code>merge N</code> is the authorisation.</p>
+
+<pre><code>merge(N):
+  refuse unless the state is ready-for-human
+  refuse unless the worktree issue-N is clean (no uncommitted work)
+  tracker.merge(N)               // github/gitlab: refuse unless mergeable and not
+                                 //   changes-requested; local: refuse unless the
+                                 //   main checkout is clean and on base
+  confirm tracker.isMerged(N)
+  teardown(N)
+
+teardown(N):                     // also called by the tick when merged on the tracker
+  orca orchestration worker-release   (if a dispatch is still held)
+  orca worktree rm name:issue-N
+  tracker: drop ready-for-human; close if "Closes #N" did not (local: Status: resolved)</code></pre>
+
+<p>Teardown runs only after the tracker confirms the merge. A refusal prints one line that says why, and changes nothing.</p>
+
+<!-- ============================================================ -->
+<h2 id="script">10. The script</h2>
+
+<p>TypeScript, run directly by Node 24 (type stripping is built in). <b>No build step, no runtime dependencies.</b> Erasable syntax only: no <code>enum</code>, no <code>namespace</code>, no parameter properties.</p>
+
+<table>
+  <tr><th>Subcommand</th><th>Called by</th><th>Does</th><th>Exit</th></tr>
+  <tr><td><code>install</code></td><td><code>orchestrator-setup</code></td><td>labels, Run, automation, one proof tick (<a href="#setup">§11</a>)</td><td>0 / 1</td></tr>
+  <tr><td><code>tick</code></td><td>the automation precheck</td><td>observe → catch deaths → merged → parents → fill (<a href="#tick">§4</a>)</td><td><b>always 1</b></td></tr>
+  <tr><td><code>start N [--role R] [--note "…"]</code></td><td>skill, "work on N"</td><td>eligibility check, claim, <code>worker-start</code>; on a parent, also starts its labelled unblocked children</td><td>0 / 1 with reason</td></tr>
+  <tr><td><code>status</code></td><td>skill, "status"</td><td>compact table: issue · state · role · harness · liveness · PR; then the ready queue</td><td>0</td></tr>
+  <tr><td><code>merge N</code></td><td>skill, "merge N"</td><td>refusals, merge, teardown (<a href="#merge">§9</a>)</td><td>0 / 1 with reason</td></tr>
+</table>
+
+<h3>Internal shape</h3>
+<pre><code>scripts/
+├── orchestrator.ts          # CLI entry, the five subcommands, tick, eligibility, roles, template
+├── harnesses.ts             # the five-row table: start path, flags, clamps, skill naming
+├── sh.ts                    # the one seam: spawnSync → {code, stdout, stderr}
+├── trackers/
+│   ├── tracker.ts           # the interface + shared types
+│   ├── github.ts            # gh
+│   ├── gitlab.ts            # glab
+│   └── local.ts             # .scratch/ files + git
+└── *.test.ts                # node --test; a fake sh() replays canned gh/glab/orca JSON;
+                             # local.test.ts uses a temp dir</code></pre>
+
+<p>Every external call goes through <code>sh()</code>, and the tests swap it out. Only the local backend touches a real filesystem, in a temp dir. The suite should run in about a second, against v1's ~35 s.</p>
+
+<h3>Tooling</h3>
+<pre><code>package.json   devDependencies: typescript, @types/node   (never needed at runtime)
+tsconfig.json  { "noEmit": true, "erasableSyntaxOnly": true, "strict": true, ... }
+Makefile       quick: npx tsc --noEmit && node --test scripts/</code></pre>
+
+<!-- ============================================================ -->
+<h2 id="setup">11. Setup and config</h2>
+
+<p>The interview lives in the <b><code>orchestrator-setup</code> skill</b>. The side effects live in <b><code>orchestrator.ts install</code></b>, so a re-run is always safe.</p>
+
+<h3>The <code>orchestrator-setup</code> skill (rewritten)</h3>
+<ol>
+  <li><b>Tracker.</b> Read <code>docs/agents/issue-tracker.md</code>. If it is missing, run mattpocock's <code>setup-matt-pocock-skills</code> first.</li>
+  <li><b>Roles.</b> Ask for a cost profile, which fills in all three <code>{harness, model, effort}</code> sets at once. Then let the human change any one of them.</li>
+  <li><b>Limits.</b> <code>max_workers</code> (default 3) and <code>base</code>.</li>
+  <li><b>Dependencies.</b> Check and install: orca, Node ≥ 22.18, the tracker CLI (<code>gh</code> / <code>glab</code>, none for local), and the CLI of <b>every distinct harness</b> across the three roles.</li>
+  <li><b>Skills into every harness.</b> Install the mattpocock skills the worker uses (<code>implement</code>, <code>tdd</code>, <code>code-review</code>, <code>diagnosing-bugs</code>, and <code>pr</code> from the in-progress bucket) into each harness the config names, in one call:<br>
+    <code>npx skills@latest add mattpocock/skills -s implement,tdd,code-review,diagnosing-bugs,pr -a &lt;agent,…&gt; -g -y</code><br>
+    Then confirm each harness lists them.</li>
+  <li><b>Write the config</b> block, then run <code>orchestrator.ts install</code>.</li>
+</ol>
+
+<h3><code>orchestrator.ts install</code> (idempotent)</h3>
+<ol>
+  <li>Create the state labels <code>in-progress</code> and <code>needs-human</code> if they are missing. <code>ready-for-agent</code> and <code>ready-for-human</code> come from the mattpocock triage setup, so create them only if absent. Also create the role labels. The local tracker needs no labels.</li>
+  <li>Create the orca Run (<code>orchestration run-create</code>) and save its id in <code>.orchestrator/run.json</code>, which is gitignored.</li>
+  <li>Create the automation <code>orchestrator-tick</code> with the precheck as an <b>absolute path</b>, because orca runs it later in a shell that saw no assignment.</li>
+  <li>Run one <code>tick</code> by hand and print its outcome as proof the precheck works.</li>
+</ol>
+
+<h3><code>docs/agents/orchestrator.md</code></h3>
+<p>One fenced JSON block that the script reads, with prose around it that explains each field. JSON needs no parser dependency, and setup writes it, so humans rarely hand-edit it.</p>
+<pre><code>{
+  "tracker": "github",
+  "base": "main",
+  "max_workers": 3,
+  "roles": {
+    "heavy":  { "harness": "claude", "model": "opus-5",   "effort": "high"   },
+    "medium": { "harness": "claude", "model": "sonnet-5", "effort": "medium" },
+    "light":  { "harness": "claude", "model": "sonnet-5", "effort": "low"    }
+  },
+  "role_labels": { "heavy": "heavy", "light": "light" },
+  "heavy_touches": 3
+}</code></pre>
+
+<!-- ============================================================ -->
+<h2 id="skill">12. The skill surface</h2>
+
+<p><code>orchestrator/SKILL.md</code>, under ~60 lines. Every action is one script call, and that is the token budget.</p>
+
+<table>
+  <tr><th>User says</th><th>Session runs</th></tr>
+  <tr><td>"work on N", "start N", "implement #N"</td><td><code>node …/orchestrator.ts start N [--role] [--note]</code>. If the automation does not exist yet, route to <code>orchestrator-setup</code> first</td></tr>
+  <tr><td>"status", "what's running", "what next"</td><td><code>node …/orchestrator.ts status</code></td></tr>
+  <tr><td>"merge N", "merge and teardown N"</td><td><code>node …/orchestrator.ts merge N</code></td></tr>
+  <tr><td>"setup the orchestrator"</td><td>the <code>orchestrator-setup</code> skill</td></tr>
+</table>
+<p>Two hard rules in the body: <b>never implement in this session</b>, and <b>never write a state label by hand</b>, because the script owns every transition. Any other request is answered freehand.</p>
+
+<!-- ============================================================ -->
+<h2 id="files">13. File-by-file changes</h2>
+
+<p>First, tag <code>v1.0.0</code> on <code>main</code> so the whole of v1 stays reachable. Then:</p>
+
+<table>
+  <tr><th></th><th>Path</th><th>Change</th></tr>
+  <tr><td><span class="tag del">delete</span></td><td><code>scripts/*.py</code> (13 modules + tests), <code>scripts/checks.sh</code>, <code>pyproject.toml</code>, <code>.importlinter</code></td><td>replaced by the TypeScript modules</td></tr>
+  <tr><td><span class="tag del">delete</span></td><td><code>hooks/</code> (context, record, refuse + tests, <code>hooks.json</code>)</td><td>no quality-gate record and no refuse hook in v2</td></tr>
+  <tr><td><span class="tag del">delete</span></td><td><code>playwright-cli/</code></td><td>no browser surface in v2</td></tr>
+  <tr><td><span class="tag del">delete</span></td><td><code>orchestrator/references/</code> (all 21 files)</td><td>harness facts move into <code>harnesses.ts</code>, tracker facts into <code>trackers/*</code>, model profiles into the setup skill, the template into the script; the rest is out of scope</td></tr>
+  <tr><td><span class="tag del">delete</span></td><td><code>orchestrator/docs/adr/0001–0068</code> and the ledger</td><td>reachable at <code>v1.0.0</code>; v2 starts a fresh set</td></tr>
+  <tr><td><span class="tag del">delete</span></td><td><code>docs/architecture.html</code>, <code>docs/skill-state-and-roadmap.html</code>, <code>docs/refactor-opportunities/</code></td><td>describe v1</td></tr>
+  <tr><td><span class="tag del">delete</span></td><td><code>.gitleaks.toml</code></td><td>only the quality gates used it</td></tr>
+  <tr><td><span class="tag add">add</span></td><td><code>scripts/{orchestrator,harnesses,sh}.ts</code>, <code>scripts/trackers/{tracker,github,gitlab,local}.ts</code>, <code>*.test.ts</code></td><td>§10</td></tr>
+  <tr><td><span class="tag add">add</span></td><td><code>package.json</code>, <code>tsconfig.json</code></td><td>dev-only typecheck</td></tr>
+  <tr><td><span class="tag add">add</span></td><td><code>orchestrator/docs/adr/0001–0005</code></td><td>§14</td></tr>
+  <tr><td><span class="tag mod">rewrite</span></td><td><code>orchestrator/SKILL.md</code></td><td>§12</td></tr>
+  <tr><td><span class="tag mod">rewrite</span></td><td><code>orchestrator-setup/SKILL.md</code> (+ <code>orchestrator.template.md</code>; drop <code>templates/</code> Makefile gates)</td><td>§11</td></tr>
+  <tr><td><span class="tag mod">rewrite</span></td><td><code>orchestrator/CONTEXT.md</code></td><td>the glossary, §14</td></tr>
+  <tr><td><span class="tag mod">rewrite</span></td><td><code>docs/agents/orchestrator.md</code></td><td>the JSON config block, §11</td></tr>
+  <tr><td><span class="tag mod">rewrite</span></td><td><code>README.md</code></td><td>install + the loop + a pointer to <code>v1.0.0</code></td></tr>
+  <tr><td><span class="tag mod">rewrite</span></td><td><code>CLAUDE.md</code></td><td>keep: run <code>make quick</code> when you touch the script; commit in slices; the version-bump rule. Drop: simple-english, prompt-improver, the close-transaction rule, ADR pointer and ledger rules, the link test</td></tr>
+  <tr><td><span class="tag mod">edit</span></td><td><code>Makefile</code></td><td><code>quick</code> = typecheck + <code>node --test</code>; drop <code>full</code></td></tr>
+  <tr><td><span class="tag mod">edit</span></td><td><code>.claude-plugin/plugin.json</code></td><td><code>version: 2.0.0</code>; <code>skills: ["./orchestrator", "./orchestrator-setup"]</code>; new description and keywords (drop cmux)</td></tr>
+  <tr><td><span class="tag mod">edit</span></td><td><code>.gitignore</code></td><td>keep <code>.orchestrator/</code>; add <code>node_modules/</code>; drop <code>__pycache__/</code></td></tr>
+  <tr><td><span class="tag mod">keep</span></td><td><code>docs/agents/issue-tracker.md</code>, <code>triage-labels.md</code>, <code>domain.md</code></td><td>mattpocock setup files, unchanged</td></tr>
+</table>
+
+<!-- ============================================================ -->
+<h2 id="docs">14. Glossary and ADRs</h2>
+
+<h3>New <code>orchestrator/CONTEXT.md</code> — the terms</h3>
+<table>
+  <tr><th>Term</th><th>Meaning</th></tr>
+  <tr><td><b>Orchestrator</b></td><td>The main session. It answers the four verbs and never implements.</td></tr>
+  <tr><td><b>Worker</b></td><td>One agent session started by orca on one issue, in its own worktree, on the harness and model its role names.</td></tr>
+  <tr><td><b>Harness</b></td><td>The agent CLI a worker runs in: claude, codex, cursor, pi or copilot.</td></tr>
+  <tr><td><b>Tracker</b></td><td>Where issues live: GitHub, GitLab or local markdown.</td></tr>
+  <tr><td><b>Role</b></td><td>The class of an issue that picks its <code>{harness, model, effort}</code>: heavy, medium or light.</td></tr>
+  <tr><td><b>Tick</b></td><td>One run of the automation's precheck. It observes, transitions and fills slots, then exits non-zero so no agent runs.</td></tr>
+  <tr><td><b>State label</b></td><td>The one value that holds an issue's work state: <code>ready-for-agent</code>, <code>in-progress</code>, <code>ready-for-human</code> or <code>needs-human</code>. A label on GitHub and GitLab, a <code>Status:</code> line locally.</td></tr>
+  <tr><td><b>Claim</b></td><td>Assigning an eligible issue to the person running the orchestrator and moving it to <code>in-progress</code>.</td></tr>
+  <tr><td><b>Eligible</b></td><td>Open, <code>ready-for-agent</code>, unassigned or assigned to me, nothing blocking it.</td></tr>
+  <tr><td><b>Parent</b></td><td>An issue with children (or <code>user-story</code>). It is claimed and closed, but never worked.</td></tr>
+  <tr><td><b>Child</b></td><td>An issue under a parent. It runs exactly like a leaf issue.</td></tr>
+  <tr><td><b>Slot</b></td><td>One of <code>max_workers</code> places for a live worker. Parents take none.</td></tr>
+  <tr><td><b>Resume</b></td><td>A fresh worker on an existing <code>issue-N</code> worktree after a <code>needs-human</code> round trip.</td></tr>
+  <tr><td><b>Teardown</b></td><td>Releasing the worker, removing the worktree and dropping the state label, after a confirmed merge.</td></tr>
+</table>
+
+<h3>New ADRs</h3>
+<table>
+  <tr><th>#</th><th>Decision</th><th>Rejected</th></tr>
+  <tr><td>0001</td><td><b>The automation precheck is the whole tick.</b> One automation per repo, always exiting non-zero.</td><td>A blocking <code>check --wait</code> in the main session (the session must stay alive, and every wake costs tokens); one automation per item (v1: leaks, and a repoint step).</td></tr>
+  <tr><td>0002</td><td><b>orca orchestration is the done/stuck signal.</b> <code>worker_done</code>, <code>ask</code> and liveness drive the transitions; no re-prompt.</td><td>Checklist files, terminal idle scraping, PR polling, one automatic re-prompt.</td></tr>
+  <tr><td>0003</td><td><b>State labels are the only state.</b> One per issue; only the Run id persists locally.</td><td>A local state file (it drifts from the tracker); the Projects board mirror.</td></tr>
+  <tr><td>0004</td><td><b>The session merges, on request.</b> <code>merge N</code> authorises merge + teardown; a merge made on the tracker is honoured too. Reverses v1 ADR 0057.</td><td>The human-only merge on the tracker (it needed a second act for teardown).</td></tr>
+  <tr><td>0005</td><td><b>The role is picked deterministically.</b> A label, then the Touches count, then medium; a manual <code>--role</code> wins.</td><td>An agent reading the issue on every spawn (tokens on every tick); v1's prose heavy/light signals.</td></tr>
+</table>
+<p>Adversarial review is out of v2.0. If it returns, it needs its own ADR and a <code>review</code> role.</p>
+
+<!-- ============================================================ -->
+<h2 id="tokens">15. Token economy</h2>
+
+<table>
+  <tr><th>Where tokens were spent in v1</th><th>v2</th></tr>
+  <tr><td>Role classification from prose signals on every spawn</td><td>A label or Touches lookup inside the script. Zero tokens, except a manual <code>--role</code></td></tr>
+  <tr><td><code>prompt-improver</code> pass + 143-line template + routed skill body</td><td>~10 lines, filled in by the script. The worker reads the issue itself</td></tr>
+  <tr><td>The orchestrator reading checklists and terminal tails</td><td>The script reads the mailbox as JSON. Zero tokens</td></tr>
+  <tr><td>A 121-line SKILL.md that points into 21 reference files</td><td>A ~60-line SKILL.md with no references to follow</td></tr>
+  <tr><td><code>simple-english</code> passes on every prose deliverable</td><td>Gone</td></tr>
+  <tr><td>A re-prompt on a stall</td><td>Gone. A stuck worker goes straight to <code>needs-human</code></td></tr>
+  <tr><td>A cross-vendor review worker</td><td>Gone for now. <code>code-review</code> runs inside the same worker</td></tr>
+</table>
+<p>The only tokens spent are the workers' own work and the few lines the main session reads when you ask it something.</p>
+
+<!-- ============================================================ -->
+<h2 id="slices">16. Build order</h2>
+
+<p>Each step is one commit slice, and each leaves the branch working.</p>
+<ol>
+  <li><b>Tag <code>v1.0.0</code></b> on <code>main</code>.</li>
+  <li><b>Strip v1.</b> Delete everything marked <span class="tag del">delete</span>. (Nothing runs between this commit and step 5, so release only after step 11.)</li>
+  <li><b>Tooling.</b> <code>package.json</code>, <code>tsconfig.json</code>, <code>Makefile quick</code>, <code>.gitignore</code>.</li>
+  <li><b><code>sh.ts</code> + config reader + the <code>Tracker</code> interface + <code>github.ts</code></b>, with tests.</li>
+  <li><b><code>harnesses.ts</code> + roles + template render.</b> Prove both start paths against a real orca: <code>--agent</code> for claude, and <code>terminal create</code> → <code>--terminal</code> for pi or copilot. With tests.</li>
+  <li><b>Eligibility + parent detection + claim + <code>start N</code></b>, with tests.</li>
+  <li><b><code>tick</code></b>: lock, mailbox drain, death catch, parent close, slot fill, with tests.</li>
+  <li><b><code>merge N</code> + teardown</b>, and the tick's merged-on-the-tracker path, with tests.</li>
+  <li><b><code>gitlab.ts</code> and <code>local.ts</code></b>, each with its own tests against the same interface.</li>
+  <li><b><code>status</code> + <code>install</code></b>, then the rewritten <code>orchestrator-setup</code> skill, including the skills-into-every-harness step.</li>
+  <li><b>Docs.</b> SKILL.md, CONTEXT.md, ADRs 0001–0005, README, CLAUDE.md, <code>docs/agents/orchestrator.md</code>; <code>version: 2.0.0</code>.</li>
+  <li><b>Dogfood.</b> Run setup in this repo, label one small issue, and watch it through every state, including a forced <code>needs-human</code> and a resume. Then run one issue on a non-claude harness.</li>
+</ol>
+
+<!-- ============================================================ -->
+<h2 id="risks">17. Risks and open edges</h2>
+
+<ul>
+  <li><b>pi and copilot under supervision.</b> They start through <code>terminal create</code> + <code>worker-start --terminal</code>, not <code>--agent</code>. Slice 5 must prove this binds a supervised Dispatch with the same mailbox and preamble. If it does not, those two harnesses fall back to <code>dispatch --inject</code>, which orca marks unsupervised. Their done/stuck signal would then come from <code>worker-list</code> liveness only, plus the worker running <code>orca orchestration send</code> itself.</li>
+  <li><b>First-run trust dialogs.</b> codex and copilot ask "trust this folder?" in a new directory, and v1 needed a two-step send to answer it. Check whether orca's agent launch handles it. If not, <code>harnesses.ts</code> carries the answer keystroke per harness.</li>
+  <li><b>Skills on non-claude harnesses.</b> The <code>skills</code> CLI agent ids and each harness's way of invoking a skill must be checked once per harness. If a harness cannot load a skill, the template inlines a three-line "tdd → test suite → review your diff → commit" fallback for that harness only.</li>
+  <li><b>The mailbox outside a coordinator terminal.</b> The tick is not an orca terminal. It addresses the Run with <code>--run &lt;id&gt;</code>. Slice 4 must prove that <code>orchestration check --run</code> without <code>--wait</code> returns and acks from a plain shell. If it does not, fall back to <code>worker-list</code> plus <code>worker-show</code> per dispatch, which is still JSON and still costs zero tokens.</li>
+  <li><b>An unacked message replays.</b> <code>check</code> replays the oldest delivery until it is acked. A tick that crashes after the state swap but before the ack sees the message again. Every transition must be idempotent: swapping to a state the issue already has is a no-op.</li>
+  <li><b>Local tracker ids are not unique across features.</b> <code>01</code> exists in every feature directory, so the local id is always <code>&lt;feature&gt;/NN</code>, and the worktree name carries both parts.</li>
+  <li><b>The local merge touches the main checkout.</b> <code>merge N</code> refuses unless that checkout is clean and on <code>base</code>.</li>
+  <li><b>The <code>pr</code> skill is beta</b> (mattpocock's in-progress bucket) and "can change or disappear". If it does, the template falls back to "a PR body with Summary, Evidence, Merge Danger".</li>
+  <li><b>Mapping a dispatch back to its issue.</b> Use the Task title and the worktree name <code>issue-N</code>. Never parse the free-text summary.</li>
+  <li><b>Resume on a worktree that has gone away.</b> If <code>issue-N</code> was deleted while it sat in <code>needs-human</code>, start from scratch on a new worktree. The branch, if pushed, still holds the work.</li>
+  <li><b>Two machines, one human.</b> "Assigned to me" lets the same person's two orchestrators both claim an issue. That is out of scope for v2.0: run one setup per repo per person.</li>
+</ul>
+
+<!-- ============================================================ -->
+<h2 id="decisions">18. Decision log</h2>
+
+<table>
+  <tr><th>#</th><th>Question</th><th>Decision</th></tr>
+  <tr><td>Q1</td><td>Where v2 lives</td><td>Replace v1 in place; tag <code>v1.0.0</code>; release <code>2.0.0</code></td></tr>
+  <tr><td>Q2</td><td>Loop driver</td><td>An orca automation running a script in its precheck, as v1 does today</td></tr>
+  <tr><td>Q3/Q12/Q36</td><td>Code</td><td>One entry point plus tracker and harness modules, with tests</td></tr>
+  <tr><td>Q4</td><td>Dependencies</td><td>Drop prompt-improver, simple-english, playwright-cli, ponytail, codebase-memory-mcp, quality gates. <b>Keep</b> multiple harnesses and trackers (corrected in round 4)</td></tr>
+  <tr><td>Q5</td><td>Work-item shape</td><td>Parents and leaves; no Projects board</td></tr>
+  <tr><td>Q6</td><td>Claim</td><td>Assign me + <code>in-progress</code>, remove <code>ready-for-agent</code>; skip issues assigned to others</td></tr>
+  <tr><td>Q7</td><td>Stuck label</td><td><code>needs-human</code></td></tr>
+  <tr><td>Q8</td><td>Merging</td><td>The session merges on <code>merge N</code>, then tears down</td></tr>
+  <tr><td>Q9/Q31/Q32</td><td>Model choice</td><td>heavy / medium / light, each <code>{harness, model, effort}</code>; picked by label → Touches → medium; manual <code>--role</code> wins</td></tr>
+  <tr><td>Q10</td><td>Concurrency</td><td><code>max_workers</code>, default 3</td></tr>
+  <tr><td>Q11</td><td>Automations</td><td>One per repo</td></tr>
+  <tr><td>Q13</td><td>Who prompts</td><td>The script renders a fixed template; a manual <code>start N --note</code> adds the agent's words</td></tr>
+  <tr><td>Q14</td><td>Done/stuck signal</td><td>The orca orchestration mailbox + liveness</td></tr>
+  <tr><td>Q15</td><td>Re-prompt</td><td>None</td></tr>
+  <tr><td>Q16</td><td>Parent marker</td><td>Native children, or the <code>user-story</code> label</td></tr>
+  <tr><td>Q17</td><td>Parent lifecycle</td><td>The parent is claimed; only children with <code>ready-for-agent</code> start, as they unblock; the parent closes when all children close</td></tr>
+  <tr><td>Q18</td><td>Leaving <code>needs-human</code></td><td>The human answers + relabels → a fresh worker in the same worktree</td></tr>
+  <tr><td>Q19</td><td>Merge on the tracker</td><td>The tick notices and tears down</td></tr>
+  <tr><td>Q20/Q38</td><td>Config</td><td>A JSON block in <code>docs/agents/orchestrator.md</code></td></tr>
+  <tr><td>Q21/Q37</td><td>Setup</td><td>The <code>orchestrator-setup</code> skill for the interview and dependencies; <code>orchestrator.ts install</code> for the side effects</td></tr>
+  <tr><td>Q22</td><td>State</td><td>Stateless apart from the Run id</td></tr>
+  <tr><td>Q23/Q30</td><td>Worker contract</td><td>~10 lines; the <code>implement</code> skill; PR body via mattpocock <code>pr</code> with <code>Closes #N</code>; no extra check step</td></tr>
+  <tr><td>Q24</td><td>Overlapping ticks</td><td>A lock file, stale after 5 min</td></tr>
+  <tr><td>Q25</td><td>Live worker on <code>needs-human</code></td><td><code>worker-stop</code>, keep the worktree, post the reason as an issue comment</td></tr>
+  <tr><td>Q26</td><td>Skill surface</td><td>Four verbs, ~60 lines</td></tr>
+  <tr><td>Q27</td><td>Repo docs</td><td>Fresh CONTEXT.md and ADRs 0001–0005; slim CLAUDE.md</td></tr>
+  <tr><td>Q28</td><td>This document</td><td><code>docs/v2-plan.html</code> on branch <code>v2-plan</code></td></tr>
+  <tr><td>Q29</td><td>Language</td><td>TypeScript on Node 24; no build step, no runtime deps; <code>tsc</code> as a dev-only typecheck</td></tr>
+  <tr><td>Q33</td><td>Review</td><td>mattpocock <code>code-review</code> only, inside the worker; no adversarial review in v2.0</td></tr>
+  <tr><td>Q34</td><td>Workspace tool</td><td>orca only</td></tr>
+  <tr><td>Q35</td><td>Local tracker</td><td><code>Status:</code> + <code>Assignee:</code> lines; the branch is the review surface; local squash merge; done = <code>resolved</code></td></tr>
+  <tr><td>Q39</td><td>Skills across harnesses</td><td>Setup installs the worker's mattpocock skills into every harness the config names; the template names skills per harness. The orchestrator itself stays a Claude Code plugin</td></tr>
+</table>
+
+</main>
+</body>
+</html>
