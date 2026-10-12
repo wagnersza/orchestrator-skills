@@ -195,11 +195,28 @@ function noWorktree(run: Result): boolean {
 
 type StartArgs = { id: string; role?: RoleName; note?: string; run?: string };
 
-type LeafArgs = { role?: RoleName; note?: string; run: string };
+// `from` reads the Run's coordinator handle on its first call, and only then.
+type LeafArgs = { role?: RoleName; note?: string; run: string; from: () => string };
+
+// The Run's coordinator terminal. orca wants it as the sender of each worker-start and
+// each mailbox read. It still answers for a terminal that has closed since, so the loop
+// runs with no session open.
+function coordinatorOf(sh: Sh, cwd: string, run: string): string {
+  const handle = orca<{ run: { coordinator_handle?: string | null } }>(sh, cwd, ["run-show", "--id", run]).run.coordinator_handle;
+  if (!handle) throw new Error(`orca Run ${run} has no coordinator terminal, so no worker can start and its mailbox cannot be read`);
+  return handle;
+}
+
+// `get` on its first call, and the same value on every call after it.
+function once<T>(get: () => T): () => T {
+  let value: { is: T } | undefined;
+  return () => (value ??= { is: get() }).is;
+}
 
 // `start N`: a parent claims and starts its children, and any other issue starts as a leaf.
 function start(config: Config, tracker: Tracker, sh: Sh, cwd: string, args: StartArgs, deps: Deps): number {
-  const leaf = { role: args.role, note: args.note, run: args.run ?? readRun(cwd) };
+  const run = args.run ?? readRun(cwd);
+  const leaf = { role: args.role, note: args.note, run, from: once(() => coordinatorOf(sh, cwd, run)) };
   const issue = tracker.view(args.id);
   if (tracker.isParent(issue.id)) return startParent(config, tracker, sh, cwd, issue, leaf, deps);
   return startLeaf(config, tracker, sh, cwd, issue, leaf, deps);
@@ -223,6 +240,7 @@ function startLeaf(config: Config, tracker: Tracker, sh: Sh, cwd: string, issue:
   }
   const name = worktreeName(issue.id);
   const repo = mainCheckout(sh, cwd);
+  const from = args.from();
   tracker.claim(issue.id);
   const worker = sh("orca", [
     "orchestration", "worker-start",
@@ -236,6 +254,7 @@ function startLeaf(config: Config, tracker: Tracker, sh: Sh, cwd: string, issue:
     "--model", model,
     "--effort", effort,
     "--run", args.run,
+    "--from", from,
     "--json",
   ], { cwd });
   if (worker.code !== 0) {
@@ -484,11 +503,9 @@ function inProgress(tracker: Tracker, id: Id, what: string, deps: Deps): Issue |
 
 // Drain the Run's mailbox without waiting. Each batch is acknowledged only after every
 // message in it is applied, so a crash replays the batch, and the replay is a no-op.
-function drain(tracker: Tracker, sh: Sh, cwd: string, run: string, seen: Observed, deps: Deps): Set<string> {
+function drain(tracker: Tracker, sh: Sh, cwd: string, run: string, from: () => string, seen: Observed, deps: Deps): Set<string> {
   const handled = new Set<string>();
-  const handle = orca<{ run: { coordinator_handle?: string | null } }>(sh, cwd, ["run-show", "--id", run]).run.coordinator_handle;
-  if (!handle) throw new Error(`orca Run ${run} has no coordinator terminal, so its mailbox cannot be read`);
-  const check = ["check", "--run", run, "--terminal", handle];
+  const check = ["check", "--run", run, "--terminal", from()];
   let batch = orca<{ deliveryId?: string | null; messages?: Message[] }>(sh, cwd, check);
   while (batch.deliveryId) {
     for (const message of batch.messages ?? []) {
@@ -546,7 +563,7 @@ function reported(task: Task | undefined): boolean {
 // `max_workers` minus the in-progress issues in `live` that are not parents. An issue
 // that is not eligible keeps its place in the queue, and an issue whose worker does not
 // start frees its slot again.
-function fill(config: Config, tracker: Tracker, sh: Sh, cwd: string, run: string, live: Issue[], deps: Deps): void {
+function fill(config: Config, tracker: Tracker, sh: Sh, cwd: string, leaf: LeafArgs, live: Issue[], deps: Deps): void {
   let free = config.max_workers - slotsTaken(tracker, live);
   const queue = tracker.list({ label: READY });
   if (queue.length === 0) return;
@@ -555,7 +572,7 @@ function fill(config: Config, tracker: Tracker, sh: Sh, cwd: string, run: string
     const parent = tracker.isParent(issue.id);
     if ((!parent && free <= 0) || whyNotEligible(tracker, issue, me) !== null) continue;
     if (parent) claimParent(tracker, issue, deps);
-    else if (startLeaf(config, tracker, sh, cwd, issue, { run }, deps) === 0) free--;
+    else if (startLeaf(config, tracker, sh, cwd, issue, leaf, deps) === 0) free--;
   }
 }
 
@@ -570,13 +587,14 @@ function tick(config: Config, tracker: Tracker, sh: Sh, cwd: string, run: string
   }
   try {
     const id = run ?? readRun(cwd);
+    const from = once(() => coordinatorOf(sh, cwd, id));
     const seen = observe(sh, cwd, id);
-    const handled = drain(tracker, sh, cwd, id, seen, deps);
+    const handled = drain(tracker, sh, cwd, id, from, seen, deps);
     catchDeaths(tracker, sh, cwd, seen, handled, deps);
     teardownMerged(tracker, sh, cwd, seen, deps);
     const live = tracker.list({ label: IN_PROGRESS });
     closeParents(tracker, live, deps);
-    fill(config, tracker, sh, cwd, id, live, deps);
+    fill(config, tracker, sh, cwd, { run: id, from }, live, deps);
   } finally {
     rmSync(join(cwd, LOCK_PATH), { force: true });
   }

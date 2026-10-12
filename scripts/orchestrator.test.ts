@@ -241,6 +241,10 @@ test("node runs the script directly, with no build step", () => {
   assert.equal(result.stderr, `${USAGE}\n`);
 });
 
+const RUN = "run_1";
+const COORDINATOR = "term_4f0ec745-92e8-4178-b33c-e0b32e2792db";
+const ORCA = (...args: string[]) => `orca orchestration ${args.join(" ")} --json`;
+const RUN_SHOW = ORCA("run-show", "--id", RUN);
 const GIT = "git rev-parse --path-format=absolute --git-common-dir";
 const PATCH = (n: number) => `gh api -X PATCH repos/{owner}/{repo}/issues/${n} --input -`;
 const WORKER_START = "orca orchestration worker-start *";
@@ -280,6 +284,7 @@ function startReplies(n: number, fixture: Fixture = {}, extra: Record<string, un
     [SCAN]: [[]],
     [ME]: "me\n",
     [GIT]: "/repo/.git\n",
+    [RUN_SHOW]: receipt({ run: { id: RUN, coordinator_handle: COORDINATOR } }),
     [PATCH(n)]: issue(n, { ...fixture, labels: ["in-progress"], assignees: ["me"] }),
     [WORKER_START]: RECEIPT,
     ...extra,
@@ -310,7 +315,7 @@ test("start claims an eligible issue in one write, then starts a claude worker o
   assert.deepEqual(result.out, [
     "started #10 in worktree issue-10: claude sonnet @ medium (medium role), dispatch ctx_54923f33c600",
   ]);
-  assert.deepEqual(result.calls.slice(0, 5), [VIEW(10), SCAN, ME, GIT, PATCH(10)]);
+  assert.deepEqual(result.calls.slice(0, 6), [VIEW(10), SCAN, ME, GIT, RUN_SHOW, PATCH(10)]);
   assert.deepEqual(patches(result), [{ labels: ["docs", "in-progress"], assignees: ["me"] }]);
   const argv = workerStart(result) ?? [];
   const spec = flag(argv, "--spec") ?? "";
@@ -326,9 +331,10 @@ test("start claims an eligible issue in one write, then starts a claude worker o
     "--model", "sonnet",
     "--effort", "medium",
     "--run", "run_1",
+    "--from", COORDINATOR,
     "--json",
   ]);
-  assert.equal(result.calls.length, 6);
+  assert.equal(result.calls.length, 7);
 });
 
 test("start takes #N, and an issue already assigned to me keeps one assignee", () => {
@@ -441,7 +447,9 @@ test("start reads the Run id from the run file when no --run is given", () => {
   const cwd = mkdtempSync(join(tmpdir(), "orch-"));
   mkdirSync(join(cwd, ".orchestrator"));
   writeFileSync(join(cwd, ".orchestrator", "run.json"), '{ "run": "run_from_file" }\n');
-  const result = run(["start", "10"], startReplies(10), cwd);
+  const result = run(["start", "10"], startReplies(10, {}, {
+    [ORCA("run-show", "--id", "run_from_file")]: receipt({ run: { id: "run_from_file", coordinator_handle: COORDINATOR } }),
+  }), cwd);
   assert.equal(result.code, 0);
   assert.equal(flag(workerStart(result), "--run"), "run_from_file");
 });
@@ -487,10 +495,6 @@ test("start refuses arguments it cannot read, with the usage", () => {
   }
 });
 
-const RUN = "run_1";
-const COORDINATOR = "term_4f0ec745-92e8-4178-b33c-e0b32e2792db";
-const ORCA = (...args: string[]) => `orca orchestration ${args.join(" ")} --json`;
-const RUN_SHOW = ORCA("run-show", "--id", RUN);
 const TASKS = ORCA("task-list", "--run", RUN);
 const WORKERS = ORCA("worker-list", "--run", RUN);
 const CHECK = ORCA("check", "--run", RUN, "--terminal", COORDINATOR);
@@ -887,6 +891,22 @@ test("tick starts every ready issue that fits, in queue order, with no session i
   ]);
 });
 
+test("tick starts each worker from the Run's coordinator, read once, so no session needs to be open", () => {
+  const result = run(TICK, tickReplies({ queue: [[10], [11]] }), MAX(3));
+  assert.deepEqual(result.err, []);
+  assert.deepEqual(result.argvs.filter((argv) => argv[2] === "worker-start").map((argv) => flag(argv, "--from")), [COORDINATOR, COORDINATOR]);
+  assert.equal(result.calls.filter((line) => line === RUN_SHOW).length, 1);
+});
+
+test("start refuses a Run with no coordinator before it claims", () => {
+  const result = run(["start", "10", "--run", RUN], startReplies(10, {}, {
+    [RUN_SHOW]: receipt({ run: { id: RUN, coordinator_handle: null } }),
+  }));
+  assert.equal(result.code, 1);
+  assert.deepEqual(result.err, [`error: orca Run ${RUN} has no coordinator terminal, so no worker can start and its mailbox cannot be read`]);
+  assert.deepEqual(patches(result), []);
+});
+
 test("tick fills only the free slots: max_workers minus the in-progress issues that are not parents", () => {
   const result = run(TICK, tickReplies({
     queue: [[20], [21], [22]],
@@ -1137,6 +1157,7 @@ function parentReplies(parent: Fixture, children: unknown[], extra: Record<strin
     [SCAN]: [children],
     [ME]: "me\n",
     [GIT]: "/repo/.git\n",
+    [RUN_SHOW]: receipt({ run: { id: RUN, coordinator_handle: COORDINATOR } }),
     [PATCH(40)]: issue(40, { labels: ["in-progress"], assignees: ["me"] }),
     [LIST_OF("in-progress")]: [[
       issue(10, { labels: ["in-progress"], assignees: ["me"] }),
