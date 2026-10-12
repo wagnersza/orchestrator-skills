@@ -28,10 +28,12 @@ const DEFAULTS: Config = {
   tracker: "github",
   base: "main",
   max_workers: 3,
+  // The claude CLI's own aliases, which it resolves on every provider. A versioned id
+  // such as "sonnet-5" is refused.
   roles: {
-    heavy: { harness: "claude", model: "opus-5", effort: "high" },
-    medium: { harness: "claude", model: "sonnet-5", effort: "medium" },
-    light: { harness: "claude", model: "sonnet-5", effort: "low" },
+    heavy: { harness: "claude", model: "opus", effort: "high" },
+    medium: { harness: "claude", model: "sonnet", effort: "medium" },
+    light: { harness: "claude", model: "sonnet", effort: "low" },
   },
   role_labels: { heavy: "heavy", light: "light" },
   heavy_touches: 3,
