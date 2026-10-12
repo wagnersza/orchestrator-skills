@@ -75,7 +75,8 @@ type Failure = { fail: Result };
 
 // A runner that answers each known command line with its recorded output, and fails
 // any other call, the way `gh` fails on a path it does not know. A key that ends in
-// " *" answers every line it prefixes.
+// " *" answers every line it prefixes. A reply that is a function gets the calls so far,
+// so a list can change after a write.
 function fakeRunner(replies: Record<string, unknown>) {
   const calls: string[] = [];
   const argvs: string[][] = [];
@@ -89,7 +90,8 @@ function fakeRunner(replies: Record<string, unknown>) {
       ? line
       : Object.keys(replies).find((k) => k.endsWith(" *") && line.startsWith(k.slice(0, -1)));
     if (key === undefined) return { code: 1, stdout: "", stderr: `unexpected call: ${line}` };
-    const reply = replies[key];
+    const raw = replies[key];
+    const reply = typeof raw === "function" ? (raw as (calls: string[]) => unknown)(calls) : raw;
     if (typeof reply === "object" && reply !== null && "fail" in reply) return (reply as Failure).fail;
     return { code: 0, stdout: typeof reply === "string" ? reply : JSON.stringify(reply), stderr: "" };
   };
@@ -570,9 +572,13 @@ type TickFixture = {
   tasks?: unknown[];
   workers?: unknown[];
   issues?: Record<number, string[]>;
+  // The ready-for-agent issues, in the order the tracker lists them.
+  queue?: [number, Fixture?][];
 };
 
-// The replies a tick needs: one batch, its ack, and each issue holding its labels.
+// The replies a tick needs: one batch, its ack, and each issue holding its labels. The
+// in-progress list holds the issues that hold the label and have no PATCH yet, and the
+// ready list holds the queue.
 function tickReplies(fixture: TickFixture = {}, extra: Record<string, unknown> = {}) {
   const issues = Object.entries(fixture.issues ?? {}).flatMap(([n, labels]) => [
     [VIEW(Number(n)), issue(Number(n), { labels, assignees: ["me"] })],
@@ -586,9 +592,18 @@ function tickReplies(fixture: TickFixture = {}, extra: Record<string, unknown> =
     [CHECK]: batch(fixture.messages ? "delivery_1" : null, fixture.messages),
     [ACK("delivery_1")]: batch(null),
     ...Object.fromEntries(issues),
+    [LIST_OF("in-progress")]: (calls: string[]) => [Object.entries(fixture.issues ?? {})
+      .filter(([n, labels]) => labels.includes("in-progress") && !calls.includes(PATCH(Number(n))))
+      .map(([n, labels]) => issue(Number(n), { labels, assignees: ["me"] }))],
+    [LIST]: [(fixture.queue ?? []).map(([n, f]) => issue(n, { ...f, labels: ["ready-for-agent", ...(f?.labels ?? [])] }))],
+    [ME]: "me\n",
+    ...Object.fromEntries((fixture.queue ?? []).flatMap(([n, f]) => Object.entries(startReplies(n, f)))),
     ...extra,
   };
 }
+
+// The two lists a tick reads last, to count the free slots and to find the queue.
+const FILL = [LIST_OF("in-progress"), LIST];
 
 function comments(result: { calls: string[]; inputs: (string | undefined)[] }): string[] {
   return result.calls.flatMap((line, i) =>
@@ -607,7 +622,7 @@ test("tick moves a worker_done with an open PR to ready-for-human, releases the 
   assert.deepEqual(result.err, []);
   assert.equal(result.code, 1);
   assert.deepEqual(result.out, ["#10: in-progress -> ready-for-human (worker_done succeeded, PR #12); released ctx_10"]);
-  assert.deepEqual(result.calls, [TASKS, WORKERS, RUN_SHOW, CHECK, VIEW(10), PRS(10), RELEASE(10), PATCH(10), ACK("delivery_1")]);
+  assert.deepEqual(result.calls, [TASKS, WORKERS, RUN_SHOW, CHECK, VIEW(10), PRS(10), RELEASE(10), PATCH(10), ACK("delivery_1"), ...FILL]);
   assert.deepEqual(patches(result), [{ labels: ["ready-for-human"], assignees: ["me"] }]);
   assert.deepEqual(comments(result), []);
 });
@@ -633,7 +648,7 @@ test("tick moves a failed worker_done to needs-human and posts the worker's own 
   ));
   assert.equal(result.code, 1);
   assert.deepEqual(result.out, ["#10: in-progress -> needs-human (worker_done failed); released ctx_10, commented"]);
-  assert.deepEqual(result.calls.slice(4), [VIEW(10), RELEASE(10), COMMENT(10), PATCH(10), ACK("delivery_1")]);
+  assert.deepEqual(result.calls.slice(4), [VIEW(10), RELEASE(10), COMMENT(10), PATCH(10), ACK("delivery_1"), ...FILL]);
   assert.deepEqual(patches(result), [{ labels: ["docs", "needs-human"], assignees: ["me"] }]);
   assert.deepEqual(comments(result), [
     "The worker reported a failure:\n\n> The suite fails on main.\n>\n> See CI.\n\n"
@@ -653,7 +668,7 @@ test("tick moves a question to needs-human, posts it with its options, and stops
   assert.deepEqual(result.err, []);
   assert.equal(result.code, 1);
   assert.deepEqual(result.out, ["#10: in-progress -> needs-human (question); stopped ctx_10, commented"]);
-  assert.deepEqual(result.calls.slice(4), [VIEW(10), STOP(10), COMMENT(10), PATCH(10), ACK("delivery_1")]);
+  assert.deepEqual(result.calls.slice(4), [VIEW(10), STOP(10), COMMENT(10), PATCH(10), ACK("delivery_1"), ...FILL]);
   assert.deepEqual(comments(result), [
     "The worker asked a question, and the tick stopped it:\n\n> Keep the old flag?\n\nIts options: `keep`, `drop`.\n\n"
       + "Answer here, then relabel `ready-for-agent` to resume. The worktree is kept.",
@@ -691,7 +706,7 @@ test("tick skips a message that names no issue, ignores status mail, and acks th
   }));
   assert.equal(result.code, 1);
   assert.deepEqual(result.err, ["tick: msg_escalation_10 (escalation) names no issue-N Task or worktree, so it is skipped"]);
-  assert.deepEqual(result.calls, [TASKS, WORKERS, RUN_SHOW, CHECK, ACK("delivery_1")]);
+  assert.deepEqual(result.calls, [TASKS, WORKERS, RUN_SHOW, CHECK, ACK("delivery_1"), ...FILL]);
 });
 
 test("tick writes nothing for a replayed message whose issue already left in-progress", () => {
@@ -707,7 +722,7 @@ test("tick writes nothing for a replayed message whose issue already left in-pro
       "#10: question msg_question_10 changes nothing, the issue is not in-progress",
       "#10: worker_done msg_worker_done_10 changes nothing, the issue is not in-progress",
     ]);
-    assert.deepEqual(result.calls, [TASKS, WORKERS, RUN_SHOW, CHECK, VIEW(10), ACK("delivery_1")]);
+    assert.deepEqual(result.calls, [TASKS, WORKERS, RUN_SHOW, CHECK, VIEW(10), ACK("delivery_1"), ...FILL]);
   }
 });
 
@@ -768,7 +783,7 @@ test("tick moves an issue whose newest worker exited without worker_done to need
   assert.deepEqual(result.err, []);
   assert.equal(result.code, 1);
   assert.deepEqual(result.out, ["#10: in-progress -> needs-human (worker exited without reporting); commented"]);
-  assert.deepEqual(result.calls, [TASKS, WORKERS, RUN_SHOW, CHECK, VIEW(10), COMMENT(10), PATCH(10), VIEW(13)]);
+  assert.deepEqual(result.calls, [TASKS, WORKERS, RUN_SHOW, CHECK, VIEW(10), COMMENT(10), PATCH(10), VIEW(13), ...FILL]);
   assert.deepEqual(comments(result), [
     "The worker exited without sending worker_done, so it left no report. "
       + "Answer here, then relabel `ready-for-agent` to resume. The worktree is kept.",
@@ -812,7 +827,7 @@ test("tick takes over a lock older than five minutes, and removes it when done",
   const result = run(TICK, tickReplies(), cwd);
   assert.equal(result.code, 1);
   assert.deepEqual(result.err, []);
-  assert.deepEqual(result.calls, [TASKS, WORKERS, RUN_SHOW, CHECK]);
+  assert.deepEqual(result.calls, [TASKS, WORKERS, RUN_SHOW, CHECK, ...FILL]);
   assert.equal(existsSync(lockAt(cwd)), false);
 });
 
@@ -831,6 +846,92 @@ test("tick exits non-zero on every path, and never leaves its lock behind", () =
     assert.notEqual(result.code, 0, name);
     assert.equal(existsSync(lockAt(cwd)), false, name);
   }
+});
+
+// The issue numbers worker-start ran for, in order, from the `--name issue-N` flag.
+function started(result: { argvs: string[][] }): string[] {
+  return result.argvs.filter((argv) => argv[2] === "worker-start").map((argv) => flag(argv, "--name") ?? "");
+}
+
+const MAX = (n: number) => repoWithConfig(`\`\`\`json\n{ "max_workers": ${n} }\n\`\`\`\n`);
+
+test("tick starts every ready issue that fits, in queue order, with no session involved", () => {
+  const result = run(TICK, tickReplies({ queue: [[10], [11]] }), MAX(3));
+  assert.deepEqual(result.err, []);
+  assert.equal(result.code, 1);
+  assert.deepEqual(started(result), ["issue-10", "issue-11"]);
+  assert.deepEqual(result.out, [
+    "started #10 in worktree issue-10: claude sonnet @ medium (medium role), dispatch ctx_54923f33c600",
+    "started #11 in worktree issue-11: claude sonnet @ medium (medium role), dispatch ctx_54923f33c600",
+  ]);
+  assert.deepEqual(patches(result), [
+    { labels: ["in-progress"], assignees: ["me"] },
+    { labels: ["in-progress"], assignees: ["me"] },
+  ]);
+});
+
+test("tick fills only the free slots: max_workers minus the in-progress issues that are not parents", () => {
+  const result = run(TICK, tickReplies({
+    queue: [[20], [21], [22]],
+    issues: { 10: ["in-progress"], 11: ["in-progress", "user-story"] },
+  }), MAX(3));
+  assert.deepEqual(started(result), ["issue-20", "issue-21"]);
+});
+
+test("tick starts nothing, and reads no queue, while every slot is full", () => {
+  const result = run(TICK, tickReplies({
+    queue: [[20]],
+    issues: { 10: ["in-progress"], 11: ["in-progress"] },
+  }), MAX(2));
+  assert.deepEqual(result.err, []);
+  assert.deepEqual(started(result), []);
+  assert.equal(result.calls.includes(LIST), false);
+  assert.deepEqual(patches(result), []);
+});
+
+test("tick skips an issue that is not eligible, a parent, and keeps queue order for the rest", () => {
+  const result = run(TICK, tickReplies({
+    queue: [[20, { assignees: ["other"] }], [21, { labels: ["user-story"] }], [22], [23]],
+  }), MAX(2));
+  assert.deepEqual(result.err, []);
+  assert.deepEqual(started(result), ["issue-22", "issue-23"]);
+});
+
+test("tick observes before it fills: a slot freed this tick is filled this tick", () => {
+  const result = run(TICK, tickReplies(
+    {
+      messages: [message(10, "worker_done", { outcome: "succeeded" })],
+      tasks: [task(10)],
+      workers: [worker(10)],
+      issues: { 10: ["in-progress"], 11: ["in-progress"] },
+      queue: [[20], [21]],
+    },
+    { [PRS(10)]: prs([12, "OPEN"]), [RELEASE(10)]: receipt({ released: true }) },
+  ), MAX(2));
+  assert.deepEqual(result.err, []);
+  assert.deepEqual(started(result), ["issue-20"]);
+  const at = (needle: string) => result.calls.findIndex((line) => line.includes(needle));
+  assert.ok(at(PATCH(10)) > 0);
+  assert.ok(at(PATCH(10)) < at("worker-start"));
+  assert.ok(at(ACK("delivery_1")) < at("worker-start"));
+  assert.deepEqual(result.out[0], "#10: in-progress -> ready-for-human (worker_done succeeded, PR #12); released ctx_10");
+});
+
+test("tick keeps a full slot full when no worker finished", () => {
+  const result = run(TICK, tickReplies(
+    { tasks: [task(10)], workers: [worker(10)], issues: { 10: ["in-progress"], 11: ["in-progress"] }, queue: [[20]] },
+  ), MAX(2));
+  assert.deepEqual(started(result), []);
+});
+
+test("tick gives a slot back when a worker does not start, and tries the next issue", () => {
+  let starts = 0;
+  const result = run(TICK, tickReplies({ queue: [[20], [21]] }, {
+    [WORKER_START]: () => (starts++ === 0 ? REFUSED : RECEIPT),
+  }), MAX(1));
+  assert.deepEqual(started(result), ["issue-20", "issue-21"]);
+  assert.equal(result.err.length, 1);
+  assert.match(result.err[0] ?? "", /^error: orca worker-start failed, so #20 is unclaimed again: /);
 });
 
 test("node runs the tick directly, and it exits non-zero", () => {
