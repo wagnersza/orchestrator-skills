@@ -1,4 +1,4 @@
-// `status` and `start` driven through the entry point, with a fake runner that replays
+// `status`, `start`, `tick` and `merge` driven through the entry point, with a fake runner that replays
 // recorded `gh api` and `orca` JSON and records every call.
 
 import assert from "node:assert/strict";
@@ -63,7 +63,7 @@ function issue(number: number, fixture: Fixture = {}) {
   };
 }
 
-const USAGE = "usage: orchestrator.ts status | start N [--role heavy|medium|light] [--note TEXT] [--run ID] | tick [--run ID]";
+const USAGE = "usage: orchestrator.ts status | start N [--role heavy|medium|light] [--note TEXT] [--run ID] | tick [--run ID] | merge N [--run ID]";
 const ME = "gh api user --jq .login";
 const LIST_OF = (label: string) => `gh api --paginate --slurp repos/{owner}/{repo}/issues?state=open&labels=${label}&per_page=100`;
 const LIST = LIST_OF("ready-for-agent");
@@ -227,7 +227,7 @@ test("status exits 1 with gh's own message when gh fails", () => {
 });
 
 test("an unknown subcommand prints the usage and exits 2", () => {
-  for (const argv of [[], ["merge"], ["status", "extra"]]) {
+  for (const argv of [[], ["close"], ["status", "extra"]]) {
     const result = run(argv, {});
     assert.equal(result.code, 2);
     assert.deepEqual(result.err, [USAGE]);
@@ -603,6 +603,7 @@ function tickReplies(fixture: TickFixture = {}, extra: Record<string, unknown> =
     [CHECK]: batch(fixture.messages ? "delivery_1" : null, fixture.messages),
     [ACK("delivery_1")]: batch(null),
     ...Object.fromEntries(issues),
+    [REVIEW]: [[]],
     [LIST_OF("in-progress")]: (calls: string[]) => [Object.entries(fixture.issues ?? {})
       .filter(([n, labels]) => labels.includes("in-progress") && !calls.includes(PATCH(Number(n))))
       .map(([n, labels]) => issue(Number(n), { labels, assignees: ["me"] }))],
@@ -614,9 +615,12 @@ function tickReplies(fixture: TickFixture = {}, extra: Record<string, unknown> =
   };
 }
 
-// The two lists a tick reads last: the in-progress issues, for the parents to close and
-// the free slots, then the queue.
-const FILL = [LIST_OF("in-progress"), LIST];
+// The ready-for-human issues in any state, which the tick reads for a merge on GitHub.
+const REVIEW = "gh api --paginate --slurp repos/{owner}/{repo}/issues?state=all&labels=ready-for-human&per_page=100";
+
+// The three lists a tick reads last: the ready-for-human issues, for a merge on GitHub,
+// the in-progress issues, for the parents to close and the free slots, then the queue.
+const FILL = [REVIEW, LIST_OF("in-progress"), LIST];
 
 function comments(result: { calls: string[]; inputs: (string | undefined)[] }): string[] {
   return result.calls.flatMap((line, i) =>
@@ -1200,4 +1204,222 @@ test("start on a parent that is not eligible claims nothing and starts no child"
   assert.deepEqual(result.err, ["#40 is not eligible: assigned to alice"]);
   assert.deepEqual(result.out, []);
   assert.equal(result.calls.some((c) => c.includes("-X ") || c.startsWith("orca")), false);
+});
+
+const MERGE = ["merge", "10", "--run", RUN];
+const WT_SHOW = (n: number) => `orca worktree show --worktree name:issue-${n} --json`;
+const WT_RM = (n: number) => `orca worktree rm --worktree name:issue-${n} --json`;
+const GIT_STATUS = "git status --porcelain";
+const PR_MERGE = "gh pr merge 12 -R wagnersza/orchestrator-skills --squash --delete-branch";
+const OPEN_PR = prs([12, "OPEN", { mergeable: "MERGEABLE", reviewDecision: "APPROVED" }]);
+
+// The `--json` reply of an orca call that found no worktree by the name it was given.
+const NO_WORKTREE = {
+  fail: {
+    code: 1,
+    stdout: JSON.stringify({ ok: false, error: { code: "selector_not_found", message: "selector_not_found" } }),
+    stderr: "",
+  },
+};
+
+// The replies `merge 10` needs on a ready-for-human issue with a clean worktree and an
+// open, mergeable, approved PR #12 that GitHub shows merged once `gh pr merge` ran.
+function mergeReplies(extra: Record<string, unknown> = {}) {
+  return {
+    [VIEW(10)]: issue(10, { labels: ["ready-for-human", "docs"], assignees: ["me"] }),
+    [WT_SHOW(10)]: receipt({ worktree: { path: "/Users/me/orca/workspaces/repo/issue-10", displayName: "issue-10" } }),
+    [GIT_STATUS]: "",
+    [PRS(10)]: (calls: string[]) => (calls.includes(PR_MERGE) ? prs([12, "MERGED"]) : OPEN_PR),
+    [PR_MERGE]: "",
+    [TASKS]: receipt({ tasks: [task(10)] }),
+    [WORKERS]: receipt({ workers: [worker(10, { dispatch: 101 }), worker(10, { dispatch: 100 })], page: { nextCursor: null } }),
+    [ORCA("worker-release", "--dispatch", "ctx_101")]: receipt({ status: "already_released" }),
+    [WT_RM(10)]: receipt({ removed: true }),
+    [COMMENT(10)]: { id: 1 },
+    [PATCH(10)]: issue(10, { state: "closed", labels: ["docs"], assignees: ["me"] }),
+    ...extra,
+  };
+}
+
+// The calls that change something: a write, a merge, a release or a removal.
+function changes(result: { calls: string[] }): string[] {
+  return result.calls.filter((c) => c.includes("-X ") || c.startsWith("gh pr merge") || c.includes("worker-release") || c.includes("worktree rm"));
+}
+
+test("merge squashes the PR, confirms it on GitHub, then tears down in order", () => {
+  const result = run(MERGE, mergeReplies());
+  assert.deepEqual(result.err, []);
+  assert.equal(result.code, 0);
+  assert.deepEqual(result.out, [
+    "#10: merged",
+    "#10: torn down; released ctx_101, removed worktree issue-10, dropped ready-for-human, closed",
+  ]);
+  assert.deepEqual(result.calls, [
+    VIEW(10), WT_SHOW(10), GIT_STATUS, PRS(10), PR_MERGE, PRS(10),
+    TASKS, WORKERS, ORCA("worker-release", "--dispatch", "ctx_101"), WT_RM(10), COMMENT(10), PATCH(10),
+  ]);
+  assert.deepEqual(patches(result), [{ state: "closed", state_reason: "completed", labels: ["docs"] }]);
+  assert.deepEqual(comments(result), [
+    "The PR is merged, so this issue is torn down: released ctx_101, removed worktree issue-10, dropped ready-for-human, closed.",
+  ]);
+});
+
+test("merge refuses in one line and changes nothing unless every precondition holds", () => {
+  const cases: [string, Record<string, unknown>, string][] = [
+    ["in-progress", { [VIEW(10)]: issue(10, { labels: ["in-progress"] }) }, "#10 is not merged: not ready-for-human"],
+    ["needs-human", { [VIEW(10)]: issue(10, { labels: ["needs-human"] }) }, "#10 is not merged: not ready-for-human"],
+    ["a dirty worktree", { [GIT_STATUS]: " M scripts/orchestrator.ts\n?? notes.md\n" }, "#10 is not merged: worktree issue-10 has uncommitted work"],
+    ["no PR", { [PRS(10)]: prs() }, "#10 is not merged: no open PR closes #10"],
+    ["a closed PR", { [PRS(10)]: prs([12, "CLOSED"]) }, "#10 is not merged: no open PR closes #10"],
+    ["a merged PR", { [PRS(10)]: prs([12, "MERGED"], [13, "CLOSED"]) }, "#10 is not merged: PR #12 is already merged, so the next tick tears it down"],
+    ["a conflict", { [PRS(10)]: prs([12, "OPEN", { mergeable: "CONFLICTING", reviewDecision: "APPROVED" }]) }, "#10 is not merged: PR #12 is not mergeable (conflicting)"],
+    ["mergeable not computed yet", { [PRS(10)]: prs([12, "OPEN"]) }, "#10 is not merged: PR #12 is not mergeable (unknown)"],
+    [
+      "changes requested",
+      { [PRS(10)]: prs([12, "OPEN", { mergeable: "MERGEABLE", reviewDecision: "CHANGES_REQUESTED" }]) },
+      "#10 is not merged: PR #12 has changes requested",
+    ],
+  ];
+  for (const [name, extra, line] of cases) {
+    const result = run(MERGE, mergeReplies(extra));
+    assert.equal(result.code, 1, name);
+    assert.deepEqual(result.err, [line], name);
+    assert.deepEqual(result.out, [], name);
+    assert.deepEqual(changes(result), [], name);
+  }
+});
+
+test("merge reads the open PR's own checks, not a newer closed one's", () => {
+  const result = run(MERGE, mergeReplies({
+    [PRS(10)]: (calls: string[]) => (calls.includes(PR_MERGE)
+      ? prs([12, "MERGED"], [13, "CLOSED"])
+      : prs([12, "OPEN", { mergeable: "MERGEABLE" }], [13, "CLOSED", { mergeable: "CONFLICTING" }])),
+  }));
+  assert.deepEqual(result.err, []);
+  assert.equal(result.code, 0);
+  assert.ok(result.calls.includes(PR_MERGE));
+});
+
+test("merge tears nothing down until GitHub shows the PR merged", () => {
+  const queued = run(MERGE, mergeReplies({ [PRS(10)]: OPEN_PR }));
+  assert.equal(queued.code, 1);
+  assert.deepEqual(queued.err, ["error: #10 is not confirmed merged, so nothing is torn down"]);
+  assert.deepEqual(changes(queued), [PR_MERGE]);
+
+  const failed = run(MERGE, mergeReplies({ [PRS(10)]: OPEN_PR, [PR_MERGE]: { fail: { code: 1, stdout: "", stderr: "Pull request is not mergeable: the base branch policy prohibits the merge." } } }));
+  assert.equal(failed.code, 1);
+  assert.deepEqual(failed.err, [
+    `error: #10 is not confirmed merged, so nothing is torn down: ${PR_MERGE} failed: `
+      + "Pull request is not mergeable: the base branch policy prohibits the merge.",
+  ]);
+  assert.deepEqual(changes(failed), [PR_MERGE]);
+});
+
+test("merge tears down when gh fails after GitHub took the merge, and says so", () => {
+  const result = run(MERGE, mergeReplies({ [PR_MERGE]: { fail: { code: 1, stdout: "", stderr: "HTTP 502" } } }));
+  assert.equal(result.code, 0);
+  assert.deepEqual(result.out[0], `#10: merged, though the merge command failed: ${PR_MERGE} failed: HTTP 502`);
+  assert.deepEqual(changes(result).slice(1), [ORCA("worker-release", "--dispatch", "ctx_101"), WT_RM(10), COMMENT(10), PATCH(10)]);
+});
+
+test("merge on an issue with no worktree and no worker still drops the label and closes", () => {
+  const result = run(MERGE, mergeReplies({
+    [WT_SHOW(10)]: NO_WORKTREE,
+    [WT_RM(10)]: NO_WORKTREE,
+    [WORKERS]: receipt({ workers: [], page: { nextCursor: null } }),
+  }));
+  assert.deepEqual(result.err, []);
+  assert.equal(result.code, 0);
+  assert.equal(result.calls.includes(GIT_STATUS), false);
+  assert.deepEqual(result.out.at(-1), "#10: torn down; dropped ready-for-human, closed");
+  assert.deepEqual(patches(result), [{ state: "closed", state_reason: "completed", labels: ["docs"] }]);
+});
+
+test("teardown stops before the label when orca cannot remove the worktree", () => {
+  const result = run(MERGE, mergeReplies({
+    [WT_RM(10)]: { fail: { code: 1, stdout: JSON.stringify({ ok: false, error: { code: "worktree_dirty", message: "worktree has local changes" } }), stderr: "" } },
+  }));
+  assert.equal(result.code, 1);
+  assert.deepEqual(result.err, [
+    "error: orca worktree rm issue-10 failed, so #10 keeps ready-for-human for the next tick: worktree has local changes",
+  ]);
+  assert.deepEqual(changes(result), [PR_MERGE, ORCA("worker-release", "--dispatch", "ctx_101"), WT_RM(10)]);
+});
+
+test("merge with no Run id stops before any call", () => {
+  const result = run(["merge", "10"], mergeReplies());
+  assert.equal(result.code, 1);
+  assert.deepEqual(result.err, ['error: no orca Run: pass --run <id>, or write { "run": "<id>" } to .orchestrator/run.json']);
+  assert.deepEqual(result.calls, []);
+});
+
+test("merge refuses arguments it cannot read, with the usage", () => {
+  for (const argv of [["merge"], ["merge", "ten"], ["merge", "1", "2"], ["merge", "1", "--role", "heavy"]]) {
+    const result = run(argv, {});
+    assert.equal(result.code, 2, argv.join(" "));
+    assert.deepEqual(result.err, [USAGE]);
+    assert.deepEqual(result.calls, []);
+  }
+});
+
+test("merge takes #N", () => {
+  const result = run(["merge", "#10", "--run", RUN], mergeReplies());
+  assert.equal(result.code, 0);
+});
+
+test("tick tears down each ready-for-human issue merged on GitHub, closed by Closes #N or not", () => {
+  const result = run(TICK, tickReplies(
+    { tasks: [task(10), task(11)], workers: [worker(10), worker(11)] },
+    {
+      [REVIEW]: [[
+        issue(10, { state: "closed", labels: ["ready-for-human"], assignees: ["me"] }),
+        issue(11, { labels: ["ready-for-human", "docs"] }),
+        issue(12, { labels: ["ready-for-human"], assignees: ["me"] }),
+        issue(13, { state: "closed", labels: ["ready-for-human"], assignees: ["alice"] }),
+      ]],
+      [PRS(10)]: prs([12, "MERGED"]),
+      [PRS(11)]: prs([14, "MERGED"]),
+      [PRS(12)]: prs([15, "OPEN"]),
+      [RELEASE(10)]: receipt({}),
+      [RELEASE(11)]: receipt({}),
+      [WT_RM(10)]: receipt({}),
+      [WT_RM(11)]: receipt({}),
+      [COMMENT(10)]: { id: 1 },
+      [COMMENT(11)]: { id: 2 },
+      [PATCH(10)]: issue(10, { state: "closed", labels: [] }),
+      [PATCH(11)]: issue(11, { state: "closed", labels: ["docs"] }),
+    },
+  ));
+  assert.deepEqual(result.err, []);
+  assert.equal(result.code, 1);
+  assert.deepEqual(result.out, [
+    "#10: torn down; released ctx_10, removed worktree issue-10, dropped ready-for-human, closed",
+    "#11: torn down; released ctx_11, removed worktree issue-11, dropped ready-for-human, closed",
+  ]);
+  assert.deepEqual(result.calls, [
+    TASKS, WORKERS, RUN_SHOW, CHECK, REVIEW, ME,
+    PRS(10), RELEASE(10), WT_RM(10), COMMENT(10), PATCH(10),
+    PRS(11), RELEASE(11), WT_RM(11), COMMENT(11), PATCH(11),
+    PRS(12),
+    LIST_OF("in-progress"), LIST,
+  ]);
+  assert.deepEqual(patches(result), [
+    { state: "closed", state_reason: "completed", labels: [] },
+    { state: "closed", state_reason: "completed", labels: ["docs"] },
+  ]);
+  assert.equal(result.calls.includes(PRS(13)), false);
+});
+
+test("tick reports a teardown orca cannot finish, keeps the label, and still fills", () => {
+  const result = run(TICK, tickReplies({ queue: [[20]] }, {
+    [REVIEW]: [[issue(10, { state: "closed", labels: ["ready-for-human"], assignees: ["me"] })]],
+    [PRS(10)]: prs([12, "MERGED"]),
+    [WT_RM(10)]: { fail: { code: 1, stdout: "", stderr: "orca is not running" } },
+  }));
+  assert.equal(result.code, 1);
+  assert.deepEqual(result.err, [
+    "tick: orca worktree rm issue-10 failed, so #10 keeps ready-for-human for the next tick: orca is not running",
+  ]);
+  assert.equal(result.calls.includes(PATCH(10)), false);
+  assert.deepEqual(started(result), ["issue-20"]);
 });
