@@ -18,8 +18,8 @@ export type Issue = {
 // The pull request (or merge request) that closes an issue, as `ref` prints it.
 export type Pr = { ref: string; url: string; open: boolean };
 
-// Open issues that carry `label`.
-export type Filter = { label: string };
+// Open issues that carry `label`, and closed ones too where `closed` is set.
+export type Filter = { label: string; closed?: boolean };
 
 export interface Tracker {
   list(filter: Filter): Issue[];
@@ -40,6 +40,12 @@ export interface Tracker {
   comment(id: Id, body: string): void;
   // The open PR that closes `id`, else the newest closed or merged one, else null.
   prFor(id: Id): Pr | null;
+  // True once a PR that closes `id` is merged, read fresh from the tracker each time.
+  isMerged(id: Id): boolean;
+  // Squash-merge the open PR that closes `id` and delete its branch. Returns null, or
+  // the one reason it refuses and changes nothing: no open PR, a PR that is not
+  // mergeable, or a review that requests changes. A merge command that fails throws.
+  merge(id: Id): string | null;
   // The shell command a worker runs to read the issue and every comment.
   viewCommand(id: Id): string;
   // The template step that hands the work back for review, with `prSkill` naming the
@@ -49,7 +55,7 @@ export interface Tracker {
   isParent(id: Id): boolean;
   // Every child of `id`, open or closed, read from both forms of the parent link.
   children(id: Id): Id[];
-  // Post `body`, then close the issue and drop in-progress in one write.
+  // Post `body`, then close the issue and drop every state label in one write.
   close(id: Id, body: string): void;
 }
 
@@ -63,3 +69,5 @@ export const READY_FOR_HUMAN = "ready-for-human";
 export const NEEDS_HUMAN = "needs-human";
 // The label that marks a parent, with or without children.
 export const USER_STORY = "user-story";
+// Every state label, one of which an issue in the loop holds.
+export const STATES = [READY, IN_PROGRESS, NEEDS_HUMAN, READY_FOR_HUMAN];

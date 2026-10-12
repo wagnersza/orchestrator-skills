@@ -500,7 +500,7 @@ const STOP = (n: number) => ORCA("worker-stop", "--dispatch", `ctx_${n}`);
 const COMMENT = (n: number) => `gh api -X POST repos/{owner}/{repo}/issues/${n}/comments --input -`;
 const CLOSING_PRS = "query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo)"
   + "{issue(number:$number){closedByPullRequestsReferences(first:20,includeClosedPrs:true)"
-  + "{nodes{number url state}}}}}";
+  + "{nodes{number url state mergeable reviewDecision}}}}}";
 const PRS = (n: number) => `gh api graphql -f query=${CLOSING_PRS} -F owner={owner} -F repo={repo} -F number=${n}`;
 const TICK = ["tick", "--run", RUN];
 
@@ -567,10 +567,13 @@ function batch(delivery: string | null, messages: unknown[] = []) {
   return receipt({ runId: RUN, deliveryId: delivery, count: messages.length, messages, acknowledged: null });
 }
 
-function prs(...nodes: [number, string][]) {
+// The closing PRs GraphQL returned, each as [number, state] with an optional
+// mergeable and review decision.
+function prs(...nodes: [number, string, { mergeable?: string; reviewDecision?: string | null }?][]) {
   return {
-    data: { repository: { issue: { closedByPullRequestsReferences: { nodes: nodes.map(([number, state]) => ({
+    data: { repository: { issue: { closedByPullRequestsReferences: { nodes: nodes.map(([number, state, extra]) => ({
       number, url: `https://github.com/wagnersza/orchestrator-skills/pull/${number}`, state,
+      mergeable: extra?.mergeable ?? "UNKNOWN", reviewDecision: extra?.reviewDecision ?? null,
     })) } } } },
   };
 }
