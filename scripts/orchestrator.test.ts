@@ -198,11 +198,11 @@ test("status skips pull requests, which the issues endpoint also returns", () =>
 
 test("status reads the tracker from the first json block in the config doc", () => {
   const cwd = repoWithConfig(
-    "# Orchestrator config\n\n```json\n{ \"tracker\": \"gitlab\", \"max_workers\": 2 }\n```\n\n```json\n{ \"tracker\": \"github\" }\n```\n",
+    "# Orchestrator config\n\n```json\n{ \"tracker\": \"local\", \"max_workers\": 2 }\n```\n\n```json\n{ \"tracker\": \"github\" }\n```\n",
   );
   const result = run(["status"], {}, cwd);
   assert.equal(result.code, 1);
-  assert.deepEqual(result.err, ['error: tracker "gitlab" is not supported yet']);
+  assert.deepEqual(result.err, ['error: tracker "local" is not supported yet']);
   assert.deepEqual(result.calls, []);
 });
 
