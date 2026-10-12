@@ -61,7 +61,11 @@ function issue(number: number, fixture: Fixture = {}) {
 
 const USAGE = "usage: orchestrator.ts status | start N [--role heavy|medium|light] [--note TEXT] [--run ID] | tick [--run ID]";
 const ME = "gh api user --jq .login";
-const LIST = "gh api --paginate --slurp repos/{owner}/{repo}/issues?state=open&labels=ready-for-agent&per_page=100";
+const LIST_OF = (label: string) => `gh api --paginate --slurp repos/{owner}/{repo}/issues?state=open&labels=${label}&per_page=100`;
+const LIST = LIST_OF("ready-for-agent");
+// The three lists status reads before the ready queue, and replies that find nothing live.
+const LIVE = ["in-progress", "needs-human", "ready-for-human"].map(LIST_OF);
+const NO_LIVE = Object.fromEntries(LIVE.map((line) => [line, [[]]]));
 const VIEW = (n: number) => `gh api repos/{owner}/{repo}/issues/${n}`;
 const NATIVE = (n: number) =>
   `gh api --paginate --slurp repos/{owner}/{repo}/issues/${n}/dependencies/blocked_by?per_page=100`;
@@ -109,6 +113,7 @@ function repoWithConfig(doc: string): string {
 
 test("status lists the ready queue, then each other issue with its reason", () => {
   const result = run(["status"], {
+    ...NO_LIVE,
     [ME]: "me\n",
     [LIST]: [[
       issue(16, { title: "line blocker, closed", body: "Blocked by: #31" }),
@@ -142,27 +147,30 @@ test("status lists the ready queue, then each other issue with its reason", () =
 
 test("status asks for native blockers only where the summary counts one", () => {
   const result = run(["status"], {
+    ...NO_LIVE,
     [ME]: "me\n",
     [LIST]: [[issue(10), issue(11, { blockedBy: 1 })]],
     [NATIVE(11)]: [[issue(20, { state: "closed" })]],
   });
   assert.equal(result.code, 0);
-  assert.deepEqual(result.calls, [ME, LIST, NATIVE(11)]);
+  assert.deepEqual(result.calls, [ME, ...LIVE, LIST, NATIVE(11)]);
 });
 
 test("status reads a blocker once, even when two forms name it", () => {
   const result = run(["status"], {
+    ...NO_LIVE,
     [ME]: "me\n",
     [LIST]: [[issue(10, { blockedBy: 1, body: "Blocked by: #20" })]],
     [NATIVE(10)]: [[issue(20)]],
   });
   assert.deepEqual(result.out, ["ready queue (0)", "not eligible (1)", "  #10  issue 10  (blocked by #20)"]);
-  assert.deepEqual(result.calls, [ME, LIST, NATIVE(10)]);
+  assert.deepEqual(result.calls, [ME, ...LIVE, LIST, NATIVE(10)]);
 });
 
 test("status names a native blocker in another repo by its repo", () => {
   const other = "https://api.github.com/repos/acme/infra";
   const result = run(["status"], {
+    ...NO_LIVE,
     [ME]: "me\n",
     [LIST]: [[issue(10, { blockedBy: 1 })]],
     [NATIVE(10)]: [[issue(7, { repo: other })]],
@@ -172,6 +180,7 @@ test("status names a native blocker in another repo by its repo", () => {
 
 test("status skips pull requests, which the issues endpoint also returns", () => {
   const result = run(["status"], {
+    ...NO_LIVE,
     [ME]: "me\n",
     [LIST]: [[issue(10), issue(11, { pr: true })], [issue(12)]],
   });
@@ -190,7 +199,7 @@ test("status reads the tracker from the first json block in the config doc", () 
 
 test("status falls back to the defaults when the config doc has no json block", () => {
   const cwd = repoWithConfig("# Orchestrator config\n\n```yaml\ntracker: gitlab\n```\n");
-  const result = run(["status"], { [ME]: "me\n", [LIST]: [[issue(10)]] }, cwd);
+  const result = run(["status"], { ...NO_LIVE, [ME]: "me\n", [LIST]: [[issue(10)]] }, cwd);
   assert.equal(result.code, 0);
   assert.deepEqual(result.out, ["ready queue (1)", "  #10  issue 10"]);
 });
@@ -203,7 +212,7 @@ test("status refuses a json block that does not parse", () => {
 });
 
 test("status exits 1 with gh's own message when gh fails", () => {
-  const result = run(["status"], { [ME]: "me\n" });
+  const result = run(["status"], { ...NO_LIVE, [ME]: "me\n" });
   assert.equal(result.code, 1);
   assert.deepEqual(result.err, [`error: ${LIST} failed: unexpected call: ${LIST}`]);
 });
@@ -830,4 +839,58 @@ test("node runs the tick directly, and it exits non-zero", () => {
   const result = spawnSync(process.execPath, [script, "tick"], { cwd, encoding: "utf8" });
   assert.equal(result.status, 1);
   assert.match(result.stderr, /^error: no orca Run: /);
+});
+
+test("status prints each live issue, unassigned or mine, with its state, role, harness, liveness and PR", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "orch-"));
+  mkdirSync(join(cwd, ".orchestrator"));
+  writeFileSync(join(cwd, ".orchestrator", "run.json"), `{ "run": "${RUN}" }\n`);
+  const result = run(["status"], {
+    [ME]: "me\n",
+    [LIVE[0] ?? ""]: [[
+      issue(10, { title: "medium work", labels: ["in-progress"], assignees: ["me"] }),
+      issue(11, { title: "someone else's", labels: ["in-progress"], assignees: ["alice"] }),
+      issue(14, { title: "no worker yet", labels: ["in-progress", "light"] }),
+    ]],
+    [LIVE[1] ?? ""]: [[issue(12, { title: "stuck", labels: ["needs-human", "heavy"], assignees: ["me"] })]],
+    [LIVE[2] ?? ""]: [[issue(13, { title: "in review", labels: ["ready-for-human"], assignees: ["me"] })]],
+    [LIST]: [[issue(20, { title: "next" })]],
+    [TASKS]: receipt({ tasks: [task(10), task(12), task(13)] }),
+    [WORKERS]: receipt({
+      workers: [worker(10), worker(12, { liveness: "exited" }), worker(13, { dispatch: 131, liveness: "exited" }), worker(13, { dispatch: 130 })],
+      page: { nextCursor: null },
+    }),
+    [PRS(10)]: prs(),
+    [PRS(12)]: prs([30, "CLOSED"]),
+    [PRS(13)]: prs([31, "CLOSED"], [32, "OPEN"]),
+    [PRS(14)]: prs(),
+  }, cwd);
+  assert.deepEqual(result.err, []);
+  assert.equal(result.code, 0);
+  assert.deepEqual(result.out, [
+    "live (4)",
+    "  issue  state            role    harness  liveness  pr   title",
+    "  #10    in-progress      medium  claude   alive     -    medium work",
+    "  #14    in-progress      light   claude   none      -    no worker yet",
+    "  #12    needs-human      heavy   claude   exited    #30  stuck",
+    "  #13    ready-for-human  medium  claude   exited    #32  in review",
+    "ready queue (1)",
+    "  #20  next",
+  ]);
+});
+
+test("status prints liveness as - and calls no orca where no Run is saved", () => {
+  const result = run(["status"], {
+    ...NO_LIVE,
+    [ME]: "me\n",
+    [LIVE[0] ?? ""]: [[issue(10, { title: "work", labels: ["in-progress"], assignees: ["me"] })]],
+    [LIST]: [[]],
+    [PRS(10)]: prs([12, "OPEN"]),
+  });
+  assert.equal(result.code, 0);
+  assert.deepEqual(result.out.slice(1, 3), [
+    "  issue  state        role    harness  liveness  pr   title",
+    "  #10    in-progress  medium  claude   -         #12  work",
+  ]);
+  assert.equal(result.calls.some((line) => line.startsWith("orca")), false);
 });

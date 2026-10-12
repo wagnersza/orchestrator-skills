@@ -5,7 +5,7 @@
 // Every dependency comes in through `main`, so a test drives the script exactly as the
 // skill calls it, with a fake process runner in place of the real one.
 
-import { mkdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
@@ -484,9 +484,31 @@ function tick(tracker: Tracker, sh: Sh, cwd: string, run: string | undefined, de
   return 1;
 }
 
-// The ready queue, then each other open ready-for-agent issue with its reason.
-function status(tracker: Tracker, out: (line: string) => void): number {
+// The state labels of an issue the loop has claimed and not yet closed.
+const LIVE = [IN_PROGRESS, NEEDS_HUMAN, READY_FOR_HUMAN];
+
+// Each claimed issue, unassigned or mine, with its state, role, harness, liveness and
+// PR, then the ready queue, then each other open ready-for-agent issue with its reason.
+// Liveness is the newest worker's, and "-" where no Run is saved.
+function status(config: Config, tracker: Tracker, sh: Sh, cwd: string, out: (line: string) => void): number {
   const me = tracker.me();
+  const live = LIVE.flatMap((label) => tracker.list({ label })
+    .filter((issue) => issue.assignees.length === 0 || issue.assignees.includes(me))
+    .map((issue): [Issue, string] => [issue, label]));
+  if (live.length > 0) {
+    const seen = existsSync(join(cwd, RUN_PATH)) ? observe(sh, cwd, readRun(cwd)) : undefined;
+    const rows = [["issue", "state", "role", "harness", "liveness", "pr", "title"]];
+    for (const [issue, label] of live) {
+      const role = pickRole(config, issue, undefined);
+      const worker = seen?.workers.find((w) => seen.issueOf(undefined, w.dispatchId) === issue.id);
+      const liveness = seen ? worker?.projection?.liveness?.verdict ?? (worker ? "unknown" : "none") : "-";
+      const pr = tracker.prFor(issue.id)?.ref ?? "-";
+      rows.push([tracker.ref(issue.id), label, role, config.roles[role].harness, liveness, pr, issue.title]);
+    }
+    const widths = rows[0]?.map((_, column) => Math.max(...rows.map((row) => row[column]?.length ?? 0))) ?? [];
+    out(`live (${live.length})`);
+    for (const row of rows) out(`  ${row.map((cell, column) => cell.padEnd(widths[column] ?? 0)).join("  ").trimEnd()}`);
+  }
   const ready: Issue[] = [];
   const waiting: [Issue, string][] = [];
   for (const issue of tracker.list({ label: READY })) {
@@ -554,7 +576,7 @@ export function main(argv: string[], deps: Deps): number {
     const tracker = trackerFor(config, deps.sh, deps.cwd);
     if (args) return start(config, tracker, deps.sh, deps.cwd, args, deps);
     if (ticking) return tick(tracker, deps.sh, deps.cwd, ticking.run, deps);
-    return status(tracker, deps.out);
+    return status(config, tracker, deps.sh, deps.cwd, deps.out);
   } catch (error) {
     deps.err(`error: ${(error as Error).message}`);
     return 1;
