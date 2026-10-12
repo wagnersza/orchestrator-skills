@@ -2,7 +2,7 @@
 // shape carries `issue_dependencies_summary`.
 
 import type { Sh } from "../sh.ts";
-import { IN_PROGRESS, READY, type Filter, type Id, type Issue, type Pr, type Tracker } from "./tracker.ts";
+import { IN_PROGRESS, READY, USER_STORY, type Filter, type Id, type Issue, type Pr, type Tracker } from "./tracker.ts";
 
 type Raw = {
   number: number;
@@ -14,6 +14,7 @@ type Raw = {
   repository_url: string;
   pull_request?: unknown;
   issue_dependencies_summary?: { total_blocked_by: number };
+  sub_issues_summary?: { total: number } | null;
 };
 
 const REPO = "repos/{owner}/{repo}";
@@ -28,10 +29,16 @@ type RawPr = { number: number; url: string; state: string };
 // A `Blocked by: #12, #14` line anywhere in the body.
 const BLOCKED_BY_LINE = /^[ \t]*blocked by:(.*)$/gim;
 
+// A `## Parent` heading followed by `#N`, the child's half of the parent link that
+// docs/agents/issue-tracker.md names.
+const PARENT_LINE = /^##[ \t]+Parent\s+#(\d+)\b/m;
+
 export function github(sh: Sh, cwd: string): Tracker {
   // Every issue read in this process, so a blocker listed twice costs one call.
   const seen = new Map<Id, Raw>();
   let login: string | undefined;
+  // Each parent's children by `## Parent` line, from one read of every issue in the repo.
+  let byParentLine: Map<Id, Id[]> | undefined;
 
   function gh(args: string[], input?: string): string {
     const run = sh("gh", args, { cwd, input });
@@ -93,6 +100,28 @@ export function github(sh: Sh, cwd: string): Tracker {
     seen.set(id, JSON.parse(gh(["api", "-X", "PATCH", path(id), "--input", "-"], body)) as Raw);
   }
 
+  // The children whose body names `id` in a `## Parent` line. Only an issue in this repo
+  // has them, because the line carries a bare number.
+  function lineChildren(id: Id): Id[] {
+    if (id.includes("#")) return [];
+    if (!byParentLine) {
+      byParentLine = new Map();
+      const all = pages(`${REPO}/issues?state=all&per_page=100`).filter((raw) => raw.pull_request === undefined);
+      for (const raw of all.sort((a, b) => a.number - b.number)) {
+        const parent = PARENT_LINE.exec(raw.body ?? "")?.[1];
+        const child = String(raw.number);
+        if (parent === undefined || parent === child) continue;
+        if (!seen.has(child)) seen.set(child, raw);
+        byParentLine.set(parent, [...(byParentLine.get(parent) ?? []), child]);
+      }
+    }
+    return byParentLine.get(id) ?? [];
+  }
+
+  function hasNativeChildren(raw: Raw): boolean {
+    return (raw.sub_issues_summary?.total ?? 0) > 0;
+  }
+
   function ref(id: Id): string {
     return id.includes("#") ? id : `#${id}`;
   }
@@ -147,6 +176,28 @@ export function github(sh: Sh, cwd: string): Tracker {
 
     comment(id, body) {
       gh(["api", "-X", "POST", `${path(id)}/comments`, "--input", "-"], JSON.stringify({ body }));
+    },
+
+    // The label and the native link cost no call, so the body scan runs only when both miss.
+    isParent(id) {
+      const raw = fetch(id);
+      return raw.labels.some((label) => label.name === USER_STORY) || hasNativeChildren(raw) || lineChildren(id).length > 0;
+    },
+
+    // The native sub-issues, then each issue whose `## Parent` line names `id`, once each.
+    children(id) {
+      const raw = fetch(id);
+      const native = hasNativeChildren(raw)
+        ? pages(`${path(id)}/sub_issues?per_page=100`).map((child) => remember(child, raw.repository_url))
+        : [];
+      return [...new Set([...native, ...lineChildren(id)])];
+    },
+
+    close(id, body) {
+      gh(["api", "-X", "POST", `${path(id)}/comments`, "--input", "-"], JSON.stringify({ body }));
+      const labels = fetch(id).labels.map((label) => label.name).filter((label) => label !== IN_PROGRESS);
+      const change = JSON.stringify({ state: "closed", state_reason: "completed", labels });
+      seen.set(id, JSON.parse(gh(["api", "-X", "PATCH", path(id), "--input", "-"], change)) as Raw);
     },
 
     prFor(id): Pr | null {

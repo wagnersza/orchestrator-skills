@@ -45,6 +45,12 @@ export interface Tracker {
   // The template step that hands the work back for review, with `prSkill` naming the
   // skill that writes the body.
   reviewStep(id: Id, base: string, prSkill: string): string;
+  // A parent: an issue with children, or one that carries the user-story label.
+  isParent(id: Id): boolean;
+  // Every child of `id`, open or closed, read from both forms of the parent link.
+  children(id: Id): Id[];
+  // Post `body`, then close the issue and drop in-progress in one write.
+  close(id: Id, body: string): void;
 }
 
 // The state label a human sets to hand an issue to the loop.
@@ -55,3 +61,5 @@ export const IN_PROGRESS = "in-progress";
 export const READY_FOR_HUMAN = "ready-for-human";
 // The state label of an issue whose worker failed, asked, escalated or died.
 export const NEEDS_HUMAN = "needs-human";
+// The label that marks a parent, with or without children.
+export const USER_STORY = "user-story";
