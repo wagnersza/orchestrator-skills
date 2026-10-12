@@ -1,17 +1,17 @@
 // The v2 entry point: `node scripts/orchestrator.ts <subcommand>`. Node >= 22.18 runs it
-// directly, with no build step. Today it has four subcommands, `status`, `start`, `tick`
-// and `merge`.
+// directly, with no build step. Today it has five subcommands, `status`, `start`, `tick`,
+// `merge` and `install`.
 //
 // Every dependency comes in through `main`, so a test drives the script exactly as the
 // skill calls it, with a fake process runner in place of the real one.
 
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 import { sh as realSh, type Result, type Sh } from "./sh.ts";
 import { github } from "./trackers/github.ts";
-import { IN_PROGRESS, NEEDS_HUMAN, READY, READY_FOR_HUMAN, type Id, type Issue, type Tracker } from "./trackers/tracker.ts";
+import { IN_PROGRESS, NEEDS_HUMAN, READY, READY_FOR_HUMAN, type Id, type Issue, type Label, type Tracker } from "./trackers/tracker.ts";
 
 const ROLES = ["heavy", "medium", "light"] as const;
 
@@ -195,11 +195,28 @@ function noWorktree(run: Result): boolean {
 
 type StartArgs = { id: string; role?: RoleName; note?: string; run?: string };
 
-type LeafArgs = { role?: RoleName; note?: string; run: string };
+// `from` reads the Run's coordinator handle on its first call, and only then.
+type LeafArgs = { role?: RoleName; note?: string; run: string; from: () => string };
+
+// The Run's coordinator terminal. orca wants it as the sender of each worker-start and
+// each mailbox read. It still answers for a terminal that has closed since, so the loop
+// runs with no session open.
+function coordinatorOf(sh: Sh, cwd: string, run: string): string {
+  const handle = orca<{ run: { coordinator_handle?: string | null } }>(sh, cwd, ["run-show", "--id", run]).run.coordinator_handle;
+  if (!handle) throw new Error(`orca Run ${run} has no coordinator terminal, so no worker can start and its mailbox cannot be read`);
+  return handle;
+}
+
+// `get` on its first call, and the same value on every call after it.
+function once<T>(get: () => T): () => T {
+  let value: { is: T } | undefined;
+  return () => (value ??= { is: get() }).is;
+}
 
 // `start N`: a parent claims and starts its children, and any other issue starts as a leaf.
 function start(config: Config, tracker: Tracker, sh: Sh, cwd: string, args: StartArgs, deps: Deps): number {
-  const leaf = { role: args.role, note: args.note, run: args.run ?? readRun(cwd) };
+  const run = args.run ?? readRun(cwd);
+  const leaf = { role: args.role, note: args.note, run, from: once(() => coordinatorOf(sh, cwd, run)) };
   const issue = tracker.view(args.id);
   if (tracker.isParent(issue.id)) return startParent(config, tracker, sh, cwd, issue, leaf, deps);
   return startLeaf(config, tracker, sh, cwd, issue, leaf, deps);
@@ -223,6 +240,7 @@ function startLeaf(config: Config, tracker: Tracker, sh: Sh, cwd: string, issue:
   }
   const name = worktreeName(issue.id);
   const repo = mainCheckout(sh, cwd);
+  const from = args.from();
   tracker.claim(issue.id);
   const worker = sh("orca", [
     "orchestration", "worker-start",
@@ -236,6 +254,7 @@ function startLeaf(config: Config, tracker: Tracker, sh: Sh, cwd: string, issue:
     "--model", model,
     "--effort", effort,
     "--run", args.run,
+    "--from", from,
     "--json",
   ], { cwd });
   if (worker.code !== 0) {
@@ -484,11 +503,9 @@ function inProgress(tracker: Tracker, id: Id, what: string, deps: Deps): Issue |
 
 // Drain the Run's mailbox without waiting. Each batch is acknowledged only after every
 // message in it is applied, so a crash replays the batch, and the replay is a no-op.
-function drain(tracker: Tracker, sh: Sh, cwd: string, run: string, seen: Observed, deps: Deps): Set<string> {
+function drain(tracker: Tracker, sh: Sh, cwd: string, run: string, from: () => string, seen: Observed, deps: Deps): Set<string> {
   const handled = new Set<string>();
-  const handle = orca<{ run: { coordinator_handle?: string | null } }>(sh, cwd, ["run-show", "--id", run]).run.coordinator_handle;
-  if (!handle) throw new Error(`orca Run ${run} has no coordinator terminal, so its mailbox cannot be read`);
-  const check = ["check", "--run", run, "--terminal", handle];
+  const check = ["check", "--run", run, "--terminal", from()];
   let batch = orca<{ deliveryId?: string | null; messages?: Message[] }>(sh, cwd, check);
   while (batch.deliveryId) {
     for (const message of batch.messages ?? []) {
@@ -546,7 +563,7 @@ function reported(task: Task | undefined): boolean {
 // `max_workers` minus the in-progress issues in `live` that are not parents. An issue
 // that is not eligible keeps its place in the queue, and an issue whose worker does not
 // start frees its slot again.
-function fill(config: Config, tracker: Tracker, sh: Sh, cwd: string, run: string, live: Issue[], deps: Deps): void {
+function fill(config: Config, tracker: Tracker, sh: Sh, cwd: string, leaf: LeafArgs, live: Issue[], deps: Deps): void {
   let free = config.max_workers - slotsTaken(tracker, live);
   const queue = tracker.list({ label: READY });
   if (queue.length === 0) return;
@@ -555,7 +572,7 @@ function fill(config: Config, tracker: Tracker, sh: Sh, cwd: string, run: string
     const parent = tracker.isParent(issue.id);
     if ((!parent && free <= 0) || whyNotEligible(tracker, issue, me) !== null) continue;
     if (parent) claimParent(tracker, issue, deps);
-    else if (startLeaf(config, tracker, sh, cwd, issue, { run }, deps) === 0) free--;
+    else if (startLeaf(config, tracker, sh, cwd, issue, leaf, deps) === 0) free--;
   }
 }
 
@@ -570,13 +587,14 @@ function tick(config: Config, tracker: Tracker, sh: Sh, cwd: string, run: string
   }
   try {
     const id = run ?? readRun(cwd);
+    const from = once(() => coordinatorOf(sh, cwd, id));
     const seen = observe(sh, cwd, id);
-    const handled = drain(tracker, sh, cwd, id, seen, deps);
+    const handled = drain(tracker, sh, cwd, id, from, seen, deps);
     catchDeaths(tracker, sh, cwd, seen, handled, deps);
     teardownMerged(tracker, sh, cwd, seen, deps);
     const live = tracker.list({ label: IN_PROGRESS });
     closeParents(tracker, live, deps);
-    fill(config, tracker, sh, cwd, id, live, deps);
+    fill(config, tracker, sh, cwd, { run: id, from }, live, deps);
   } finally {
     rmSync(join(cwd, LOCK_PATH), { force: true });
   }
@@ -708,6 +726,133 @@ function status(config: Config, tracker: Tracker, sh: Sh, cwd: string, out: (lin
   return 0;
 }
 
+// The labels the loop writes, then the role labels the config names.
+function labelsFor(config: Config): Label[] {
+  const labels = [
+    { name: READY, color: "0E8A16", description: "Ready for the orchestrator to pick up" },
+    { name: IN_PROGRESS, color: "FBCA04", description: "Claimed: a worker is on it" },
+    { name: NEEDS_HUMAN, color: "D93F0B", description: "The worker failed, asked, escalated or died" },
+    { name: READY_FOR_HUMAN, color: "1D76DB", description: "A PR is open for review" },
+    { name: config.role_labels.heavy, color: "5319E7", description: "Run on the heavy role" },
+    { name: config.role_labels.light, color: "C5DEF5", description: "Run on the light role" },
+  ];
+  return labels.filter((label, i) => labels.findIndex((l) => l.name === label.name) === i);
+}
+
+// The automation whose precheck is the tick.
+const AUTOMATION = "orchestrator-tick";
+const EVERY_MINUTE = "* * * * *";
+// orca's default of 60 seconds can kill a tick that starts a few workers. A tick that
+// lives as long as its lock never sees a second tick take that lock.
+const PRECHECK_TIMEOUT = String(STALE_MS / 1000);
+
+// This script by absolute path, which the precheck names.
+const SCRIPT = fileURLToPath(import.meta.url);
+
+function shellQuote(word: string): string {
+  return `'${word.replaceAll("'", `'\\''`)}'`;
+}
+
+// The precheck: the tick, with node, the script and the repo as absolute paths, because
+// orca runs it later in a shell that saw no assignment.
+function precheckFor(root: string): string {
+  return `cd ${shellQuote(root)} && ${shellQuote(process.execPath)} ${shellQuote(SCRIPT)} tick`;
+}
+
+type Automation = {
+  id: string;
+  name: string;
+  enabled?: boolean;
+  rrule?: string;
+  precheck?: { command?: string; timeoutSeconds?: number } | null;
+  runContext?: { path?: string } | null;
+};
+
+// The saved Run, kept while orca has it with a coordinator, else a new one saved in its
+// place. A run file that is missing or does not parse counts as no Run. orca binds the
+// new Run to the terminal that runs install.
+function ensureRun(sh: Sh, cwd: string, deps: Deps): void {
+  let saved: string | undefined;
+  try {
+    saved = readRun(cwd);
+  } catch {
+    saved = undefined;
+  }
+  let why = "";
+  if (saved) {
+    const show = sh("orca", ["orchestration", "run-show", "--id", saved, "--json"], { cwd });
+    const reply = orcaReply(show) as OrcaReply & { result?: { run?: { coordinator_handle?: string | null } } };
+    if (show.code === 0 && reply.result?.run?.coordinator_handle) {
+      deps.out(`run ${saved}: present`);
+      return;
+    }
+    if (show.code !== 0 && reply.error?.code !== "run_not_found") throw new Error(`orca run-show ${saved} failed: ${orcaError(show)}`);
+    why = `, in place of ${saved}, which ${show.code === 0 ? "has no coordinator terminal" : "orca no longer has"}`;
+  }
+  const run = orca<{ run: { id: string } }>(sh, cwd, ["run-create", "--objective", `orchestrator loop for ${basename(cwd)}`]).run.id;
+  mkdirSync(join(cwd, ".orchestrator"), { recursive: true });
+  writeFileSync(join(cwd, RUN_PATH), `${JSON.stringify({ run })}\n`);
+  deps.out(`run ${run}: created${why}, saved to ${RUN_PATH}`);
+}
+
+// The automation for this repo, created where it is missing, and repaired where its
+// precheck, its timeout, its trigger or its switch differs.
+function ensureAutomation(sh: Sh, cwd: string, deps: Deps): void {
+  const repo = mainCheckout(sh, cwd);
+  const precheck = precheckFor(cwd);
+  const list = sh("orca", ["automations", "list", "--json"], { cwd });
+  if (list.code !== 0) throw new Error(`orca automations list failed: ${orcaError(list)}`);
+  const found = (JSON.parse(list.stdout) as { result: { automations: Automation[] } }).result.automations
+    .find((a) => a.name === AUTOMATION && a.runContext?.path === repo);
+  const prompt = "The precheck is the whole tick, and it always exits non-zero, so this agent never runs. Do nothing.";
+  if (!found) {
+    const create = sh("orca", [
+      "automations", "create",
+      "--name", AUTOMATION,
+      "--trigger", EVERY_MINUTE,
+      "--precheck", precheck,
+      "--precheck-timeout", PRECHECK_TIMEOUT,
+      "--prompt", prompt,
+      "--provider", "claude",
+      "--workspace", `path:${cwd}`,
+      "--enabled",
+      "--json",
+    ], { cwd });
+    if (create.code !== 0) throw new Error(`orca automations create failed: ${orcaError(create)}`);
+    const id = (JSON.parse(create.stdout) as { result: { automation: { id: string } } }).result.automation.id;
+    deps.out(`automation ${AUTOMATION}: created (${id}), precheck ${precheck}`);
+    return;
+  }
+  const same = found.precheck?.command === precheck && String(found.precheck.timeoutSeconds) === PRECHECK_TIMEOUT;
+  if (same && found.rrule === EVERY_MINUTE && found.enabled) {
+    deps.out(`automation ${AUTOMATION}: present (${found.id})`);
+    return;
+  }
+  const edit = sh("orca", [
+    "automations", "edit", "--id", found.id, "--trigger", EVERY_MINUTE,
+    "--precheck", precheck, "--precheck-timeout", PRECHECK_TIMEOUT, "--enabled", "--json",
+  ], { cwd });
+  if (edit.code !== 0) throw new Error(`orca automations edit ${found.id} failed: ${orcaError(edit)}`);
+  deps.out(`automation ${AUTOMATION}: repaired (${found.id}), precheck ${precheck}`);
+}
+
+// `install`: labels, then the Run, then the automation, then one tick through the exact
+// precheck string, as proof it runs. Each step that finds its part present creates
+// nothing, so a re-run repairs a broken install and duplicates nothing.
+function install(config: Config, tracker: Tracker, sh: Sh, cwd: string, deps: Deps): number {
+  const created = new Set(tracker.ensureLabels(labelsFor(config)));
+  for (const label of labelsFor(config)) deps.out(`label ${label.name}: ${created.has(label.name) ? "created" : "present"}`);
+  ensureRun(sh, cwd, deps);
+  ensureAutomation(sh, cwd, deps);
+  // The tick exits 1 on every path. Any other code, or an `error:` line, is a failure.
+  const proof = sh("sh", ["-c", precheckFor(cwd)], { cwd });
+  const lines = [...proof.stdout.split("\n"), ...proof.stderr.split("\n")].filter((line) => line.trim() !== "");
+  const ok = proof.code === 1 && !lines.some((line) => line.startsWith("error:"));
+  deps.out(`tick: exit ${proof.code}, ${ok ? "the precheck works" : "the precheck fails"}`);
+  for (const line of lines) deps.out(`  ${line}`);
+  return ok ? 0 : 1;
+}
+
 export type Deps = {
   sh: Sh;
   cwd: string;
@@ -716,7 +861,7 @@ export type Deps = {
 };
 
 const USAGE = "usage: orchestrator.ts status | start N [--role heavy|medium|light] [--note TEXT] [--run ID] "
-  + "| tick [--run ID] | merge N [--run ID]";
+  + "| tick [--run ID] | merge N [--run ID] | install";
 
 // The `start` arguments, or null where they do not parse.
 function startArgs(argv: string[]): StartArgs | null {
@@ -764,7 +909,8 @@ export function main(argv: string[], deps: Deps): number {
   const args = command === "start" ? startArgs(rest) : null;
   const ticking = command === "tick" ? tickArgs(rest) : null;
   const merging = command === "merge" ? mergeArgs(rest) : null;
-  if (!(command === "status" && rest.length === 0) && !args && !ticking && !merging) {
+  const bare = (command === "status" || command === "install") && rest.length === 0;
+  if (!bare && !args && !ticking && !merging) {
     deps.err(USAGE);
     return 2;
   }
@@ -774,6 +920,7 @@ export function main(argv: string[], deps: Deps): number {
     if (args) return start(config, tracker, deps.sh, deps.cwd, args, deps);
     if (ticking) return tick(config, tracker, deps.sh, deps.cwd, ticking.run, deps);
     if (merging) return merge(tracker, deps.sh, deps.cwd, merging, deps);
+    if (command === "install") return install(config, tracker, deps.sh, deps.cwd, deps);
     return status(config, tracker, deps.sh, deps.cwd, deps.out);
   } catch (error) {
     deps.err(`error: ${(error as Error).message}`);

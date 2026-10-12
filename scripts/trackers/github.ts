@@ -2,7 +2,7 @@
 // shape carries `issue_dependencies_summary`.
 
 import type { Sh } from "../sh.ts";
-import { IN_PROGRESS, READY, STATES, USER_STORY, type Filter, type Id, type Issue, type Pr, type Tracker } from "./tracker.ts";
+import { IN_PROGRESS, READY, STATES, USER_STORY, type Filter, type Id, type Issue, type Label, type Pr, type Tracker } from "./tracker.ts";
 
 type Raw = {
   number: number;
@@ -254,6 +254,20 @@ export function github(sh: Sh, cwd: string): Tracker {
     reviewStep(id, base, prSkill) {
       return `Push, and open a PR (not a draft) against ${base}. Write its body with ${prSkill}, `
         + `and put "Closes ${ref(id)}" in it.`;
+    },
+
+    // GitHub matches label names without case, so `Heavy` counts as `heavy`.
+    ensureLabels(labels: Label[]) {
+      const have = new Set((JSON.parse(gh(["api", "--paginate", "--slurp", `${REPO}/labels?per_page=100`])) as { name: string }[][])
+        .flat().map((label) => label.name.toLowerCase()));
+      const created: string[] = [];
+      for (const label of labels) {
+        if (have.has(label.name.toLowerCase())) continue;
+        gh(["api", "-X", "POST", `${REPO}/labels`, "--input", "-"], JSON.stringify(label));
+        have.add(label.name.toLowerCase());
+        created.push(label.name);
+      }
+      return created;
     },
   };
 }

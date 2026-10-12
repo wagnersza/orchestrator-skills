@@ -1,9 +1,9 @@
-// `status`, `start`, `tick` and `merge` driven through the entry point, with a fake runner that replays
+// `status`, `start`, `tick`, `merge` and `install` driven through the entry point, with a fake runner that replays
 // recorded `gh api` and `orca` JSON and records every call.
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -63,7 +63,7 @@ function issue(number: number, fixture: Fixture = {}) {
   };
 }
 
-const USAGE = "usage: orchestrator.ts status | start N [--role heavy|medium|light] [--note TEXT] [--run ID] | tick [--run ID] | merge N [--run ID]";
+const USAGE = "usage: orchestrator.ts status | start N [--role heavy|medium|light] [--note TEXT] [--run ID] | tick [--run ID] | merge N [--run ID] | install";
 const ME = "gh api user --jq .login";
 const LIST_OF = (label: string) => `gh api --paginate --slurp repos/{owner}/{repo}/issues?state=open&labels=${label}&per_page=100`;
 const LIST = LIST_OF("ready-for-agent");
@@ -227,7 +227,7 @@ test("status exits 1 with gh's own message when gh fails", () => {
 });
 
 test("an unknown subcommand prints the usage and exits 2", () => {
-  for (const argv of [[], ["close"], ["status", "extra"]]) {
+  for (const argv of [[], ["close"], ["status", "extra"], ["install", "extra"]]) {
     const result = run(argv, {});
     assert.equal(result.code, 2);
     assert.deepEqual(result.err, [USAGE]);
@@ -241,6 +241,10 @@ test("node runs the script directly, with no build step", () => {
   assert.equal(result.stderr, `${USAGE}\n`);
 });
 
+const RUN = "run_1";
+const COORDINATOR = "term_4f0ec745-92e8-4178-b33c-e0b32e2792db";
+const ORCA = (...args: string[]) => `orca orchestration ${args.join(" ")} --json`;
+const RUN_SHOW = ORCA("run-show", "--id", RUN);
 const GIT = "git rev-parse --path-format=absolute --git-common-dir";
 const PATCH = (n: number) => `gh api -X PATCH repos/{owner}/{repo}/issues/${n} --input -`;
 const WORKER_START = "orca orchestration worker-start *";
@@ -280,6 +284,7 @@ function startReplies(n: number, fixture: Fixture = {}, extra: Record<string, un
     [SCAN]: [[]],
     [ME]: "me\n",
     [GIT]: "/repo/.git\n",
+    [RUN_SHOW]: receipt({ run: { id: RUN, coordinator_handle: COORDINATOR } }),
     [PATCH(n)]: issue(n, { ...fixture, labels: ["in-progress"], assignees: ["me"] }),
     [WORKER_START]: RECEIPT,
     ...extra,
@@ -310,7 +315,7 @@ test("start claims an eligible issue in one write, then starts a claude worker o
   assert.deepEqual(result.out, [
     "started #10 in worktree issue-10: claude sonnet @ medium (medium role), dispatch ctx_54923f33c600",
   ]);
-  assert.deepEqual(result.calls.slice(0, 5), [VIEW(10), SCAN, ME, GIT, PATCH(10)]);
+  assert.deepEqual(result.calls.slice(0, 6), [VIEW(10), SCAN, ME, GIT, RUN_SHOW, PATCH(10)]);
   assert.deepEqual(patches(result), [{ labels: ["docs", "in-progress"], assignees: ["me"] }]);
   const argv = workerStart(result) ?? [];
   const spec = flag(argv, "--spec") ?? "";
@@ -326,9 +331,10 @@ test("start claims an eligible issue in one write, then starts a claude worker o
     "--model", "sonnet",
     "--effort", "medium",
     "--run", "run_1",
+    "--from", COORDINATOR,
     "--json",
   ]);
-  assert.equal(result.calls.length, 6);
+  assert.equal(result.calls.length, 7);
 });
 
 test("start takes #N, and an issue already assigned to me keeps one assignee", () => {
@@ -441,7 +447,9 @@ test("start reads the Run id from the run file when no --run is given", () => {
   const cwd = mkdtempSync(join(tmpdir(), "orch-"));
   mkdirSync(join(cwd, ".orchestrator"));
   writeFileSync(join(cwd, ".orchestrator", "run.json"), '{ "run": "run_from_file" }\n');
-  const result = run(["start", "10"], startReplies(10), cwd);
+  const result = run(["start", "10"], startReplies(10, {}, {
+    [ORCA("run-show", "--id", "run_from_file")]: receipt({ run: { id: "run_from_file", coordinator_handle: COORDINATOR } }),
+  }), cwd);
   assert.equal(result.code, 0);
   assert.equal(flag(workerStart(result), "--run"), "run_from_file");
 });
@@ -487,10 +495,6 @@ test("start refuses arguments it cannot read, with the usage", () => {
   }
 });
 
-const RUN = "run_1";
-const COORDINATOR = "term_4f0ec745-92e8-4178-b33c-e0b32e2792db";
-const ORCA = (...args: string[]) => `orca orchestration ${args.join(" ")} --json`;
-const RUN_SHOW = ORCA("run-show", "--id", RUN);
 const TASKS = ORCA("task-list", "--run", RUN);
 const WORKERS = ORCA("worker-list", "--run", RUN);
 const CHECK = ORCA("check", "--run", RUN, "--terminal", COORDINATOR);
@@ -887,6 +891,22 @@ test("tick starts every ready issue that fits, in queue order, with no session i
   ]);
 });
 
+test("tick starts each worker from the Run's coordinator, read once, so no session needs to be open", () => {
+  const result = run(TICK, tickReplies({ queue: [[10], [11]] }), MAX(3));
+  assert.deepEqual(result.err, []);
+  assert.deepEqual(result.argvs.filter((argv) => argv[2] === "worker-start").map((argv) => flag(argv, "--from")), [COORDINATOR, COORDINATOR]);
+  assert.equal(result.calls.filter((line) => line === RUN_SHOW).length, 1);
+});
+
+test("start refuses a Run with no coordinator before it claims", () => {
+  const result = run(["start", "10", "--run", RUN], startReplies(10, {}, {
+    [RUN_SHOW]: receipt({ run: { id: RUN, coordinator_handle: null } }),
+  }));
+  assert.equal(result.code, 1);
+  assert.deepEqual(result.err, [`error: orca Run ${RUN} has no coordinator terminal, so no worker can start and its mailbox cannot be read`]);
+  assert.deepEqual(patches(result), []);
+});
+
 test("tick fills only the free slots: max_workers minus the in-progress issues that are not parents", () => {
   const result = run(TICK, tickReplies({
     queue: [[20], [21], [22]],
@@ -1137,6 +1157,7 @@ function parentReplies(parent: Fixture, children: unknown[], extra: Record<strin
     [SCAN]: [children],
     [ME]: "me\n",
     [GIT]: "/repo/.git\n",
+    [RUN_SHOW]: receipt({ run: { id: RUN, coordinator_handle: COORDINATOR } }),
     [PATCH(40)]: issue(40, { labels: ["in-progress"], assignees: ["me"] }),
     [LIST_OF("in-progress")]: [[
       issue(10, { labels: ["in-progress"], assignees: ["me"] }),
@@ -1422,4 +1443,209 @@ test("tick reports a teardown orca cannot finish, keeps the label, and still fil
   ]);
   assert.equal(result.calls.includes(PATCH(10)), false);
   assert.deepEqual(started(result), ["issue-20"]);
+});
+
+const LABELS = "gh api --paginate --slurp repos/{owner}/{repo}/labels?per_page=100";
+const LABEL_POST = "gh api -X POST repos/{owner}/{repo}/labels --input -";
+const RUN_CREATE = "orca orchestration run-create *";
+const AUTOMATIONS = "orca automations list --json";
+const AUTOMATION_CREATE = "orca automations create *";
+const AUTOMATION_EDIT = "orca automations edit *";
+const PROOF = "sh -c *";
+const SCRIPT = join(import.meta.dirname, "orchestrator.ts");
+const EVERY = ["ready-for-agent", "in-progress", "needs-human", "ready-for-human", "heavy", "light"];
+
+// The precheck install writes for the repo at `cwd`.
+function precheck(cwd: string): string {
+  return `cd '${cwd}' && '${process.execPath}' '${SCRIPT}' tick`;
+}
+
+// An `orca automations list` row, shaped like the one orca printed for the scratch repo.
+function automation(fixture: { id?: string; name?: string; path?: string; precheck?: string; timeout?: number; rrule?: string; enabled?: boolean }) {
+  return {
+    id: fixture.id ?? "auto_1",
+    name: fixture.name ?? "orchestrator-tick",
+    precheck: { command: fixture.precheck ?? "", timeoutSeconds: fixture.timeout ?? 300 },
+    agentId: "claude",
+    runContext: { kind: "workspace-run", repoId: "79ff050a", path: fixture.path ?? "/repo" },
+    workspaceMode: "existing",
+    rrule: fixture.rrule ?? "* * * * *",
+    enabled: fixture.enabled ?? true,
+  };
+}
+
+// The replies an install needs, with `labels` the repo already has and `automations`
+// orca already lists. The proof tick is a quiet one: no output, exit 1.
+function installReplies(labels: string[], automations: unknown[], extra: Record<string, unknown> = {}) {
+  return {
+    [LABELS]: [labels.map((name) => ({ name, color: "ededed" }))],
+    [LABEL_POST]: { id: 1 },
+    [RUN_CREATE]: receipt({ run: { id: "run_new", coordinator_handle: COORDINATOR } }),
+    [GIT]: "/repo/.git\n",
+    [AUTOMATIONS]: receipt({ automations, items: [], orphanCount: 0 }),
+    [AUTOMATION_CREATE]: receipt({ automation: { id: "auto_new" } }),
+    [AUTOMATION_EDIT]: receipt({ automation: { id: "auto_1" } }),
+    [PROOF]: { fail: { code: 1, stdout: "", stderr: "" } },
+    ...extra,
+  };
+}
+
+function withRunFile(text: string): string {
+  const cwd = mkdtempSync(join(tmpdir(), "orch-"));
+  mkdirSync(join(cwd, ".orchestrator"));
+  writeFileSync(join(cwd, ".orchestrator", "run.json"), text);
+  return cwd;
+}
+
+function runFile(cwd: string): string {
+  return readFileSync(join(cwd, ".orchestrator", "run.json"), "utf8");
+}
+
+test("install on a bare repo creates the labels, the Run and the automation, then runs one tick", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "orch-"));
+  // Another repo's automation of the same name is not this repo's.
+  const result = run(["install"], installReplies(["bug", "ready-for-agent"], [automation({ id: "other", path: "/elsewhere" })]), cwd);
+  assert.deepEqual(result.err, []);
+  assert.equal(result.code, 0);
+  assert.deepEqual(result.out, [
+    "label ready-for-agent: present",
+    "label in-progress: created",
+    "label needs-human: created",
+    "label ready-for-human: created",
+    "label heavy: created",
+    "label light: created",
+    "run run_new: created, saved to .orchestrator/run.json",
+    `automation orchestrator-tick: created (auto_new), precheck ${precheck(cwd)}`,
+    "tick: exit 1, the precheck works",
+  ]);
+  assert.deepEqual(
+    result.calls.flatMap((line, i) => (line === LABEL_POST ? [(JSON.parse(result.inputs[i] ?? "") as { name: string }).name] : [])),
+    EVERY.slice(1),
+  );
+  assert.deepEqual(JSON.parse(runFile(cwd)), { run: "run_new" });
+  const create = result.argvs.find((argv) => argv[1] === "automations" && argv[2] === "create") ?? [];
+  assert.deepEqual(create, [
+    "orca", "automations", "create",
+    "--name", "orchestrator-tick",
+    "--trigger", "* * * * *",
+    "--precheck", precheck(cwd),
+    "--precheck-timeout", "300",
+    "--prompt", flag(create, "--prompt") ?? "",
+    "--provider", "claude",
+    "--workspace", `path:${cwd}`,
+    "--enabled",
+    "--json",
+  ]);
+  assert.deepEqual(result.argvs.at(-1), ["sh", "-c", precheck(cwd)]);
+  assert.equal(result.calls.some((line) => line.startsWith("orca automations edit")), false);
+});
+
+test("a second install finds every part present and creates nothing", () => {
+  const cwd = withRunFile('{ "run": "run_1" }\n');
+  const result = run(["install"], installReplies(
+    ["Ready-For-Agent", "in-progress", "needs-human", "ready-for-human", "Heavy", "light"],
+    [automation({ precheck: precheck(cwd) })],
+    { [RUN_SHOW]: receipt({ run: { id: RUN, coordinator_handle: COORDINATOR } }) },
+  ), cwd);
+  assert.deepEqual(result.err, []);
+  assert.equal(result.code, 0);
+  assert.deepEqual(result.out, [
+    ...EVERY.map((name) => `label ${name}: present`),
+    "run run_1: present",
+    "automation orchestrator-tick: present (auto_1)",
+    "tick: exit 1, the precheck works",
+  ]);
+  assert.deepEqual(result.calls, [LABELS, RUN_SHOW, GIT, AUTOMATIONS, `sh -c ${precheck(cwd)}`]);
+  assert.equal(runFile(cwd), '{ "run": "run_1" }\n');
+});
+
+test("install creates the role labels the config names", () => {
+  const cwd = repoWithConfig('```json\n{ "role_labels": { "heavy": "size:L", "light": "size:S" } }\n```\n');
+  const result = run(["install"], installReplies(EVERY, [automation({ precheck: precheck(cwd) })]), cwd);
+  assert.equal(result.code, 0);
+  assert.deepEqual(result.out.slice(4, 6), ["label size:L: created", "label size:S: created"]);
+});
+
+test("install replaces a saved Run that is gone, has no coordinator, or does not parse", () => {
+  const cases: [string, string, Record<string, unknown>, string][] = [
+    ["gone", '{ "run": "run_1" }\n', {
+      [RUN_SHOW]: { fail: { code: 1, stdout: JSON.stringify({ ok: false, error: { code: "run_not_found", message: "Run run_1 was not found." } }), stderr: "" } },
+    }, "run run_new: created, in place of run_1, which orca no longer has, saved to .orchestrator/run.json"],
+    ["no coordinator", '{ "run": "run_1" }\n', {
+      [RUN_SHOW]: receipt({ run: { id: RUN, coordinator_handle: null } }),
+    }, "run run_new: created, in place of run_1, which has no coordinator terminal, saved to .orchestrator/run.json"],
+    ["not JSON", "run_1\n", {}, "run run_new: created, saved to .orchestrator/run.json"],
+  ];
+  for (const [name, text, extra, line] of cases) {
+    const cwd = withRunFile(text);
+    const result = run(["install"], installReplies(EVERY, [automation({ precheck: precheck(cwd) })], extra), cwd);
+    assert.equal(result.code, 0, name);
+    assert.equal(result.out[6], line, name);
+    assert.deepEqual(JSON.parse(runFile(cwd)), { run: "run_new" }, name);
+  }
+});
+
+test("install stops, and keeps the run file, when orca cannot say whether the Run exists", () => {
+  const cwd = withRunFile('{ "run": "run_1" }\n');
+  const result = run(["install"], installReplies(EVERY, [], {
+    [RUN_SHOW]: { fail: { code: 1, stdout: "", stderr: "orca is not running" } },
+  }), cwd);
+  assert.equal(result.code, 1);
+  assert.deepEqual(result.err, ["error: orca run-show run_1 failed: orca is not running"]);
+  assert.equal(result.calls.some((line) => line.startsWith("orca orchestration run-create")), false);
+  assert.equal(runFile(cwd), '{ "run": "run_1" }\n');
+});
+
+test("install repairs this repo's automation where its precheck, timeout, trigger or switch differs", () => {
+  const cases: [string, Parameters<typeof automation>[0]][] = [
+    ["an old node path", { precheck: "cd '/repo' && '/old/node' '/old/orchestrator.ts' tick" }],
+    ["orca's default timeout", { timeout: 60 }],
+    ["another trigger", { rrule: "hourly" }],
+    ["switched off", { enabled: false }],
+  ];
+  for (const [name, fixture] of cases) {
+    const cwd = withRunFile('{ "run": "run_1" }\n');
+    const result = run(["install"], installReplies(EVERY, [automation({ precheck: precheck(cwd), ...fixture })], {
+      [RUN_SHOW]: receipt({ run: { id: RUN, coordinator_handle: COORDINATOR } }),
+    }), cwd);
+    assert.equal(result.code, 0, name);
+    assert.equal(result.out[7], `automation orchestrator-tick: repaired (auto_1), precheck ${precheck(cwd)}`, name);
+    assert.deepEqual(result.argvs.find((argv) => argv[2] === "edit"), [
+      "orca", "automations", "edit", "--id", "auto_1", "--trigger", "* * * * *",
+      "--precheck", precheck(cwd), "--precheck-timeout", "300", "--enabled", "--json",
+    ], name);
+    assert.equal(result.calls.some((line) => line.startsWith("orca automations create")), false, name);
+  }
+});
+
+test("install prints the proof tick's output, and exits 1 when the precheck fails", () => {
+  const cases: [string, unknown, string[], number][] = [
+    ["a tick that acted", { fail: { code: 1, stdout: "started #10 in worktree issue-10\n", stderr: "" } },
+      ["tick: exit 1, the precheck works", "  started #10 in worktree issue-10"], 0],
+    ["a tick another tick locked out", { fail: { code: 1, stdout: "", stderr: "tick: another tick holds .orchestrator/tick.lock, so this one exits\n" } },
+      ["tick: exit 1, the precheck works", "  tick: another tick holds .orchestrator/tick.lock, so this one exits"], 0],
+    ["a tick that errored", { fail: { code: 1, stdout: "", stderr: "error: orca orchestration task-list failed: orca is not running\n" } },
+      ["tick: exit 1, the precheck fails", "  error: orca orchestration task-list failed: orca is not running"], 1],
+    ["no node", { fail: { code: 127, stdout: "", stderr: "sh: /old/node: No such file or directory\n" } },
+      ["tick: exit 127, the precheck fails", "  sh: /old/node: No such file or directory"], 1],
+  ];
+  for (const [name, proof, lines, code] of cases) {
+    const cwd = mkdtempSync(join(tmpdir(), "orch-"));
+    const result = run(["install"], installReplies(EVERY, [automation({ precheck: precheck(cwd) })], { [PROOF]: proof }), cwd);
+    assert.equal(result.code, code, name);
+    assert.deepEqual(result.out.slice(-lines.length), lines, name);
+  }
+});
+
+test("the precheck names node, the script and the repo by absolute path, so it runs from any directory", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "orch it's-"));
+  const result = run(["install"], installReplies(EVERY, [automation({ precheck: precheck(cwd) })]), cwd);
+  const command = result.argvs.at(-1)?.[2] ?? "";
+  assert.equal(command, `cd '${cwd.replace("'", "'\\''")}' && '${process.execPath}' '${SCRIPT}' tick`);
+  // The real shell, from another directory and with no PATH, reaches the real tick in
+  // `cwd`. With the run file gone, that tick stops at its first step.
+  rmSync(join(cwd, ".orchestrator", "run.json"));
+  const proof = spawnSync("/bin/sh", ["-c", command], { cwd: tmpdir(), env: {}, encoding: "utf8" });
+  assert.equal(proof.status, 1);
+  assert.match(proof.stderr, /^error: no orca Run: /);
 });
