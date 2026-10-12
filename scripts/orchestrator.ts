@@ -1,6 +1,6 @@
 // The v2 entry point: `node scripts/orchestrator.ts <subcommand>`. Node >= 22.18 runs it
-// directly, with no build step. Today it has three subcommands, `status`, `start` and
-// `tick`.
+// directly, with no build step. Today it has four subcommands, `status`, `start`, `tick`
+// and `merge`.
 //
 // Every dependency comes in through `main`, so a test drives the script exactly as the
 // skill calls it, with a fake process runner in place of the real one.
@@ -172,7 +172,7 @@ function mainCheckout(sh: Sh, cwd: string): string {
   return dirname(git.stdout.trim());
 }
 
-type OrcaReply = { result?: { dispatchId?: string }; error?: { message?: string } };
+type OrcaReply = { result?: { dispatchId?: string }; error?: { code?: string; message?: string } };
 
 // The JSON an `orca --json` call printed, or an empty reply where it printed none.
 function orcaReply(run: Result): OrcaReply {
@@ -186,6 +186,11 @@ function orcaReply(run: Result): OrcaReply {
 // orca's own message from a failed `--json` call, or its raw output.
 function orcaError(run: Result): string {
   return orcaReply(run).error?.message || run.stderr.trim() || run.stdout.trim() || `exit ${run.code}`;
+}
+
+// A failed orca call that found no worktree by the name it was given.
+function noWorktree(run: Result): boolean {
+  return orcaReply(run).error?.code === "selector_not_found";
 }
 
 type StartArgs = { id: string; role?: RoleName; note?: string; run?: string };
@@ -555,9 +560,9 @@ function fill(config: Config, tracker: Tracker, sh: Sh, cwd: string, run: string
 }
 
 // The precheck of the orca automation. It observes the workers, moves their issues'
-// state labels, closes each parent whose children are all closed, then fills the free
-// slots from the ready queue. It exits non-zero on every path, so the automation's agent
-// never runs.
+// state labels, tears down each issue merged on the tracker, closes each parent whose
+// children are all closed, then fills the free slots from the ready queue. It exits
+// non-zero on every path, so the automation's agent never runs.
 function tick(config: Config, tracker: Tracker, sh: Sh, cwd: string, run: string | undefined, deps: Deps): number {
   if (!takeLock(cwd)) {
     deps.err(`tick: another tick holds ${LOCK_PATH}, so this one exits`);
@@ -568,6 +573,7 @@ function tick(config: Config, tracker: Tracker, sh: Sh, cwd: string, run: string
     const seen = observe(sh, cwd, id);
     const handled = drain(tracker, sh, cwd, id, seen, deps);
     catchDeaths(tracker, sh, cwd, seen, handled, deps);
+    teardownMerged(tracker, sh, cwd, seen, deps);
     const live = tracker.list({ label: IN_PROGRESS });
     closeParents(tracker, live, deps);
     fill(config, tracker, sh, cwd, id, live, deps);
@@ -575,6 +581,90 @@ function tick(config: Config, tracker: Tracker, sh: Sh, cwd: string, run: string
     rmSync(join(cwd, LOCK_PATH), { force: true });
   }
   return 1;
+}
+
+// Why worktree issue-N is not safe to remove, or null. A missing worktree holds no work.
+function uncommitted(sh: Sh, cwd: string, id: Id): string | null {
+  const name = worktreeName(id);
+  const show = sh("orca", ["worktree", "show", "--worktree", `name:${name}`, "--json"], { cwd });
+  if (show.code !== 0) {
+    if (noWorktree(show)) return null;
+    throw new Error(`orca worktree show ${name} failed: ${orcaError(show)}`);
+  }
+  const path = (JSON.parse(show.stdout) as { result: { worktree: { path: string } } }).result.worktree.path;
+  const git = sh("git", ["status", "--porcelain"], { cwd: path });
+  if (git.code !== 0) throw new Error(`git status in ${path} failed: ${git.stderr.trim() || `exit ${git.code}`}`);
+  return git.stdout.trim() === "" ? null : `worktree ${name} has uncommitted work`;
+}
+
+// Tear down a merged issue: release its newest worker, remove worktree issue-N, then
+// drop the state label and close the issue in one write. A failed release is reported
+// and passed. A failed removal throws before the write, so the issue keeps
+// ready-for-human and the next tick tries again. A replay finds each step done.
+function teardown(tracker: Tracker, sh: Sh, cwd: string, seen: Observed, issue: Issue, deps: Deps): void {
+  const ref = tracker.ref(issue.id);
+  const done: string[] = [];
+  const worker = seen.workers.find((w) => seen.issueOf(undefined, w.dispatchId) === issue.id);
+  if (worker) {
+    const call = sh("orca", ["orchestration", "worker-release", "--dispatch", worker.dispatchId, "--json"], { cwd });
+    if (call.code === 0) done.push(`released ${worker.dispatchId}`);
+    else deps.err(`${ref}: orca worker-release ${worker.dispatchId} failed: ${orcaError(call)}`);
+  }
+  const name = worktreeName(issue.id);
+  const rm = sh("orca", ["worktree", "rm", "--worktree", `name:${name}`, "--json"], { cwd });
+  if (rm.code === 0) done.push(`removed worktree ${name}`);
+  else if (!noWorktree(rm)) {
+    throw new Error(`orca worktree rm ${name} failed, so ${ref} keeps ${READY_FOR_HUMAN} for the next tick: ${orcaError(rm)}`);
+  }
+  done.push(`dropped ${READY_FOR_HUMAN}`, "closed");
+  tracker.close(issue.id, `The PR is merged, so this issue is torn down: ${done.join(", ")}.`);
+  deps.out(`${ref}: torn down; ${done.join(", ")}`);
+}
+
+type MergeArgs = { id: string; run?: string };
+
+// `merge N`: refuse in one line, changing nothing, unless the issue is ready-for-human,
+// its worktree is clean and the tracker takes the merge. Teardown runs only once the
+// tracker confirms the merge, because a merge command can fail after the merge landed.
+function merge(tracker: Tracker, sh: Sh, cwd: string, args: MergeArgs, deps: Deps): number {
+  const run = args.run ?? readRun(cwd);
+  const issue = tracker.view(args.id);
+  const ref = tracker.ref(issue.id);
+  const refuse = (why: string) => {
+    deps.err(`${ref} is not merged: ${why}`);
+    return 1;
+  };
+  const why = issue.labels.includes(READY_FOR_HUMAN) ? uncommitted(sh, cwd, issue.id) : `not ${READY_FOR_HUMAN}`;
+  if (why !== null) return refuse(why);
+  let failure: string | undefined;
+  try {
+    const refusal = tracker.merge(issue.id);
+    if (refusal !== null) return refuse(refusal);
+  } catch (error) {
+    failure = (error as Error).message;
+  }
+  if (!tracker.isMerged(issue.id)) {
+    deps.err(`error: ${ref} is not confirmed merged, so nothing is torn down${failure ? `: ${failure}` : ""}`);
+    return 1;
+  }
+  deps.out(`${ref}: merged${failure ? `, though the merge command failed: ${failure}` : ""}`);
+  teardown(tracker, sh, cwd, observe(sh, cwd, run), issue, deps);
+  return 0;
+}
+
+// Tear down each ready-for-human issue, unassigned or mine, whose PR was merged on the
+// tracker. A closed one counts, because `Closes #N` closes the issue at the merge. A
+// teardown that fails is reported, and the tick goes on.
+function teardownMerged(tracker: Tracker, sh: Sh, cwd: string, seen: Observed, deps: Deps): void {
+  for (const issue of tracker.list({ label: READY_FOR_HUMAN, closed: true })) {
+    if (issue.assignees.length > 0 && !issue.assignees.includes(tracker.me())) continue;
+    if (!tracker.isMerged(issue.id)) continue;
+    try {
+      teardown(tracker, sh, cwd, seen, issue, deps);
+    } catch (error) {
+      deps.err(`tick: ${(error as Error).message}`);
+    }
+  }
 }
 
 // The state labels of an issue the loop has claimed and not yet closed.
@@ -626,7 +716,7 @@ export type Deps = {
 };
 
 const USAGE = "usage: orchestrator.ts status | start N [--role heavy|medium|light] [--note TEXT] [--run ID] "
-  + "| tick [--run ID]";
+  + "| tick [--run ID] | merge N [--run ID]";
 
 // The `start` arguments, or null where they do not parse.
 function startArgs(argv: string[]): StartArgs | null {
@@ -656,11 +746,25 @@ function tickArgs(argv: string[]): { run?: string } | null {
   }
 }
 
+// The `merge` arguments, or null where they do not parse.
+function mergeArgs(argv: string[]): MergeArgs | null {
+  let parsed;
+  try {
+    parsed = parseArgs({ args: argv, allowPositionals: true, options: { run: { type: "string" } } });
+  } catch {
+    return null;
+  }
+  const { positionals, values } = parsed;
+  if (positionals.length !== 1 || !/^#?\d+$/.test(positionals[0] ?? "")) return null;
+  return { id: (positionals[0] ?? "").replace("#", ""), run: values.run };
+}
+
 export function main(argv: string[], deps: Deps): number {
   const [command, ...rest] = argv;
   const args = command === "start" ? startArgs(rest) : null;
   const ticking = command === "tick" ? tickArgs(rest) : null;
-  if (!(command === "status" && rest.length === 0) && !args && !ticking) {
+  const merging = command === "merge" ? mergeArgs(rest) : null;
+  if (!(command === "status" && rest.length === 0) && !args && !ticking && !merging) {
     deps.err(USAGE);
     return 2;
   }
@@ -669,6 +773,7 @@ export function main(argv: string[], deps: Deps): number {
     const tracker = trackerFor(config, deps.sh, deps.cwd);
     if (args) return start(config, tracker, deps.sh, deps.cwd, args, deps);
     if (ticking) return tick(config, tracker, deps.sh, deps.cwd, ticking.run, deps);
+    if (merging) return merge(tracker, deps.sh, deps.cwd, merging, deps);
     return status(config, tracker, deps.sh, deps.cwd, deps.out);
   } catch (error) {
     deps.err(`error: ${(error as Error).message}`);

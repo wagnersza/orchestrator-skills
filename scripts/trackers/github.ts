@@ -2,7 +2,7 @@
 // shape carries `issue_dependencies_summary`.
 
 import type { Sh } from "../sh.ts";
-import { IN_PROGRESS, READY, USER_STORY, type Filter, type Id, type Issue, type Pr, type Tracker } from "./tracker.ts";
+import { IN_PROGRESS, READY, STATES, USER_STORY, type Filter, type Id, type Issue, type Pr, type Tracker } from "./tracker.ts";
 
 type Raw = {
   number: number;
@@ -19,12 +19,13 @@ type Raw = {
 
 const REPO = "repos/{owner}/{repo}";
 
-// The PRs GitHub links as closing an issue. Only GraphQL has this link.
+// The PRs GitHub links as closing an issue, with what a merge checks. Only GraphQL has
+// this link.
 const CLOSING_PRS = "query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo)"
   + "{issue(number:$number){closedByPullRequestsReferences(first:20,includeClosedPrs:true)"
-  + "{nodes{number url state}}}}}";
+  + "{nodes{number url state mergeable reviewDecision}}}}}";
 
-type RawPr = { number: number; url: string; state: string };
+type RawPr = { number: number; url: string; state: string; mergeable?: string; reviewDecision?: string | null };
 
 // A `Blocked by: #12, #14` line anywhere in the body.
 const BLOCKED_BY_LINE = /^[ \t]*blocked by:(.*)$/gim;
@@ -126,6 +127,26 @@ export function github(sh: Sh, cwd: string): Tracker {
     return id.includes("#") ? id : `#${id}`;
   }
 
+  // Every PR that closes `id`, oldest first, read fresh on each call.
+  function closingPrs(id: Id): RawPr[] {
+    const [repo, number] = id.includes("#") ? id.split("#") : [undefined, id];
+    const [owner, name] = repo ? repo.split("/") : ["{owner}", "{repo}"];
+    const reply = JSON.parse(gh([
+      "api", "graphql", "-f", `query=${CLOSING_PRS}`,
+      "-F", `owner=${owner}`, "-F", `repo=${name}`, "-F", `number=${number}`,
+    ])) as { data: { repository: { issue: { closedByPullRequestsReferences: { nodes: RawPr[] } } } } };
+    return reply.data.repository.issue.closedByPullRequestsReferences.nodes;
+  }
+
+  // The open PR, else the newest closed or merged one.
+  function pick(prs: RawPr[]): RawPr | undefined {
+    return prs.find((p) => p.state === "OPEN") ?? prs.at(-1);
+  }
+
+  function prRef(id: Id, pr: RawPr): string {
+    return `${id.includes("#") ? id.split("#")[0] : ""}#${pr.number}`;
+  }
+
   function repoFlag(id: Id): string {
     return id.includes("#") ? ` -R ${id.split("#")[0]}` : "";
   }
@@ -133,7 +154,7 @@ export function github(sh: Sh, cwd: string): Tracker {
   return {
     list(filter: Filter) {
       const label = encodeURIComponent(filter.label);
-      return pages(`${REPO}/issues?state=open&labels=${label}&per_page=100`)
+      return pages(`${REPO}/issues?state=${filter.closed ? "all" : "open"}&labels=${label}&per_page=100`)
         .filter((raw) => raw.pull_request === undefined)
         .sort((a, b) => a.number - b.number)
         .map((raw) => issue(remember(raw, raw.repository_url), raw));
@@ -195,22 +216,34 @@ export function github(sh: Sh, cwd: string): Tracker {
 
     close(id, body) {
       gh(["api", "-X", "POST", `${path(id)}/comments`, "--input", "-"], JSON.stringify({ body }));
-      const labels = fetch(id).labels.map((label) => label.name).filter((label) => label !== IN_PROGRESS);
+      const labels = fetch(id).labels.map((label) => label.name).filter((label) => !STATES.includes(label));
       const change = JSON.stringify({ state: "closed", state_reason: "completed", labels });
       seen.set(id, JSON.parse(gh(["api", "-X", "PATCH", path(id), "--input", "-"], change)) as Raw);
     },
 
     prFor(id): Pr | null {
-      const [repo, number] = id.includes("#") ? id.split("#") : [undefined, id];
-      const [owner, name] = repo ? repo.split("/") : ["{owner}", "{repo}"];
-      const reply = JSON.parse(gh([
-        "api", "graphql", "-f", `query=${CLOSING_PRS}`,
-        "-F", `owner=${owner}`, "-F", `repo=${name}`, "-F", `number=${number}`,
-      ])) as { data: { repository: { issue: { closedByPullRequestsReferences: { nodes: RawPr[] } } } } };
-      const prs = reply.data.repository.issue.closedByPullRequestsReferences.nodes;
-      const pr = prs.find((p) => p.state === "OPEN") ?? prs.at(-1);
+      const pr = pick(closingPrs(id));
       if (!pr) return null;
-      return { ref: `${repo ?? ""}#${pr.number}`, url: pr.url, open: pr.state === "OPEN" };
+      return { ref: prRef(id, pr), url: pr.url, open: pr.state === "OPEN" };
+    },
+
+    isMerged(id) {
+      return closingPrs(id).some((pr) => pr.state === "MERGED");
+    },
+
+    // `-R` names the PR's repo, which also keeps gh off the local branch: a worktree
+    // still has it checked out, and gh would fail on it before it deletes the remote one.
+    merge(id) {
+      const prs = closingPrs(id);
+      const pr = prs.find((p) => p.state === "OPEN");
+      const merged = prs.find((p) => p.state === "MERGED");
+      if (!pr && merged) return `PR ${prRef(id, merged)} is already merged, so the next tick tears it down`;
+      if (!pr) return `no open PR closes ${ref(id)}`;
+      if (pr.mergeable !== "MERGEABLE") return `PR ${prRef(id, pr)} is not mergeable (${(pr.mergeable ?? "unknown").toLowerCase()})`;
+      if (pr.reviewDecision === "CHANGES_REQUESTED") return `PR ${prRef(id, pr)} has changes requested`;
+      const repo = new URL(pr.url).pathname.split("/").slice(1, 3).join("/");
+      gh(["pr", "merge", String(pr.number), "-R", repo, "--squash", "--delete-branch"]);
+      return null;
     },
 
     // JSON, because outside a terminal `--comments` prints the comments and not the body.
