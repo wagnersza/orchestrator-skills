@@ -104,7 +104,8 @@ def body_lines(text):
             else:
                 yield number, line
         elif (
-            marker.startswith(fence[0])
+            found is not None
+            and marker.startswith(fence[0])
             and len(marker) >= len(fence)
             and not found.group(2).strip()
         ):
