@@ -24,6 +24,7 @@ const RECORDED = {
   state: "open",
   assignees: [] as { login: string }[],
   issue_dependencies_summary: { blocked_by: 0, total_blocked_by: 0, blocking: 1, total_blocking: 1 },
+  sub_issues_summary: { total: 0, completed: 0, percent_completed: 0 },
   body: "## Parent\n\n#348\n\n## What to build\n\nThe first tracer bullet f",
 };
 
@@ -34,6 +35,8 @@ type Fixture = {
   assignees?: string[];
   body?: string;
   blockedBy?: number;
+  // The native sub-issues the summary counts.
+  subIssues?: number;
   repo?: string;
   pr?: boolean;
 };
@@ -54,6 +57,7 @@ function issue(number: number, fixture: Fixture = {}) {
       blocked_by: fixture.blockedBy ?? 0,
       total_blocked_by: fixture.blockedBy ?? 0,
     },
+    sub_issues_summary: { total: fixture.subIssues ?? 0, completed: 0, percent_completed: 0 },
     body: fixture.body ?? RECORDED.body,
     ...(fixture.pr ? { pull_request: { url: `${repo}/pulls/${number}` } } : {}),
   };
@@ -69,6 +73,9 @@ const NO_LIVE = Object.fromEntries(LIVE.map((line) => [line, [[]]]));
 const VIEW = (n: number) => `gh api repos/{owner}/{repo}/issues/${n}`;
 const NATIVE = (n: number) =>
   `gh api --paginate --slurp repos/{owner}/{repo}/issues/${n}/dependencies/blocked_by?per_page=100`;
+// The one read of every issue that finds the children by `## Parent` line.
+const SCAN = "gh api --paginate --slurp repos/{owner}/{repo}/issues?state=all&per_page=100";
+const SUB_ISSUES = (n: number) => `gh api --paginate --slurp repos/{owner}/{repo}/issues/${n}/sub_issues?per_page=100`;
 
 // A failed command, for a reply. A command that succeeds replies with its stdout.
 type Failure = { fail: Result };
@@ -270,6 +277,7 @@ function startReplies(n: number, fixture: Fixture = {}, extra: Record<string, un
   const labels = fixture.labels ?? ["ready-for-agent"];
   return {
     [VIEW(n)]: issue(n, { ...fixture, labels }),
+    [SCAN]: [[]],
     [ME]: "me\n",
     [GIT]: "/repo/.git\n",
     [PATCH(n)]: issue(n, { ...fixture, labels: ["in-progress"], assignees: ["me"] }),
@@ -302,7 +310,7 @@ test("start claims an eligible issue in one write, then starts a claude worker o
   assert.deepEqual(result.out, [
     "started #10 in worktree issue-10: claude sonnet @ medium (medium role), dispatch ctx_54923f33c600",
   ]);
-  assert.deepEqual(result.calls.slice(0, 4), [VIEW(10), ME, GIT, PATCH(10)]);
+  assert.deepEqual(result.calls.slice(0, 5), [VIEW(10), SCAN, ME, GIT, PATCH(10)]);
   assert.deepEqual(patches(result), [{ labels: ["docs", "in-progress"], assignees: ["me"] }]);
   const argv = workerStart(result) ?? [];
   const spec = flag(argv, "--spec") ?? "";
@@ -320,7 +328,7 @@ test("start claims an eligible issue in one write, then starts a claude worker o
     "--run", "run_1",
     "--json",
   ]);
-  assert.equal(result.calls.length, 5);
+  assert.equal(result.calls.length, 6);
 });
 
 test("start takes #N, and an issue already assigned to me keeps one assignee", () => {
@@ -417,7 +425,7 @@ test("start on an issue that is not eligible prints one line and writes nothing"
     assert.equal(result.code, 1, line);
     assert.deepEqual(result.err, [line]);
     assert.deepEqual(result.out, []);
-    assert.deepEqual(result.calls.filter((c) => !c.startsWith("gh api repos/") && c !== ME), [], line);
+    assert.deepEqual(result.calls.filter((c) => !c.startsWith("gh api repos/") && c !== ME && c !== SCAN), [], line);
   }
 });
 
@@ -426,7 +434,7 @@ test("start refuses a role whose harness is not claude, before it claims", () =>
   const result = run(["start", "10", "--run", "run_1", "--role", "heavy"], startReplies(10), cwd);
   assert.equal(result.code, 1);
   assert.deepEqual(result.err, ["#10 is not started: its heavy role runs on codex, and start launches only claude for now"]);
-  assert.deepEqual(result.calls, [VIEW(10), ME]);
+  assert.deepEqual(result.calls, [VIEW(10), SCAN, ME]);
 });
 
 test("start reads the Run id from the run file when no --run is given", () => {
@@ -596,13 +604,15 @@ function tickReplies(fixture: TickFixture = {}, extra: Record<string, unknown> =
       .filter(([n, labels]) => labels.includes("in-progress") && !calls.includes(PATCH(Number(n))))
       .map(([n, labels]) => issue(Number(n), { labels, assignees: ["me"] }))],
     [LIST]: [(fixture.queue ?? []).map(([n, f]) => issue(n, { ...f, labels: ["ready-for-agent", ...(f?.labels ?? [])] }))],
+    [SCAN]: [[]],
     [ME]: "me\n",
     ...Object.fromEntries((fixture.queue ?? []).flatMap(([n, f]) => Object.entries(startReplies(n, f)))),
     ...extra,
   };
 }
 
-// The two lists a tick reads last, to count the free slots and to find the queue.
+// The two lists a tick reads last: the in-progress issues, for the parents to close and
+// the free slots, then the queue.
 const FILL = [LIST_OF("in-progress"), LIST];
 
 function comments(result: { calls: string[]; inputs: (string | undefined)[] }): string[] {
@@ -878,23 +888,23 @@ test("tick fills only the free slots: max_workers minus the in-progress issues t
   assert.deepEqual(started(result), ["issue-20", "issue-21"]);
 });
 
-test("tick starts nothing, and reads no queue, while every slot is full", () => {
+test("tick starts nothing while every slot is full, and reads no blocker of a leaf it cannot start", () => {
   const result = run(TICK, tickReplies({
-    queue: [[20]],
+    queue: [[20, { body: "Blocked by: #21" }]],
     issues: { 10: ["in-progress"], 11: ["in-progress"] },
   }), MAX(2));
   assert.deepEqual(result.err, []);
   assert.deepEqual(started(result), []);
-  assert.equal(result.calls.includes(LIST), false);
+  assert.equal(result.calls.includes(VIEW(21)), false);
   assert.deepEqual(patches(result), []);
 });
 
-test("tick skips an issue that is not eligible, a parent, and keeps queue order for the rest", () => {
+test("tick skips an issue that is not eligible, and keeps queue order for the rest", () => {
   const result = run(TICK, tickReplies({
-    queue: [[20, { assignees: ["other"] }], [21, { labels: ["user-story"] }], [22], [23]],
+    queue: [[20, { assignees: ["other"] }], [21], [22]],
   }), MAX(2));
   assert.deepEqual(result.err, []);
-  assert.deepEqual(started(result), ["issue-22", "issue-23"]);
+  assert.deepEqual(started(result), ["issue-21", "issue-22"]);
 });
 
 test("tick observes before it fills: a slot freed this tick is filled this tick", () => {
@@ -994,4 +1004,197 @@ test("status prints liveness as - and calls no orca where no Run is saved", () =
     "  #10    in-progress  medium  claude   -         #12  work",
   ]);
   assert.equal(result.calls.some((line) => line.startsWith("orca")), false);
+});
+
+// A child of parent `p` by `## Parent` line, as the body scan finds it.
+function child(n: number, p: number, fixture: Fixture = {}) {
+  return issue(n, { labels: ["ready-for-agent"], ...fixture, body: `## Parent\n\n#${p}\n\n${fixture.body ?? ""}` });
+}
+
+test("tick claims a ready parent in each form, with no worker and no slot", () => {
+  const result = run(TICK, tickReplies(
+    {
+      queue: [
+        [30, { labels: ["user-story"] }],
+        [31, { subIssues: 2 }],
+        [32],
+        [33, { labels: ["user-story"], assignees: ["alice"] }],
+        [40],
+      ],
+    },
+    { [SCAN]: [[child(35, 32, { labels: [] })]] },
+  ), MAX(1));
+  assert.deepEqual(result.err, []);
+  assert.deepEqual(result.out, [
+    "claimed parent #30: no worker, no slot",
+    "claimed parent #31: no worker, no slot",
+    "claimed parent #32: no worker, no slot",
+    "started #40 in worktree issue-40: claude sonnet @ medium (medium role), dispatch ctx_54923f33c600",
+  ]);
+  assert.deepEqual(started(result), ["issue-40"]);
+  assert.deepEqual(result.calls.filter((c) => c.includes("-X PATCH")), [PATCH(30), PATCH(31), PATCH(32), PATCH(40)]);
+});
+
+test("tick gives an in-progress parent no slot, in each parent form", () => {
+  const result = run(TICK, tickReplies({ queue: [[20], [21]] }, {
+    [LIST_OF("in-progress")]: [[
+      issue(10, { labels: ["in-progress"], assignees: ["me"] }),
+      issue(11, { labels: ["in-progress", "user-story"], assignees: ["me"] }),
+      issue(12, { labels: ["in-progress"], assignees: ["me"], subIssues: 1 }),
+      issue(13, { labels: ["in-progress"], assignees: ["me"] }),
+    ]],
+    [SUB_ISSUES(12)]: [[issue(14, { labels: [] })]],
+    [SCAN]: [[child(15, 13, { labels: [] })]],
+  }), MAX(3));
+  assert.deepEqual(result.err, []);
+  assert.deepEqual(started(result), ["issue-20", "issue-21"]);
+  assert.deepEqual(comments(result), []);
+});
+
+test("tick closes no parent with an open child or with no child, and none held by someone else", () => {
+  const result = run(TICK, tickReplies({}, {
+    [LIST_OF("in-progress")]: [[
+      issue(50, { labels: ["in-progress", "user-story"], assignees: ["me"] }),
+      issue(51, { labels: ["in-progress"], assignees: ["me"], subIssues: 1 }),
+      issue(53, { labels: ["in-progress", "user-story"], assignees: ["alice"], subIssues: 1 }),
+    ]],
+    [SUB_ISSUES(51)]: [[issue(52, { labels: [] })]],
+  }));
+  assert.deepEqual(result.err, []);
+  assert.deepEqual(result.out, []);
+  assert.deepEqual(started(result), []);
+  assert.equal(result.calls.some((c) => c.includes("-X ")), false);
+  assert.equal(result.calls.includes(SUB_ISSUES(53)), false);
+});
+
+test("a story runs in order: A and C start, B starts once A closes, then the parent closes with each PR", () => {
+  // Parent #40 holds three native sub-issues. B (#42) is blocked by A (#41).
+  const blockedByA = { body: "Blocked by: #41" };
+  const parentLive = issue(40, { labels: ["in-progress"], assignees: ["me"], subIssues: 3 });
+
+  const first = run(TICK, tickReplies({ queue: [[40, { subIssues: 3 }], [41], [42, blockedByA], [43]] }), MAX(3));
+  assert.deepEqual(first.err, []);
+  assert.deepEqual(first.out.slice(0, 1), ["claimed parent #40: no worker, no slot"]);
+  assert.deepEqual(started(first), ["issue-41", "issue-43"]);
+  assert.deepEqual(first.calls.filter((c) => c.includes("-X PATCH")), [PATCH(40), PATCH(41), PATCH(43)]);
+
+  const second = run(TICK, tickReplies({ issues: { 43: ["in-progress"] }, queue: [[42, blockedByA]] }, {
+    [LIST_OF("in-progress")]: [[parentLive, issue(43, { labels: ["in-progress"], assignees: ["me"] })]],
+    [SUB_ISSUES(40)]: [[
+      issue(41, { labels: [], state: "closed" }),
+      issue(42, { ...blockedByA, labels: ["ready-for-agent"] }),
+      issue(43, { labels: ["in-progress"], assignees: ["me"] }),
+    ]],
+  }), MAX(3));
+  assert.deepEqual(second.err, []);
+  assert.deepEqual(started(second), ["issue-42"]);
+  assert.deepEqual(comments(second), []);
+
+  const third = run(TICK, tickReplies({ issues: { 40: ["in-progress"] } }, {
+    [LIST_OF("in-progress")]: [[parentLive]],
+    [SUB_ISSUES(40)]: [[41, 42, 43].map((n) => issue(n, { labels: [], state: "closed" }))],
+    [PRS(41)]: prs([60, "MERGED"]),
+    [PRS(42)]: prs([62, "MERGED"]),
+    [PRS(43)]: prs([61, "CLOSED"], [63, "MERGED"]),
+  }));
+  assert.deepEqual(third.err, []);
+  assert.deepEqual(third.out, ["#40: closed, every child is closed (#41, #42, #43)"]);
+  assert.deepEqual(comments(third), [
+    "Every child of this story is closed, so the tick closes it.\n\n- #41: PR #60\n- #42: PR #62\n- #43: PR #63",
+  ]);
+  assert.deepEqual(patches(third), [{ state: "closed", state_reason: "completed", labels: [] }]);
+  assert.ok(third.calls.indexOf(COMMENT(40)) < third.calls.indexOf(PATCH(40)));
+  assert.deepEqual(started(third), []);
+});
+
+test("tick closes a parent read by `## Parent` line, naming a child with no PR", () => {
+  const result = run(TICK, tickReplies({ issues: { 40: ["in-progress", "user-story"] } }, {
+    [LIST_OF("in-progress")]: [[issue(40, { labels: ["in-progress", "user-story", "docs"], assignees: ["me"] })]],
+    [SCAN]: [[child(41, 40, { state: "closed" }), child(42, 40, { state: "closed" }), issue(43, { state: "closed" })]],
+    [PRS(41)]: prs([60, "MERGED"]),
+    [PRS(42)]: prs(),
+  }));
+  assert.deepEqual(result.err, []);
+  assert.deepEqual(result.out, ["#40: closed, every child is closed (#41, #42)"]);
+  assert.deepEqual(comments(result), [
+    "Every child of this story is closed, so the tick closes it.\n\n- #41: PR #60\n- #42: no PR",
+  ]);
+  assert.deepEqual(patches(result), [{ state: "closed", state_reason: "completed", labels: ["user-story", "docs"] }]);
+});
+
+// The replies `start 40` needs on a parent whose children the body scan finds, with
+// #10 a leaf that holds a slot.
+function parentReplies(parent: Fixture, children: unknown[], extra: Record<string, unknown> = {}) {
+  return {
+    [VIEW(40)]: issue(40, parent),
+    [SCAN]: [children],
+    [ME]: "me\n",
+    [GIT]: "/repo/.git\n",
+    [PATCH(40)]: issue(40, { labels: ["in-progress"], assignees: ["me"] }),
+    [LIST_OF("in-progress")]: [[
+      issue(10, { labels: ["in-progress"], assignees: ["me"] }),
+      issue(40, { ...parent, labels: ["in-progress"], assignees: ["me"] }),
+    ]],
+    ...Object.fromEntries([41, 43, 44].map((n) => [PATCH(n), issue(n, { labels: ["in-progress"], assignees: ["me"] })])),
+    [WORKER_START]: RECEIPT,
+    ...extra,
+  };
+}
+
+test("start on a parent claims it, then starts its eligible children up to the free slots", () => {
+  const result = run(["start", "40", "--run", RUN], parentReplies({ labels: ["ready-for-agent"] }, [
+    child(41, 40),
+    child(42, 40, { labels: [] }),
+    child(43, 40, { body: "Blocked by: #41" }),
+    child(44, 40),
+    child(45, 40, { state: "closed" }),
+  ]), MAX(3));
+  assert.deepEqual(result.err, []);
+  assert.equal(result.code, 0);
+  assert.deepEqual(result.out, [
+    "claimed parent #40: no worker, no slot",
+    "started #41 in worktree issue-41: claude sonnet @ medium (medium role), dispatch ctx_54923f33c600",
+    "#42 waits: not ready-for-agent",
+    "#43 waits: blocked by #41",
+    "started #44 in worktree issue-44: claude sonnet @ medium (medium role), dispatch ctx_54923f33c600",
+  ]);
+  assert.deepEqual(started(result), ["issue-41", "issue-44"]);
+  assert.deepEqual(patches(result)[0], { labels: ["in-progress"], assignees: ["me"] });
+});
+
+test("start on a parent stops starting children when the slots run out", () => {
+  const result = run(["start", "40", "--run", RUN], parentReplies({ labels: ["ready-for-agent"] }, [
+    child(41, 40),
+    child(44, 40),
+  ]), MAX(2));
+  assert.equal(result.code, 0);
+  assert.deepEqual(started(result), ["issue-41"]);
+  assert.deepEqual(result.out.at(-1), "#44 waits: no free slot");
+});
+
+test("start on a parent I already claimed reads its native sub-issues and starts them", () => {
+  const result = run(["start", "40", "--run", RUN], parentReplies(
+    { labels: ["in-progress"], assignees: ["me"], subIssues: 2 },
+    [],
+    { [SUB_ISSUES(40)]: [[issue(41), issue(43, { labels: ["in-progress", "user-story"] })]] },
+  ), MAX(3));
+  assert.deepEqual(result.err, []);
+  assert.equal(result.code, 0);
+  assert.deepEqual(result.out, [
+    "parent #40 is already claimed",
+    "started #41 in worktree issue-41: claude sonnet @ medium (medium role), dispatch ctx_54923f33c600",
+    "#43 waits: it is a parent, so it needs its own start",
+  ]);
+  assert.equal(result.calls.includes(PATCH(40)), false);
+});
+
+test("start on a parent that is not eligible claims nothing and starts no child", () => {
+  const result = run(["start", "40", "--run", RUN], parentReplies(
+    { labels: ["ready-for-agent", "user-story"], assignees: ["alice"] },
+    [child(41, 40)],
+  ));
+  assert.equal(result.code, 1);
+  assert.deepEqual(result.err, ["#40 is not eligible: assigned to alice"]);
+  assert.deepEqual(result.out, []);
+  assert.equal(result.calls.some((c) => c.includes("-X ") || c.startsWith("orca")), false);
 });

@@ -190,12 +190,20 @@ function orcaError(run: Result): string {
 
 type StartArgs = { id: string; role?: RoleName; note?: string; run?: string };
 
+type LeafArgs = { role?: RoleName; note?: string; run: string };
+
+// `start N`: a parent claims and starts its children, and any other issue starts as a leaf.
+function start(config: Config, tracker: Tracker, sh: Sh, cwd: string, args: StartArgs, deps: Deps): number {
+  const leaf = { role: args.role, note: args.note, run: args.run ?? readRun(cwd) };
+  const issue = tracker.view(args.id);
+  if (tracker.isParent(issue.id)) return startParent(config, tracker, sh, cwd, issue, leaf, deps);
+  return startLeaf(config, tracker, sh, cwd, issue, leaf, deps);
+}
+
 // Claim one eligible issue and start a supervised worker on it in worktree issue-N. An
 // issue that is not eligible, or a role on a harness start cannot launch yet, changes
 // nothing.
-function start(config: Config, tracker: Tracker, sh: Sh, cwd: string, args: StartArgs, deps: Deps): number {
-  const run = args.run ?? readRun(cwd);
-  const issue = tracker.view(args.id);
+function startLeaf(config: Config, tracker: Tracker, sh: Sh, cwd: string, issue: Issue, args: LeafArgs, deps: Deps): number {
   const ref = tracker.ref(issue.id);
   const why = whyNotEligible(tracker, issue, tracker.me());
   if (why !== null) {
@@ -222,7 +230,7 @@ function start(config: Config, tracker: Tracker, sh: Sh, cwd: string, args: Star
     "--agent", harness,
     "--model", model,
     "--effort", effort,
-    "--run", run,
+    "--run", args.run,
     "--json",
   ], { cwd });
   if (worker.code !== 0) {
@@ -235,6 +243,69 @@ function start(config: Config, tracker: Tracker, sh: Sh, cwd: string, args: Star
       + `dispatch ${orcaReply(worker).result?.dispatchId ?? "unknown"}`,
   );
   return 0;
+}
+
+// The slots `live`, the in-progress issues, take: one per issue that is not a parent.
+function slotsTaken(tracker: Tracker, live: Issue[]): number {
+  return live.filter((issue) => !tracker.isParent(issue.id)).length;
+}
+
+// Claim an eligible parent, which takes no worker and no slot.
+function claimParent(tracker: Tracker, parent: Issue, deps: Deps): void {
+  tracker.claim(parent.id);
+  deps.out(`claimed parent ${tracker.ref(parent.id)}: no worker, no slot`);
+}
+
+// `start P` on a parent: claim it, or keep my claim, then start each open child that is
+// eligible, in order, up to the free slots. A child that waits gets a line with its
+// reason. A child that is a parent itself waits for its own `start`.
+function startParent(config: Config, tracker: Tracker, sh: Sh, cwd: string, parent: Issue, args: LeafArgs, deps: Deps): number {
+  const ref = tracker.ref(parent.id);
+  const me = tracker.me();
+  const mine = parent.open && parent.labels.includes(IN_PROGRESS)
+    && (parent.assignees.length === 0 || parent.assignees.includes(me));
+  if (mine) {
+    deps.out(`parent ${ref} is already claimed`);
+  } else {
+    const why = whyNotEligible(tracker, parent, me);
+    if (why !== null) {
+      deps.err(`${ref} is not eligible: ${why}`);
+      return 1;
+    }
+    claimParent(tracker, parent, deps);
+  }
+  let free = config.max_workers - slotsTaken(tracker, tracker.list({ label: IN_PROGRESS }));
+  let code = 0;
+  for (const id of tracker.children(parent.id)) {
+    const child = tracker.view(id);
+    if (!child.open) continue;
+    const why = tracker.isParent(id) ? "it is a parent, so it needs its own start" : whyNotEligible(tracker, child, me);
+    if (why !== null || free <= 0) {
+      deps.out(`${tracker.ref(id)} waits: ${why ?? "no free slot"}`);
+      continue;
+    }
+    if (startLeaf(config, tracker, sh, cwd, child, args, deps) === 0) free--;
+    else code = 1;
+  }
+  return code;
+}
+
+// Close each in-progress parent, unassigned or mine, once it has children and every one
+// is closed. The comment lists each child's PR. The comment comes before the close, so a
+// replay before the close posts it again, and a replay after it finds no parent.
+function closeParents(tracker: Tracker, live: Issue[], deps: Deps): void {
+  for (const parent of live) {
+    if (!tracker.isParent(parent.id)) continue;
+    if (parent.assignees.length > 0 && !parent.assignees.includes(tracker.me())) continue;
+    const children = tracker.children(parent.id);
+    if (children.length === 0 || children.some((id) => tracker.view(id).open)) continue;
+    const lines = children.map((id) => {
+      const pr = tracker.prFor(id);
+      return `- ${tracker.ref(id)}: ${pr ? `PR ${pr.ref}` : "no PR"}`;
+    });
+    tracker.close(parent.id, `Every child of this story is closed, so the tick closes it.\n\n${lines.join("\n")}`);
+    deps.out(`${tracker.ref(parent.id)}: closed, every child is closed (${children.map((id) => tracker.ref(id)).join(", ")})`);
+  }
 }
 
 // The tick lock. A live tick holds it for seconds, so one older than five minutes is
@@ -465,30 +536,28 @@ function reported(task: Task | undefined): boolean {
   }
 }
 
-// The label that marks a parent. A parent takes no worker and no slot. Native children
-// are not read yet, so the label is the only marker.
-const PARENT = "user-story";
-
-// Start the ready queue's issues, in queue order, into the free slots: `max_workers` minus
-// the live in-progress issues that are not parents. An issue that is not eligible keeps
-// its place in the queue, and an issue whose worker does not start frees its slot again.
-function fill(config: Config, tracker: Tracker, sh: Sh, cwd: string, run: string, deps: Deps): void {
-  const taken = tracker.list({ label: IN_PROGRESS }).filter((issue) => !issue.labels.includes(PARENT)).length;
-  let free = config.max_workers - taken;
-  if (free <= 0) return;
+// Walk the ready queue in order. An eligible parent is claimed, with no worker and no
+// slot, so a full house still claims it. An eligible leaf starts while a slot is free:
+// `max_workers` minus the in-progress issues in `live` that are not parents. An issue
+// that is not eligible keeps its place in the queue, and an issue whose worker does not
+// start frees its slot again.
+function fill(config: Config, tracker: Tracker, sh: Sh, cwd: string, run: string, live: Issue[], deps: Deps): void {
+  let free = config.max_workers - slotsTaken(tracker, live);
   const queue = tracker.list({ label: READY });
   if (queue.length === 0) return;
   const me = tracker.me();
   for (const issue of queue) {
-    if (free <= 0) return;
-    if (issue.labels.includes(PARENT) || whyNotEligible(tracker, issue, me) !== null) continue;
-    if (start(config, tracker, sh, cwd, { id: issue.id, run }, deps) === 0) free--;
+    const parent = tracker.isParent(issue.id);
+    if ((!parent && free <= 0) || whyNotEligible(tracker, issue, me) !== null) continue;
+    if (parent) claimParent(tracker, issue, deps);
+    else if (startLeaf(config, tracker, sh, cwd, issue, { run }, deps) === 0) free--;
   }
 }
 
 // The precheck of the orca automation. It observes the workers, moves their issues'
-// state labels, then fills the free slots from the ready queue. It exits non-zero on
-// every path, so the automation's agent never runs.
+// state labels, closes each parent whose children are all closed, then fills the free
+// slots from the ready queue. It exits non-zero on every path, so the automation's agent
+// never runs.
 function tick(config: Config, tracker: Tracker, sh: Sh, cwd: string, run: string | undefined, deps: Deps): number {
   if (!takeLock(cwd)) {
     deps.err(`tick: another tick holds ${LOCK_PATH}, so this one exits`);
@@ -499,7 +568,9 @@ function tick(config: Config, tracker: Tracker, sh: Sh, cwd: string, run: string
     const seen = observe(sh, cwd, id);
     const handled = drain(tracker, sh, cwd, id, seen, deps);
     catchDeaths(tracker, sh, cwd, seen, handled, deps);
-    fill(config, tracker, sh, cwd, id, deps);
+    const live = tracker.list({ label: IN_PROGRESS });
+    closeParents(tracker, live, deps);
+    fill(config, tracker, sh, cwd, id, live, deps);
   } finally {
     rmSync(join(cwd, LOCK_PATH), { force: true });
   }
