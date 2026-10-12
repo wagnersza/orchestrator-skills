@@ -2,7 +2,7 @@
 // shape carries `issue_dependencies_summary`.
 
 import type { Sh } from "../sh.ts";
-import type { Filter, Id, Issue, Tracker } from "./tracker.ts";
+import { IN_PROGRESS, READY, type Filter, type Id, type Issue, type Tracker } from "./tracker.ts";
 
 type Raw = {
   number: number;
@@ -26,8 +26,8 @@ export function github(sh: Sh, cwd: string): Tracker {
   const seen = new Map<Id, Raw>();
   let login: string | undefined;
 
-  function gh(args: string[]): string {
-    const run = sh("gh", args, { cwd });
+  function gh(args: string[], input?: string): string {
+    const run = sh("gh", args, { cwd, input });
     if (run.code !== 0) {
       throw new Error(`gh ${args.join(" ")} failed: ${run.stderr.trim() || `exit ${run.code}`}`);
     }
@@ -73,6 +73,27 @@ export function github(sh: Sh, cwd: string): Tracker {
     };
   }
 
+  function me(): string {
+    login ??= gh(["api", "user", "--jq", ".login"]).trim();
+    return login;
+  }
+
+  // One PATCH that sets the labels and assignees whole, so a state swap is one write.
+  function edit(id: Id, change: (labels: string[], assignees: string[]) => [string[], string[]]): void {
+    const raw = fetch(id);
+    const [labels, assignees] = change(raw.labels.map((l) => l.name), raw.assignees.map((u) => u.login));
+    const body = JSON.stringify({ labels: [...new Set(labels)], assignees: [...new Set(assignees)] });
+    seen.set(id, JSON.parse(gh(["api", "-X", "PATCH", path(id), "--input", "-"], body)) as Raw);
+  }
+
+  function ref(id: Id): string {
+    return id.includes("#") ? id : `#${id}`;
+  }
+
+  function repoFlag(id: Id): string {
+    return id.includes("#") ? ` -R ${id.split("#")[0]}` : "";
+  }
+
   return {
     list(filter: Filter) {
       const label = encodeURIComponent(filter.label);
@@ -86,10 +107,8 @@ export function github(sh: Sh, cwd: string): Tracker {
       return issue(id, fetch(id));
     },
 
-    me() {
-      login ??= gh(["api", "user", "--jq", ".login"]).trim();
-      return login;
-    },
+    me,
+    ref,
 
     blockers(id) {
       const raw = fetch(id);
@@ -101,8 +120,27 @@ export function github(sh: Sh, cwd: string): Tracker {
       return [...new Set([...native, ...lines])];
     },
 
-    ref(id) {
-      return id.includes("#") ? id : `#${id}`;
+    claim(id) {
+      const login = me();
+      edit(id, (labels, assignees) => [[...labels.filter((l) => l !== READY), IN_PROGRESS], [...assignees, login]]);
+    },
+
+    unclaim(id) {
+      const login = me();
+      edit(id, (labels, assignees) => [
+        [...labels.filter((l) => l !== IN_PROGRESS), READY],
+        assignees.filter((a) => a !== login),
+      ]);
+    },
+
+    // JSON, because outside a terminal `--comments` prints the comments and not the body.
+    viewCommand(id) {
+      return `gh issue view ${id.split("#").pop()}${repoFlag(id)} --json title,body,comments`;
+    },
+
+    reviewStep(id, base, prSkill) {
+      return `Push, and open a PR (not a draft) against ${base}. Write its body with ${prSkill}, `
+        + `and put "Closes ${ref(id)}" in it.`;
     },
   };
 }
