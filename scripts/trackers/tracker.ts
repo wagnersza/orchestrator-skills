@@ -21,6 +21,9 @@ export type Pr = { ref: string; url: string; open: boolean };
 // Open issues that carry `label`, and closed ones too where `closed` is set.
 export type Filter = { label: string; closed?: boolean };
 
+// A label `install` makes sure the tracker has. `color` is six hex digits, with no `#`.
+export type Label = { name: string; color: string; description: string };
+
 export interface Tracker {
   list(filter: Filter): Issue[];
   view(id: Id): Issue;
@@ -57,6 +60,9 @@ export interface Tracker {
   children(id: Id): Id[];
   // Post `body`, then close the issue and drop every state label in one write.
   close(id: Id, body: string): void;
+  // Create each label the repo lacks, and leave the others as they are. Returns the
+  // names it created.
+  ensureLabels(labels: Label[]): string[];
 }
 
 // The state label a human sets to hand an issue to the loop.
