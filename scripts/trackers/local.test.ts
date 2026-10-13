@@ -81,7 +81,7 @@ class Orca {
   };
 
   private call(args: string[]): Result {
-    const flag = (name: string) => args[args.indexOf(name) + 1] ?? "";
+    const flag = (name: string) => (args.includes(name) ? args[args.indexOf(name) + 1] : "") ?? "";
     const [group, verb] = args;
     if (group === "worktree") {
       const name = flag("--worktree").replace(/^name:/, "");
@@ -94,7 +94,7 @@ class Orca {
     }
     if (verb === "run-show") return ok({ run: { id: RUN, coordinator_handle: "term_1" } });
     if (verb === "worker-start") {
-      const name = flag("--name");
+      const name = flag("--name") || flag("--worktree").replace(/^name:/, "");
       if (!this.worktrees.has(name)) {
         const path = join(this.dir, name);
         git(this.root, "worktree", "add", "-q", "-b", `ada/${name}`, path, flag("--base-branch"));

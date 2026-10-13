@@ -122,9 +122,12 @@ function pickRole(config: Config, issue: Issue, manual: RoleName | undefined): R
   return "medium";
 }
 
+// The line a resumed worker gets: its worktree already exists, so an earlier worker stopped here.
+const RESUMED = "This issue was resumed. Read the latest comments first: they answer why you stopped.";
+
 // The worker's whole prompt. orca adds its own preamble with the Task, the Dispatch and
 // the exact `worker_done` and `ask` commands. The worker reads the issue itself.
-function render(tracker: Tracker, issue: Issue, base: string, note: string | undefined): string {
+function render(tracker: Tracker, issue: Issue, base: string, note: string | undefined, resumed: boolean): string {
   const lines = [
     `You are working on issue ${tracker.ref(issue.id)}: "${issue.title}", in the orca worktree `
       + `${worktreeName(issue.id)}, on the branch it checked out.`,
@@ -139,6 +142,7 @@ function render(tracker: Tracker, issue: Issue, base: string, note: string | und
     "7. When you finish, send worker_done --outcome succeeded with the PR URL, or --outcome "
       + "failed with the reason.",
   ];
+  if (resumed) lines.push("", RESUMED);
   if (note) lines.push("", note);
   return lines.join("\n") + "\n";
 }
@@ -195,6 +199,14 @@ function noWorktree(run: Result): boolean {
   return orcaReply(run).error?.code === "selector_not_found";
 }
 
+// Whether orca still holds worktree `name`. Any failure but "not found" stops the start.
+function worktreeExists(sh: Sh, cwd: string, name: string): boolean {
+  const show = sh("orca", ["worktree", "show", "--worktree", `name:${name}`, "--json"], { cwd });
+  if (show.code === 0) return true;
+  if (noWorktree(show)) return false;
+  throw new Error(`orca worktree show ${name} failed: ${orcaError(show)}`);
+}
+
 type StartArgs = { id: string; role?: RoleName; note?: string; run?: string };
 
 // `from` reads the Run's coordinator handle on its first call, and only then.
@@ -243,15 +255,18 @@ function startLeaf(config: Config, tracker: Tracker, sh: Sh, cwd: string, issue:
   const name = worktreeName(issue.id);
   const repo = mainCheckout(sh, cwd);
   const from = args.from();
+  // A worktree issue-N that is still there means an earlier worker stopped on this issue.
+  // The new worker takes it over, branch and files kept. Orca rejects the creation flags on
+  // an existing worktree. A worktree that is gone gets a new one from base.
+  const resumed = worktreeExists(sh, cwd, name);
   tracker.claim(issue.id);
   const worker = sh("orca", [
     "orchestration", "worker-start",
-    "--spec", render(tracker, issue, config.base, args.note),
+    "--spec", render(tracker, issue, config.base, args.note, resumed),
     "--task-title", name,
-    "--worktree", "new-top-level",
-    "--name", name,
-    "--repo", `path:${repo}`,
-    "--base-branch", config.base,
+    ...(resumed
+      ? ["--worktree", `name:${name}`]
+      : ["--worktree", "new-top-level", "--name", name, "--repo", `path:${repo}`, "--base-branch", config.base]),
     "--agent", harness,
     "--model", model,
     "--effort", effort,

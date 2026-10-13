@@ -80,6 +80,12 @@ const SUB_ISSUES = (n: number) => `gh api --paginate --slurp repos/{owner}/{repo
 // A failed command, for a reply. A command that succeeds replies with its stdout.
 type Failure = { fail: Result };
 
+const GONE: Result = {
+  code: 1,
+  stdout: JSON.stringify({ ok: false, error: { code: "selector_not_found", message: "no worktree" } }),
+  stderr: "",
+};
+
 // A runner that answers each known command line with its recorded output, and fails
 // any other call, the way `gh` fails on a path it does not know. A key that ends in
 // " *" answers every line it prefixes. A reply that is a function gets the calls so far,
@@ -96,6 +102,8 @@ function fakeRunner(replies: Record<string, unknown>) {
     const key = line in replies
       ? line
       : Object.keys(replies).find((k) => k.endsWith(" *") && line.startsWith(k.slice(0, -1)));
+    // An unlisted worktree is gone, the way orca answers for a name it does not know.
+    if (key === undefined && line.startsWith("orca worktree show ")) return GONE;
     if (key === undefined) return { code: 1, stdout: "", stderr: `unexpected call: ${line}` };
     const raw = replies[key];
     const reply = typeof raw === "function" ? (raw as (calls: string[]) => unknown)(calls) : raw;
@@ -315,7 +323,7 @@ test("start claims an eligible issue in one write, then starts a claude worker o
   assert.deepEqual(result.out, [
     "started #10 in worktree issue-10: claude sonnet @ medium (medium role), dispatch ctx_54923f33c600",
   ]);
-  assert.deepEqual(result.calls.slice(0, 6), [VIEW(10), SCAN, ME, GIT, RUN_SHOW, PATCH(10)]);
+  assert.deepEqual(result.calls.slice(0, 7), [VIEW(10), SCAN, ME, GIT, RUN_SHOW, SHOW(10), PATCH(10)]);
   assert.deepEqual(patches(result), [{ labels: ["docs", "in-progress"], assignees: ["me"] }]);
   const argv = workerStart(result) ?? [];
   const spec = flag(argv, "--spec") ?? "";
@@ -334,7 +342,58 @@ test("start claims an eligible issue in one write, then starts a claude worker o
     "--from", COORDINATOR,
     "--json",
   ]);
-  assert.equal(result.calls.length, 7);
+  assert.equal(result.calls.length, 8);
+});
+
+const SHOW = (n: number) => `orca worktree show --worktree name:issue-${n} --json`;
+const RESUME_LINE = "This issue was resumed. Read the latest comments first: they answer why you stopped.";
+
+test("start resumes in the existing worktree issue-N: no creation flags, and the resume line", () => {
+  const result = run(
+    ["start", "10", "--run", "run_1"],
+    startReplies(10, {}, { [SHOW(10)]: receipt({ worktree: { path: "/wt/issue-10" } }) }),
+  );
+  assert.deepEqual(result.err, []);
+  assert.equal(result.code, 0);
+  const argv = workerStart(result) ?? [];
+  const spec = flag(argv, "--spec") ?? "";
+  assert.deepEqual(argv, [
+    "orca", "orchestration", "worker-start",
+    "--spec", spec,
+    "--task-title", "issue-10",
+    "--worktree", "name:issue-10",
+    "--agent", "claude",
+    "--model", "sonnet",
+    "--effort", "medium",
+    "--run", "run_1",
+    "--from", COORDINATOR,
+    "--json",
+  ]);
+  assert.ok(spec.endsWith(`7. When you finish, send worker_done --outcome succeeded with the PR URL, or --outcome failed with the reason.\n\n${RESUME_LINE}\n`), spec);
+});
+
+test("start on a missing worktree makes a new one from base, with no resume line", () => {
+  const result = run(["start", "10", "--run", "run_1"], startReplies(10));
+  const argv = workerStart(result) ?? [];
+  assert.equal(flag(argv, "--worktree"), "new-top-level");
+  assert.equal(flag(argv, "--base-branch"), "main");
+  assert.equal(flag(argv, "--spec")?.includes(RESUME_LINE), false);
+});
+
+test("start keeps the --note after the resume line", () => {
+  const result = run(
+    ["start", "10", "--run", "run_1", "--note", "Mind the cache."],
+    startReplies(10, {}, { [SHOW(10)]: receipt({ worktree: { path: "/wt/issue-10" } }) }),
+  );
+  assert.ok(flag(workerStart(result), "--spec")?.endsWith(`${RESUME_LINE}\n\nMind the cache.\n`));
+});
+
+test("start stops before the claim when orca cannot say whether the worktree exists", () => {
+  const result = run(["start", "10", "--run", "run_1"], startReplies(10, {}, {
+    [SHOW(10)]: { fail: { code: 1, stdout: "", stderr: "orca is not running" } },
+  }));
+  assert.equal(result.code, 1);
+  assert.equal(result.calls.includes(PATCH(10)), false);
 });
 
 test("start takes #N, and an issue already assigned to me keeps one assignee", () => {
