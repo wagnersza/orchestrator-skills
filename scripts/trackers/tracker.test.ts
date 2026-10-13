@@ -726,6 +726,7 @@ test("gitlab: start claims the issue and renders the merge request step", () => 
   const result = runMain(["start", "10", "--run", RUN], server, {
     "git rev-parse --path-format=absolute --git-common-dir": "/repo/.git\n",
     [ORCA("run-show", "--id", RUN)]: receipt({ run: { id: RUN, coordinator_handle: COORDINATOR } }),
+    "orca worktree show *": { fail: { code: 1, stdout: JSON.stringify({ error: { code: "selector_not_found" } }), stderr: "" } },
     "orca orchestration worker-start *": receipt({ dispatchId: "ctx_1" }),
   });
   assert.deepEqual(result.err, []);
