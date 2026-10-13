@@ -8,7 +8,8 @@ issue in its own worktree. See [`README.md`](README.md) for the loop and
 The script is `scripts/orchestrator.ts`, with `scripts/harnesses.ts` and
 `scripts/trackers/`. Node 22.18 or later runs it directly, with no build step and no
 runtime dependency. **Run `make quick` when you touch a TypeScript or Markdown file.** It
-runs the typecheck and the `node --test` suite.
+runs the typecheck and the `node --test` suite, and `scripts/links.test.ts` in that suite
+checks that every relative Markdown link resolves.
 
 ## Working here
 
