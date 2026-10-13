@@ -2,12 +2,6 @@
 
 Issues and PRDs for this repo live as GitHub issues. Use the `gh` CLI for all operations.
 
-**The reads the orchestrator flows make live in
-[`orchestrator/references/tracker-reads.md`](https://github.com/wagnersza/orchestrator-skills/blob/v1.0.0/orchestrator/references/tracker-reads.md)**,
-with the command for `gh` and the command for `glab`. That file also holds the rule that
-an exit code is checked before a parse. The conventions in this file stay the generic
-surface every skill uses, and a flow read gets no second copy here.
-
 ## Conventions
 
 - **Create an issue**: `gh issue create --title "..." --body "..."`. Use a heredoc for multi-line bodies.
@@ -21,303 +15,54 @@ Infer the repo from `git remote -v` — `gh` does this automatically when run in
 
 ## The parent edge
 
-**A child carries its parent in two representations, and one command writes both.** The
-native parent link is a sub-issue on the parent, and it is the one a human sees as a tree.
-The `## Parent` line in the child body is the portable one, because it is the only form
-that works on every tracker. Rationale:
-[`orchestrator/docs/adr/0065-the-parent-edge-is-two-representations.md`](../../orchestrator/docs/adr/0065-the-parent-edge-is-two-representations.md).
+**A child names its parent in a `## Parent` block in its body**, with the parent's
+`#number` on the next line:
+
+```markdown
+## Parent
+
+#348
+```
+
+The block lives in the body, so it needs no tracker feature. On GitHub, also add the child
+as a native sub-issue of the parent, so a human sees the tree. One command writes both:
 
 ```bash
 gh issue edit <child> --parent <parent> --body "<body, carrying its ## Parent block>"
 ```
 
-**One command, so it cannot write only one edge.** `--parent` sets the native link and
-`--body` carries the `## Parent` block, so there is no window in which the child is half
-linked. `Tracker.parent_link_argv` in `scripts/tracker.py` builds this argv, and it adds the
-`## Parent` block to a body that holds none. The body is a required argument there, because
-the command replaces the body.
+Run it once per child. A second run on a child that is already a sub-issue fails, and the
+body write fails with it.
 
-**This flag takes the parent's `#number`, and no database id.** That is what makes it the
-command to use. The REST route, `POST repos/<owner>/<name>/issues/<parent>/sub_issues`, needs
-the child's numeric database id from `gh api repos/<owner>/<name>/issues/<n> --jq .id`, which
-is neither the `#number` nor the `node_id`. It is the same trap the dependencies line below
-warns about, and the `--parent` flag has no part in it.
+The orchestrator reads both forms and counts a child once. An issue with the `user-story`
+label, a native sub-issue or a child that names it in `## Parent` is a parent.
 
-**Run it once per child, at the create.** A second run on a child that already carries the
-native link fails, and the whole command fails with it, so the body write does not land
-either. The error names the cause:
+## Blocking
 
-```
-GraphQL: Failed to add sub-issue #<child> to parent #<parent>. Issue may not contain duplicate sub-issues (addSubIssue)
-```
+A child lists what blocks it in a `Blocked by: #12, #14` line, or as GitHub's native issue
+dependencies. The orchestrator reads both. An issue is unblocked when every blocker is
+closed.
 
-**A failed link write is reported and is not a stop.** The session names the child and the
-parent, then carries on. The `## Parent` line already carries the meaning, so no
-`needs-human` label is written for it.
+## State labels
 
-**The child read unions the two, and it prefers neither.** One list read carries both edges:
+The orchestrator moves an issue through four state labels, and an issue holds at most one.
+The script writes every change, and a worker never does. A human writes only
+`ready-for-agent`: to queue an issue, or to resume one by swapping `needs-human` for it after
+answering in a comment. See [ADR 0003](../../orchestrator/docs/adr/0003-state-labels-are-the-only-state.md).
 
-```bash
-gh issue list --state all --limit 200 --json number,state,title,body,parent \
-  --jq '[.[] | select((.parent.number == <N>) or ((.body // "") | test("(?m)^## Parent\\s+#<N>\\b"))) | {number, state, title}]'
-```
+| Label | Meaning |
+|-------|---------|
+| `ready-for-agent` | Fully specified. The orchestrator may claim it. |
+| `in-progress` | Claimed. A worker is on it. |
+| `ready-for-human` | The worker is done and a PR is open for review. |
+| `needs-human` | The worker failed, asked a question, escalated, died, or finished with no PR. Its comment says why. |
+| *(closed)* | The PR is merged. The next tick removes the worker and the worktree. |
 
-**The union is by work item number, and a child that carries both counts once.** Where the
-two disagree, the child stays in the answer, so a wrong edge shows up as an extra child and
-never as a missing one. A preference order hides that disagreement. A child a maintainer
-linked by hand in the UI is a real child here, and that is the case a body scan alone missed.
-The full recipe, with the GitLab read beside it, is in
-[`orchestrator/references/tracker-reads.md`](https://github.com/wagnersza/orchestrator-skills/blob/v1.0.0/orchestrator/references/tracker-reads.md).
+Two more labels pick a role: `heavy` and `light`. The orchestrator's install creates all
+six labels where they are missing.
 
-**GitLab has no parent link between two issues, and this claims no parity.** Its issue links
-endpoint offers `relates_to`, `blocks` and `is_blocked_by` only, and its real hierarchy is an
-epic or a work item, which is a different object. So there the `## Parent` line is the whole
-edge, the write sets the description alone, and the native half of the union is always empty.
-
-## Work-state labels
-
-The states a work item moves through while an agent owns it. **One family, four values,
-and it never stacks — swap, never stack**
-(`gh issue edit <n> --add-label <new> --remove-label <old>`).
-The orchestrator reads these from here; its own config never redefines them.
-
-| State | Label | Meaning |
-|-------|-------|---------|
-| ready | `ready-for-agent` | Fully specified; a worker can start. Gates the ready queue. |
-| in progress | `in-progress` | A worker owns it. Set at spawn, before the prompt. Held through the whole adversarial-review loop. |
-| review | `to-review` | Work done, PR open, evidence posted. Waiting on a human. |
-| stopped | `needs-human` | A seam refused. **The one label that stops every tick.** |
-| done | *(closed)* | PR merged and the issue closed. |
-
-**A seam writes every value in this table, and no session moves an item from one value to
-another by hand.** The tick of an **Item automation** applies the transition it computed, in
-the process that read the labels. The removals and the addition are one command, so nothing
-can stack. The orchestrator's spawn claim runs that same writer under one named transition,
-and the close seam writes the last value as one step of its own transaction. Rationale:
-[`orchestrator/docs/adr/0056-the-tick-applies-the-transition-it-computed.md`](../../orchestrator/docs/adr/0056-the-tick-applies-the-transition-it-computed.md).
-
-**`ready-for-agent` has one other writer, and it writes it on create.** An inline
-item-writing flow (`/to-tickets`, `/to-spec`, `/triage`) writes that label on each item it
-files, beside the `## Touches` block and the parent edge it already writes. The label means
-the item is fully specified, and the flow that wrote the specification is the one that knows
-it. **The drag into the start column stays the maintainer's, and it stays the
-authorisation**, so the label alone still starts nothing. A `user-story` parent takes no
-work-state label at all. `hooks/refuse.py` exempts a create for this reason, and it still
-denies every `edit`. Rationale:
-[`orchestrator/docs/adr/0068-an-item-writing-flow-writes-the-start-label.md`](../../orchestrator/docs/adr/0068-an-item-writing-flow-writes-the-start-label.md).
-
-**`needs-human` carries one comment that says what the seam saw, and only the maintainer
-removes it.** Every tick reads it first and stays quiet, whatever the other facts say. So a
-paused item costs one cheap read a minute and moves nowhere.
-
-**Where an item sits inside an owned run is computed, and no label records it.** The
-**Position** entry of
-[`orchestrator/CONTEXT.md`](../../orchestrator/CONTEXT.md) holds that rule, and
-[`orchestrator/docs/adr/0053-one-work-state-label-and-a-computed-position.md`](../../orchestrator/docs/adr/0053-one-work-state-label-and-a-computed-position.md)
-records why the family that cached the same answer is gone.
-
-Triage roles (`needs-triage`, `needs-info`, `ready-for-human`, `wontfix`) are a
-separate vocabulary — see `triage-labels.md`. The layer 5 story gate writes two more, and
-both stack — see [Story gate labels](#story-gate-labels). The project board mirrors the
-work, and a seam writes the card at three moments — see [Project board](#project-board).
-
-Labels beyond GitHub's defaults don't exist in this repo yet. Create on first use:
-
-```bash
-gh label create in-progress --color FBCA04 --description "An agent worker owns this"
-gh label create to-review   --color 0E8A16 --description "Work done, PR open, awaiting human review"
-gh label create ready-for-agent --color 1D76DB --description "Fully specified, ready for an AFK agent"
-gh label create user-story  --color 5319E7 --description "A spec whose children are the implementable work"
-gh label create needs-human --color B60205 --description "A seam refused. Every tick stops until a human clears it"
-```
-
-## Story gate labels
-
-Two more families, and the layer 5 story gate writes both on every candidate it files. They
-answer different questions from the two families this file already names. So they **stack**
-with a work-state label, and neither one replaces a label of another
-family. Rationale:
-[`orchestrator/docs/adr/0048-the-story-gate-report-is-a-repo-artifact.md`](../../orchestrator/docs/adr/0048-the-story-gate-report-is-a-repo-artifact.md).
-
-**`refactor` is provenance, and not a state.** It answers where an item came from: a layer 5
-story gate filed it. Provenance never changes, so a session writes the label once. It never
-swaps the label and never removes it. One label is the whole family.
-
-| Provenance | Label | Meaning |
-|-------|-------|---------|
-| story gate | `refactor` | A layer 5 story gate filed this item. Written once, never swapped and never removed. |
-
-**The `rating:*` family says what the gate rated the candidate.** **Mutually exclusive inside
-the family — swap, never stack** (`gh issue edit <n> --add-label <new> --remove-label <old>`),
-the same rule the work-state family takes. It stacks with `refactor`,
-because the two answer different questions: where the item came from, and how the gate judged
-it.
-
-| Rating | Label | Meaning |
-|-------|-------|---------|
-| strong | `rating:strong` | The gate rated the candidate strong. Filed as a work item, so it wears `ready-for-agent` beside this label. |
-| worth exploring | `rating:worth-exploring` | The gate rated the candidate worth exploring. Sent to the backlog, so it wears no work-state label. |
-
-The gate files no item for a candidate it drops, so nothing wears either family.
-
-**Neither family reaches the board.** The three card writes happen at the three moments of
-the work, and no label of either family moves a card. That is one statement for both
-families.
-
-Create on first use:
-
-```bash
-gh label create refactor --color A2EEEF --description "A layer 5 story gate filed this. Provenance, not a state, so it stacks"
-gh label create rating:strong --color D4C5F9 --description "The layer 5 story gate rated this candidate Strong"
-gh label create rating:worth-exploring --color D4C5F9 --description "The layer 5 story gate rated this candidate Worth exploring"
-```
-
-## Project board
-
-This repo's issues are also cards on a GitHub Projects v2 board. **The board is read in one
-column and written in three, and the two sets do not overlap.** One question is asked of it:
-is this item's card in the start column. **What that answer authorises depends on the item's
-kind.** Three rows, and an item matches one:
-
-| Item kind | What authorises it |
-|---|---|
-| `user-story` | its card sits in the start column. **No label, ever.** |
-| child of an authorised story | it wears `ready-for-agent`, and every `## Blocked by` edge is closed. **Its own column is not read.** |
-| standalone leaf | it wears `ready-for-agent`, **and** its own card sits in the start column. |
-
-A story card authorises that story's whole run, so one drag starts every labelled,
-unblocked child. A child with no label stays stopped. On the standalone row both facts are
-necessary, and one fact on its own starts nothing. Rationale:
-[`orchestrator/docs/adr/0054-the-board-is-an-input-not-a-mirror.md`](../../orchestrator/docs/adr/0054-the-board-is-an-input-not-a-mirror.md)
-and
-[`orchestrator/docs/adr/0062-a-story-card-authorises-its-run.md`](../../orchestrator/docs/adr/0062-a-story-card-authorises-its-run.md),
-which narrows
-[`orchestrator/docs/adr/0045-a-story-start-is-automatic-under-two-roofs.md`](../../orchestrator/docs/adr/0045-a-story-start-is-automatic-under-two-roofs.md).
-
-Two coordinates, the name of the start column, and the three columns a seam writes:
-
-| What | Value |
-|------|-------|
-| Project | <https://github.com/users/wagnersza/projects/6> — `--owner wagnersza`, number `6` |
-| Start column | `To do`, between `Ready` and `In progress` |
-| The spawn claim writes | `In progress` |
-| The finish writes | `In review` |
-| The close writes | `Done`, after the teardown |
-
-**This file records every column by name, and never as an option id.** A write needs the
-option id, and the seam resolves that id from the name at run time: the project's own id,
-the `Status` field id, and the option id of the name. So the name is the whole coordinate
-here, a reader compares it to the `Status` name the board answers, and a renamed column is
-one edit in this file. Rationale:
-[`orchestrator/docs/adr/0067-the-board-is-a-mirror-at-three-moments.md`](../../orchestrator/docs/adr/0067-the-board-is-a-mirror-at-three-moments.md).
-
-**A repo on GitLab has a board too, and a column is a label there rather than a card.** Its
-coordinates are their own table, and the rest of this section holds for both trackers. See
-[The GitLab board](#the-gitlab-board).
-
-**`Backlog`, `Ready` and the start column are the maintainer's own lanes, and nothing
-writes one.** The three writes above and the one read never touch the same column, so a card
-the loop wrote and the maintainer drags back stays where they put it.
-
-**A `To do` card is not promoted to the `ready-for-agent` label.** No pass reads one fact
-and writes the other, in either direction, and that holds for a story card too. The two
-facts stay separate. That is what keeps `Ready` the maintainer's own lane. An item dragged
-to `Ready` gains no label, and a labelled standalone leaf left in `Ready` starts nothing. A
-labelled child of an authorised story does start there, because a child's own column is
-never read.
-
-**A filed item carries the label already.** An inline item-writing flow writes
-`ready-for-agent` as it files the item, per the **Work-state labels** section above. So a
-standalone leaf waits in `Backlog` for one drag, and a child of a story the maintainer
-already dragged is startable as soon as it is filed.
-
-### The one filtered call
-
-```bash
-gh project item-list 6 --owner wagnersza --format json --limit 500 --query '-status:Done'
-```
-
-The reader walks the answer and matches the card whose `content.number` is the item. The
-`Status` name on that card is the answer, and an item with no card answers nothing.
-
-**The filter is what keeps the read whole, and it names no column.** `-status:Done` is every
-card that is not finished, which is every card a gate can act on. This board holds 188 cards
-and answers 54 rows, so the limit above is ten times the answer. A card in any lane still
-answers its own `Status` name, because the filter removes only the finished cards. An
-unfiltered read of 100 cards was the fault this closes: a new card sits at the end of the
-board, so every new item read as an item with no card.
-
-**A card the read never returned is not a missing card.** Where the answer holds exactly as
-many cards as `--limit` asked for, that answer can be one page of a longer board, so the
-read fails instead of answering. A read that cannot answer must never answer "no", and the
-tick reads that board as unreadable.
-
-**The filter needs github.com, or GitHub Enterprise Server 3.20 and later.** An older host
-answers an error, so the read fails and the tick reads the board as unreadable. No older
-host answers "no card".
-
-**A card with no status, an item with no card, and a repo with no board all read the same
-way**, so none of the three is an error. A card the read never returned is a fourth case,
-and that sentence does not cover it: it reads as unreadable, and never as a missing card. A
-card in `Done` is outside the filter, so it reads as an item with no card. No gate acts on
-either one, because `Done` is not the start column.
-
-The token needs the `project` scope (`gh auth refresh -s project`). That scope covers the
-read and the three writes. **A token with `read:project` alone answers every read and fails
-every card write**, and a failed card write is reported and stops nothing, so the symptom is
-a stale card rather than a stopped loop.
-
-**A closed item also reaches `Done` through the board's own built-in workflow.** GitHub
-Projects ships an **item closed to Done** workflow, and the maintainer enables it in the
-project settings. Nothing in this repo can switch it on, because that switch is not in the
-API. `/orchestrator-setup` reads whether it is on and says so. **Keep it on**: it and the
-close's own write are safe beside each other, because the seam reads the card before it
-writes and moves nothing that already sits in `Done`.
-
-**A drag is intent, in every column.** No pass reads a card and writes it back, so a card
-stays where the maintainer put it. The three writes above happen at the moment the work
-moves, and none of them is a repair pass. A take-back is the maintainer removing
-`ready-for-agent`, or writing `needs-human` with a comment that says why.
-
-**A repo with no board leaves this section out entirely.** The board read then asks
-nothing, no card write is even attempted, the `ready-for-agent` label alone is the whole
-gate, and that absence is never an error.
-
-### The GitLab board
-
-**On GitLab a column is a scoped label on the issue, and there is no card.** A scoped label
-is a label whose name carries a scope and a value, `status::to do`. GitLab keeps one label
-per scope on an item, so a column move is one label write and the old value comes off
-without being named. Rationale:
-[`orchestrator/docs/adr/0070-a-board-column-is-a-card-or-a-scoped-label.md`](../../orchestrator/docs/adr/0070-a-board-column-is-a-card-or-a-scoped-label.md).
-
-The scope prefix, and the four column names:
-
-| What | Value |
-|------|-------|
-| Scope prefix | `status::` |
-| Start column | `status::to do`, which reads as `to do` |
-| In progress | `status::in progress` |
-| In review | `status::in review` |
-| Done | `status::done` |
-
-**GitLab needs no project number and no owner.** Those two coordinates address a Projects v2
-board, and GitLab has no such object. So a column name is the whole coordinate here, because
-the label is the column. A renamed column is one edit in this table, the same as it is on the
-other tracker.
-
-**The read costs no call of its own.** Every label on an item arrives with the item read the
-adapter already makes, and the column is one of those labels. So there is no board list, no
-page to fill and no page-limit refusal. `scoped_column` in `scripts/tracker.py` is that
-filter, and it answers the label with the prefix stripped.
-
-**A board built on plain column labels reads as unreadable.** A plain label carries no
-scope, so GitLab swaps nothing and two column labels can sit on one item at once. Neither
-one is then the column. The adapter refuses, the message names the prefix it expected, and
-the item stays where it is. Scope the column labels, or name no board at all.
-
-**Only the read is built.** The three write moments of this section are the GitHub half
-today. ADR 0070 covers the column read, and the GitLab column write is a change of its own.
+Triage roles (`needs-triage`, `needs-info`, `wontfix`) are a separate vocabulary — see
+`triage-labels.md`.
 
 ## Pull requests as a triage surface
 

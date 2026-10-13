@@ -1,172 +1,142 @@
 # orchestrator-skills
 
-Skills for driving multi-agent, multi-tool development work. An **orchestrator**
-session coordinates **worker** sessions: each worker is a
-`(tool, harness, model)` triple implementing one work item in its own worktree.
+Label an issue, and an agent ships a PR for it. This Claude Code plugin runs agent workers
+on your tracker's `ready-for-agent` issues. Each worker gets its own worktree and runs on
+the harness and model that fit the job. You review the PR, and you say when to merge.
 
-- **`orchestrator/`** — pick the next ready work item, spawn a worker, prompt and
-  monitor it, run cross-vendor adversarial review on demand, and close finished
-  work. Tool-agnostic (orca / cmux / herdr), harness-agnostic (claude / codex /
-  pi / copilot / cursor), and works over any tracker the mattpocock skills
-  support (GitHub / GitLab / local markdown).
-- **`orchestrator-setup/`** — one-time per-repo setup: pick tool/harness/model,
-  the review policy, and the project recipe; check + install dependencies; write
-  the config.
-- **`playwright-cli/`** — the only sanctioned browser surface for a worker (used
-  for UI evidence). The skill body ships here; the binary installs from npm.
+```
+you label ready-for-agent ─▶ tick claims it ─▶ worker opens a PR ─▶ you review ─▶ "merge N"
+                                                     │
+                                         stuck? ─▶ needs-human, with the worker's question
+```
 
-## Concepts
+## Why use it
 
-| Term | Meaning |
-|------|---------|
-| **Tool** | Workspace manager that cuts a worktree, opens a terminal, sends keystrokes — orca / cmux / herdr. |
-| **Harness** | Agent CLI in the worker terminal — claude / codex / pi / copilot / cursor. Owns the yolo flag, the `--model` flag, and how effort is expressed. |
-| **Model** | Frontier model + **vendor** (anthropic / openai) + **effort**. Never hardcoded — resolved per role. |
-| **Effort** | How much the model *thinks*: `low`…`max`, default `high`. Some harnesses clamp the top (codex → `high`). |
-| **Role** | The class of job that picks the `(model, effort)` pair — **heavy** (a contract, a schema, a code seam, three or more files, or an open decision → strongest @ `high`), **medium** (the ordinary work item, and the default → cheaper @ `medium`), **light** (one file, criteria fully enumerated, no open decision → cheaper @ `low`), **review** (cross-vendor @ `high`). |
-| **Cost profile** | A preset of all three role pairs — **conservative** / **balanced** (default) / **max-capability**. Setup asks this instead of interrogating role-by-role. Table + per-MTok prices in [`models.md`](https://github.com/wagnersza/orchestrator-skills/blob/v1.0.0/orchestrator/references/models.md). |
-| **Worker** | A `(tool, harness, model)` triple on one work item. |
-| **Adversarial review** | Optional review by a second worker on a **different-vendor** model (e.g. implement opus-5, review gpt-5.6). Prompted for **coverage**, not self-filtering. |
-| **Prose deliverable** | Text a worker routes through `simple-english` before it commits — the markdown in its diff, its review note, its PR body, and any string a Python file prints. Code, identifiers, paths, commands and link targets stay byte-identical. |
-| **Commit slice** | One commit on a worker's branch: one logical change, with the branch self-consistent at that commit (every cross-reference it adds resolves inside it). Committed as soon as the slice is done, not batched to the end. A trivial item is one commit. `main` still squash-merges to one commit per item ([ADR 0013](orchestrator/docs/adr/0013-workers-commit-in-contextualised-slices.md)). |
-| **Close transaction** | The five steps that finish a work item, in one fixed order, once its pull request is merged. They keep the numbers 4 to 8 they held when there were eight. `scripts/close_item.py` owns them, it refuses rather than warns, and its default invocation mutates nothing. The tick reads the merge and runs the seam in its own process, so no verb starts a close ([ADR 0015](orchestrator/docs/adr/0015-close-is-a-deterministic-transaction.md), [ADR 0057](orchestrator/docs/adr/0057-the-merge-is-the-second-act.md)). |
-
-Full glossary: [`orchestrator/CONTEXT.md`](orchestrator/CONTEXT.md). Design
-rationale: [`orchestrator/docs/adr/`](orchestrator/docs/adr/).
+- **Waiting costs nothing.** An orca automation checks the workers once a minute, and that
+  check runs as a precheck that never starts an agent. No session polls, and no tokens burn
+  while the workers work. Your own session answers a verb and goes idle.
+- **Your session stays yours.** "work on 42" returns at once. You keep talking about
+  something else while three workers build three issues in parallel.
+- **The right model for each issue, picked with no agent.** Each issue runs on a heavy,
+  medium or light role, and each role is its own harness, model and effort. A label or the
+  issue's `## Touches` count picks the role, so a one-line fix does not pay for your
+  strongest model.
+- **Any of five agent CLIs:** claude, codex, cursor, pi and copilot. Mix them per role, for
+  example opus for heavy work and codex for light work.
+- **Your tracker is the dashboard.** GitHub, GitLab or local markdown. An issue's state is
+  one label on the tracker, and nothing else. There is no state file to drift and no
+  database. A crash loses nothing, and the next tick picks up where the last one stopped.
+- **A stuck worker stops and asks.** A worker that fails, gives up or asks a question moves
+  its issue to `needs-human`, with its own words as a comment. Nothing re-prompts it into a
+  loop. You answer on the issue, relabel it, and a fresh worker resumes in the same
+  worktree.
+- **A whole story at once.** Label each child of a story, and each one starts as soon as
+  nothing blocks it, so the story runs in dependency order. Label the parent too, and the
+  tick closes it when the last child closes.
+- **You stay in charge.** You decide what is ready, you review every PR, and nothing merges
+  until you say "merge N" or merge it on the tracker yourself.
+- **Small.** One TypeScript script with no runtime dependency, two skills, five ADRs.
 
 ## Install
 
-Ships as a native [Claude Code plugin](https://code.claude.com/docs/en/plugins),
-same model as the mattpocock skills. Install the plugin, then run one setup
-command — **setup installs every other dependency for you**.
+You need:
 
-```
-/plugin marketplace add wagnersza/orchestrator-skills
-/plugin install orchestrator-skills@wsza
-```
+- Claude Code, for the orchestrator session.
+- The Orca app, which ships the `orca` CLI. The workers and the tick run in Orca.
+- Node 22.18 or later.
+- `gh` for a GitHub tracker, or `glab` for GitLab. A local markdown tracker needs neither.
 
-or from your shell:
+Setup checks each of these and installs what it can.
+
+Install the plugin from your shell:
 
 ```bash
 claude plugin marketplace add wagnersza/orchestrator-skills
 claude plugin install orchestrator-skills@wsza
 ```
 
-That's the only manual install. Everything else — the tracker skills, the tool
-and harness CLIs, the MCP — is handled by setup below.
-
-### Dependencies (installed for you by setup)
-
-`/orchestrator-setup` **installs** every missing dependency your chosen config
-needs — it runs the install commands itself, pausing only where it genuinely
-can't automate (an unpinned installer, a login, or the local-only MCP). Full
-catalog with check + install commands:
-[`orchestrator/references/requirements.md`](https://github.com/wagnersza/orchestrator-skills/blob/v1.0.0/orchestrator/references/requirements.md).
-
-**Always:** git · `mattpocock-skills` plugin (tracker config + ticket
-conventions) · [`prompt-improver`](https://github.com/wagnersza/prompt-improver)
-plugin (owns all worker/review prompt composition) ·
-[`simple-english`](https://github.com/AminBlg/SimpleEnglish) skill (owns all
-writing rules for prose deliverables) · `ponytail` plugin · `playwright-cli`
-(`npm install -g @playwright/cli`, plus `npx playwright install` for the browser
-binaries) · `codebase-memory-mcp` · a tracker CLI (`gh`/`glab`, or none for local
-markdown).
-
-`playwright-cli` is **the only sanctioned browser surface for a worker**, and only
-its skill body ships in this plugin. The binary is an npm global package, and the
-browser binaries it drives are a second install. A browser MCP that a worker's
-session happens to expose is not a sanctioned surface, whichever one it is. Tool
-availability is not tool endorsement
-([ADR 0012](orchestrator/docs/adr/0012-playwright-cli-is-the-only-browser-surface.md)).
-Steps, verification and failure modes:
-[`playwright-cli/references/installation.md`](https://github.com/wagnersza/orchestrator-skills/blob/v1.0.0/playwright-cli/references/installation.md).
-
-`simple-english` is the one dependency that is not a Claude plugin. It installs
-with the `skills` CLI — `npx skills add AminBlg/SimpleEnglish --global --all` — so
-it needs `node`. A worker runs the prose it changed through that skill before it
-commits, and the orchestrator applies the skill to its own reports. This repo
-restates no rule of the standard, only what counts as a prose deliverable
-([ADR 0011](orchestrator/docs/adr/0011-delegate-technical-writing-to-simple-english.md)).
-
-`prompt-improver` also ships as a plugin now — `claude plugin marketplace add
-wagnersza/prompt-improver && claude plugin install prompt-improver@prompt-improver`.
-If you already have it as a git clone under `~/.claude/skills/`, that still works
-and needs no migration; the skill body is identical either way.
-
-**Your chosen tool:** `orca` (its own CLI; needs `orca open` running) / `cmux` /
-`herdr` — fill in `orchestrator/references/tools/<tool>.md` for cmux/herdr first.
-
-**Your chosen harness(es):** the impl harness, plus the review harness if review
-is on. Cross-vendor review needs **both** CLIs installed **and** authenticated.
-
-**Per recipe (optional):** `sqlite3` / `node` / `uv` if `db_gate` or `setup_cmd`
-need them.
-
-### Vendor authentication
-
-Each harness CLI must be logged in for its vendor; a cross-vendor review setup
-needs **both** an Anthropic-authed and an OpenAI-authed harness. Setup runs the
-login where it can and tells you the exact command otherwise — it doesn't manage
-keys itself.
-
-## Setup (run once per repo — zero touch)
-
-Point Claude at the repo and run:
+Or from inside Claude Code:
 
 ```
-/orchestrator-setup
+/plugin marketplace add wagnersza/orchestrator-skills
+/plugin install orchestrator-skills@wsza
 ```
 
-It explores the repo, ensures the tracker config exists (calls
-`/setup-matt-pocock-skills` if missing), asks you one choice at a time
-(tool → harness → models+effort per role → yolo → review → recipe → repo), then
-**installs every missing dependency itself** (plugins, CLIs, MCP) and writes
-`docs/agents/orchestrator.md` plus a one-line pointer in `CLAUDE.md`/`AGENTS.md`.
-The only time it stops for you is a login or an installer it can't run
-unattended — it hands you the exact command.
+## Set up a repo
 
-The config is human-editable markdown — edit it directly later; re-run setup only
-to switch tools/harnesses. Worked example:
-[`orchestrator/references/examples/run.md`](https://github.com/wagnersza/orchestrator-skills/blob/v1.0.0/orchestrator/references/examples/run.md).
+Run setup once per repo. A re-run is always safe: it keeps what exists and adds only what
+is missing.
 
-## Use
+1. **Open the repo in Orca**, and start Claude Code in an Orca terminal, in the repo's main
+   checkout. Setup creates an orca Run, and orca accepts that only from an Orca terminal.
+2. **Say "set up the orchestrator".** The `orchestrator-setup` skill asks one question at a
+   time, each with a recommended answer:
+   - **The tracker.** It reads `docs/agents/issue-tracker.md`. If that file is missing, it
+     asks you to run `/setup-matt-pocock-skills` first.
+   - **A cost profile**, which fills all three roles at once:
 
-The orchestrator reads `docs/agents/orchestrator.md` on every action. Trigger
-phrases:
+     | Profile | heavy | medium | light |
+     |---|---|---|---|
+     | **balanced** (recommended) | opus @ high | sonnet @ medium | sonnet @ low |
+     | **economy** | sonnet @ high | sonnet @ low | haiku @ low |
+     | **quality** | opus @ xhigh | opus @ high | sonnet @ medium |
 
-| Say | Does |
-|-----|------|
-| **what next** / what's ready | Resolve the ready queue; present startable items. |
-| **implement #N** / start work on X | Spawn a worker for the item (worktree + harness + prompt + checklist). |
-| **work on #N, max K** | Batch-spawn every unblocked child of #N, capped at K. |
-| **what are the workers doing** | Monitor via checklist files + terminal idle state. |
-| **review #N adversarially** | Spawn a cross-vendor reviewer. It posts one comment for you to read, and nothing parses it. |
-| **close task #N** / it's done | Report where the item is. A close needs no verb: merge the pull request, and the next tick runs the transaction. |
+     Then you can change the harness, model or effort of any one role.
+   - **`max_workers`**, how many workers run at once. The default is 3.
+   - **The base branch** each worktree starts from and each PR targets.
+3. **Setup installs the rest.** It installs and checks the tracker CLI and each harness CLI
+   the roles name. It installs the mattpocock skills each worker uses (`implement`, `tdd`,
+   `code-review`, `diagnosing-bugs` and `pr`) into every one of those harnesses. A harness
+   that needs a login gets the exact command to run.
+4. **Setup writes the config and starts the loop.** It writes `docs/agents/orchestrator.md`,
+   then runs the script's `install`. That creates the state labels, the orca Run, the
+   `orchestrator-tick` automation and one proof tick. The install ends with
+   `the precheck works` when the loop is live.
 
-Each worker keeps a file-based **checklist** (`.orchestrator/checklist-<item>.md`,
-gitignored) it ticks as it completes each contract step; the orchestrator reads it
-to track progress and catch a worker that stalls before opening the PR/MR. This
-replaces claude-only `TodoWrite` so it works across every harness.
+This repo's own config is [`docs/agents/orchestrator.md`](docs/agents/orchestrator.md).
+Edit its JSON block by hand, or re-run setup to change it.
 
-The merge decision is always a human one, and nothing here ever merges. You merge on the
-tracker, and the next tick reads that merge and runs a **Close transaction**: the item
-closes, and its worktree and its schedule go. So nothing is typed
-([ADR 0057](orchestrator/docs/adr/0057-the-merge-is-the-second-act.md)).
+## Use it
 
-## Layout
+Label an issue `ready-for-agent`, then talk to your Claude session:
+
+| Say | What happens |
+|---|---|
+| "work on 42" | Claims #42 now and starts its worker. On a parent, starts each eligible child. |
+| "status" | The claimed issues with their state, role, harness and PR, then the ready queue, then why each other issue waits. |
+| "merge 42" | Merges the PR of a `ready-for-human` issue, then removes its worker and worktree and closes it. |
+| "set up the orchestrator" | Runs setup again. |
+
+You can also say nothing: the next tick claims each eligible issue on its own, up to
+`max_workers`.
+
+An issue moves through four state labels, and only the script writes them:
+
+| Label | Means | Who moves it on |
+|---|---|---|
+| `ready-for-agent` | Ready to start. | The tick or "work on N" claims it. |
+| `in-progress` | A worker is on it. | The worker's report. |
+| `ready-for-human` | A PR is open for your review. | You: "merge N", or a merge on the tracker. |
+| `needs-human` | The worker failed, asked or died. Its comment says why. | You: answer on the issue, then relabel it `ready-for-agent`. |
+
+Add the `heavy` or `light` label to an issue to pick its role, or say "work on 42 as heavy".
+
+## How it works
 
 ```
-orchestrator/
-  SKILL.md · CONTEXT.md
-  docs/adr/                     # design decisions
-  references/
-    requirements.md            # deps: check + install
-    models.md                  # model -> vendor -> prompt-improver profile
-    checklist.template.md
-    tools/{_operations,orca,cmux,herdr}.md
-    harnesses/{claude,codex,pi,copilot,cursor}.md
-    examples/run.md
-orchestrator-setup/
-  SKILL.md · orchestrator.template.md
-playwright-cli/
+orchestrator/            the orchestrator skill, its glossary and ADRs
+orchestrator-setup/      the setup skill and the config template
+scripts/orchestrator.ts  install · tick · start · status · merge
+scripts/harnesses.ts     how each harness starts
+scripts/trackers/        github · gitlab · local
 ```
+
+The terms are in [`orchestrator/CONTEXT.md`](orchestrator/CONTEXT.md). The five decisions
+the loop rests on are in [`orchestrator/docs/adr/`](orchestrator/docs/adr/). `make quick`
+runs the typecheck and the test suite.
+
+## v1
+
+v1 had cmux and herdr, a per-item automation, quality-gate layers, adversarial review and
+65 ADRs. It is the [`v1.0.0`](https://github.com/wagnersza/orchestrator-skills/tree/v1.0.0)
+tag.

@@ -1,7 +1,7 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "wsza",
-  "description": "Multi-agent orchestration skills — tool/harness/model agnostic worker coordination.",
+  "description": "Run agent workers over a tracker's issues, from one orca automation per repo.",
   "owner": {
     "name": "wagnersza",
     "url": "https://github.com/wagnersza"
@@ -10,14 +10,13 @@
     {
       "name": "orchestrator-skills",
       "source": "./",
-      "description": "Orchestrate agent worker sessions across any workspace tool (orca/cmux/herdr), harness (claude/codex/pi/copilot/cursor), and frontier model — with zero-touch setup and optional cross-vendor adversarial review.",
+      "description": "Run agent workers over a tracker's ready-for-agent issues: one orca automation per repo ticks every minute at zero tokens, each worker runs on the harness and model its role names, and the tracker's state labels are the only state.",
       "category": "engineering",
       "keywords": [
         "orchestration",
         "multi-agent",
         "worktree",
-        "orca",
-        "adversarial-review"
+        "orca"
       ]
     }
   ]
