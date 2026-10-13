@@ -886,10 +886,47 @@ function shellQuote(word: string): string {
   return `'${word.replaceAll("'", `'\\''`)}'`;
 }
 
-// The precheck: the tick, with node, the script and the repo as absolute paths, because
-// orca runs it later in a shell that saw no assignment.
+// The gitignored shell file the precheck runs. orca and a hand run read the same file.
+const TICK_PATH = join(".orchestrator", "tick.sh");
+
+// The tick file: the tick, with node, the script and the repo as absolute paths, because
+// orca runs it later in a shell that saw no assignment. One word per line, so no line
+// quotes more than one level deep.
+function tickFileFor(root: string): string {
+  return [
+    "# The precheck of the orchestrator-tick automation. orca runs this file once a minute,",
+    "# and `sh .orchestrator/tick.sh` runs the same tick by hand, with the same exit code.",
+    "# install writes it, so a re-run of install puts back any edit.",
+    "",
+    "# The main checkout, where the tick reads its config and its Run.",
+    `cd ${shellQuote(root)} || exit 1`,
+    "",
+    "# node, the script and the verb, one per line. exec hands on the tick's exit code.",
+    `exec ${shellQuote(process.execPath)} \\`,
+    `  ${shellQuote(SCRIPT)} \\`,
+    "  tick",
+    "",
+  ].join("\n");
+}
+
+// The precheck: one line that runs the tick file by absolute path.
 function precheckFor(root: string): string {
-  return `cd ${shellQuote(root)} && ${shellQuote(process.execPath)} ${shellQuote(SCRIPT)} tick`;
+  return `sh ${shellQuote(join(root, TICK_PATH))}`;
+}
+
+// The tick file, written where it is missing and rewritten where it differs, so a new
+// node path or a moved plugin needs no change to the automation.
+function ensureTickFile(cwd: string, deps: Deps): void {
+  const path = join(cwd, TICK_PATH);
+  const text = tickFileFor(cwd);
+  const found = existsSync(path) ? readFileSync(path, "utf8") : undefined;
+  if (found === text) {
+    deps.out(`tick file ${TICK_PATH}: present`);
+    return;
+  }
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, text);
+  deps.out(`tick file ${TICK_PATH}: ${found === undefined ? "created" : "repaired"}`);
 }
 
 type Automation = {
@@ -969,13 +1006,14 @@ function ensureAutomation(sh: Sh, cwd: string, deps: Deps): void {
   deps.out(`automation ${AUTOMATION}: repaired (${found.id}), precheck ${precheck}`);
 }
 
-// `install`: labels, then the Run, then the automation, then one tick through the exact
-// precheck string, as proof it runs. Each step that finds its part present creates
+// `install`: labels, then the Run, then the tick file, then the automation, then one tick
+// through the exact precheck string, as proof it runs. Each step that finds its part present creates
 // nothing, so a re-run repairs a broken install and duplicates nothing.
 function install(config: Config, tracker: Tracker, sh: Sh, cwd: string, deps: Deps): number {
   const created = new Set(tracker.ensureLabels(labelsFor(config)));
   for (const label of labelsFor(config)) deps.out(`label ${label.name}: ${created.has(label.name) ? "created" : "present"}`);
   ensureRun(sh, cwd, deps);
+  ensureTickFile(cwd, deps);
   ensureAutomation(sh, cwd, deps);
   // The tick exits 1 on every path. Any other code, or an `error:` line, is a failure.
   const proof = sh("sh", ["-c", precheckFor(cwd)], { cwd });

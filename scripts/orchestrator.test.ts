@@ -1803,9 +1803,38 @@ const PROOF = "sh -c *";
 const SCRIPT = join(import.meta.dirname, "orchestrator.ts");
 const EVERY = ["ready-for-agent", "in-progress", "needs-human", "ready-for-human", "heavy", "light"];
 
-// The precheck install writes for the repo at `cwd`.
+// The precheck install writes for the repo at `cwd`: one line that names the tick file.
 function precheck(cwd: string): string {
-  return `cd '${cwd}' && '${process.execPath}' '${SCRIPT}' tick`;
+  return `sh '${cwd}/.orchestrator/tick.sh'`;
+}
+
+// The tick file install writes for the repo at `cwd`.
+function tickFile(cwd: string): string {
+  return [
+    "# The precheck of the orchestrator-tick automation. orca runs this file once a minute,",
+    "# and `sh .orchestrator/tick.sh` runs the same tick by hand, with the same exit code.",
+    "# install writes it, so a re-run of install puts back any edit.",
+    "",
+    "# The main checkout, where the tick reads its config and its Run.",
+    `cd '${cwd}' || exit 1`,
+    "",
+    "# node, the script and the verb, one per line. exec hands on the tick's exit code.",
+    `exec '${process.execPath}' \\`,
+    `  '${SCRIPT}' \\`,
+    "  tick",
+    "",
+  ].join("\n");
+}
+
+// A repo that a past install left with `run` saved and the current tick file.
+function installed(run: string): string {
+  const cwd = withRunFile(run);
+  writeFileSync(join(cwd, ".orchestrator", "tick.sh"), tickFile(cwd));
+  return cwd;
+}
+
+function writtenTickFile(cwd: string): string {
+  return readFileSync(join(cwd, ".orchestrator", "tick.sh"), "utf8");
 }
 
 // An `orca automations list` row, shaped like the one orca printed for the scratch repo.
@@ -1863,9 +1892,11 @@ test("install on a bare repo creates the labels, the Run and the automation, the
     "label heavy: created",
     "label light: created",
     "run run_new: created, saved to .orchestrator/run.json",
+    "tick file .orchestrator/tick.sh: created",
     `automation orchestrator-tick: created (auto_new), precheck ${precheck(cwd)}`,
     "tick: exit 1, the precheck works",
   ]);
+  assert.equal(writtenTickFile(cwd), tickFile(cwd));
   assert.deepEqual(
     result.calls.flatMap((line, i) => (line === LABEL_POST ? [(JSON.parse(result.inputs[i] ?? "") as { name: string }).name] : [])),
     EVERY.slice(1),
@@ -1889,7 +1920,7 @@ test("install on a bare repo creates the labels, the Run and the automation, the
 });
 
 test("a second install finds every part present and creates nothing", () => {
-  const cwd = withRunFile('{ "run": "run_1" }\n');
+  const cwd = installed('{ "run": "run_1" }\n');
   const result = run(["install"], installReplies(
     ["Ready-For-Agent", "in-progress", "needs-human", "ready-for-human", "Heavy", "light"],
     [automation({ precheck: precheck(cwd) })],
@@ -1900,6 +1931,7 @@ test("a second install finds every part present and creates nothing", () => {
   assert.deepEqual(result.out, [
     ...EVERY.map((name) => `label ${name}: present`),
     "run run_1: present",
+    "tick file .orchestrator/tick.sh: present",
     "automation orchestrator-tick: present (auto_1)",
     "tick: exit 1, the precheck works",
   ]);
@@ -1946,24 +1978,38 @@ test("install stops, and keeps the run file, when orca cannot say whether the Ru
 
 test("install repairs this repo's automation where its precheck, timeout, trigger or switch differs", () => {
   const cases: [string, Parameters<typeof automation>[0]][] = [
-    ["an old node path", { precheck: "cd '/repo' && '/old/node' '/old/orchestrator.ts' tick" }],
+    ["the inline precheck of 2.0.0", { precheck: "cd '/repo' && '/old/node' '/old/orchestrator.ts' tick" }],
     ["orca's default timeout", { timeout: 60 }],
     ["another trigger", { rrule: "hourly" }],
     ["switched off", { enabled: false }],
   ];
   for (const [name, fixture] of cases) {
-    const cwd = withRunFile('{ "run": "run_1" }\n');
+    const cwd = installed('{ "run": "run_1" }\n');
     const result = run(["install"], installReplies(EVERY, [automation({ precheck: precheck(cwd), ...fixture })], {
       [RUN_SHOW]: receipt({ run: { id: RUN, coordinator_handle: COORDINATOR } }),
     }), cwd);
     assert.equal(result.code, 0, name);
-    assert.equal(result.out[7], `automation orchestrator-tick: repaired (auto_1), precheck ${precheck(cwd)}`, name);
+    assert.equal(result.out[8], `automation orchestrator-tick: repaired (auto_1), precheck ${precheck(cwd)}`, name);
     assert.deepEqual(result.argvs.find((argv) => argv[2] === "edit"), [
       "orca", "automations", "edit", "--id", "auto_1", "--trigger", "* * * * *",
       "--precheck", precheck(cwd), "--precheck-timeout", "300", "--enabled", "--json",
     ], name);
     assert.equal(result.calls.some((line) => line.startsWith("orca automations create")), false, name);
   }
+});
+
+test("install rewrites a tick file that names an old node, and leaves the automation as it is", () => {
+  const cwd = installed('{ "run": "run_1" }\n');
+  writeFileSync(join(cwd, ".orchestrator", "tick.sh"), tickFile(cwd).replace(process.execPath, "/old/node"));
+  const result = run(["install"], installReplies(EVERY, [automation({ precheck: precheck(cwd) })], {
+    [RUN_SHOW]: receipt({ run: { id: RUN, coordinator_handle: COORDINATOR } }),
+  }), cwd);
+  assert.equal(result.code, 0);
+  assert.deepEqual(result.out.slice(7, 9), [
+    "tick file .orchestrator/tick.sh: repaired",
+    "automation orchestrator-tick: present (auto_1)",
+  ]);
+  assert.equal(writtenTickFile(cwd), tickFile(cwd));
 });
 
 test("install prints the proof tick's output, and exits 1 when the precheck fails", () => {
@@ -1985,15 +2031,23 @@ test("install prints the proof tick's output, and exits 1 when the precheck fail
   }
 });
 
-test("the precheck names node, the script and the repo by absolute path, so it runs from any directory", () => {
+test("the precheck is one line naming the tick file, and a hand run of that file is the same tick", () => {
   const cwd = mkdtempSync(join(tmpdir(), "orch it's-"));
   const result = run(["install"], installReplies(EVERY, [automation({ precheck: precheck(cwd) })]), cwd);
   const command = result.argvs.at(-1)?.[2] ?? "";
-  assert.equal(command, `cd '${cwd.replace("'", "'\\''")}' && '${process.execPath}' '${SCRIPT}' tick`);
-  // The real shell, from another directory and with no PATH, reaches the real tick in
-  // `cwd`. With the run file gone, that tick stops at its first step.
+  assert.equal(command, `sh '${cwd.replace("'", "'\\''")}/.orchestrator/tick.sh'`);
+  // Each line of the file quotes one word at most, so no quote nests in another.
+  for (const line of writtenTickFile(cwd).split("\n").filter((l) => !l.startsWith("#"))) {
+    assert.ok(line.replaceAll("'\\''", "").split("'").length <= 3, line);
+  }
+  // The real shell runs the precheck from another directory with no PATH, the way orca
+  // runs it, and runs the file by hand from the checkout. Both reach the real tick in
+  // `cwd`, and with the run file gone, both stop at its first step.
   rmSync(join(cwd, ".orchestrator", "run.json"));
-  const proof = spawnSync("/bin/sh", ["-c", command], { cwd: tmpdir(), env: {}, encoding: "utf8" });
-  assert.equal(proof.status, 1);
-  assert.match(proof.stderr, /^error: no orca Run: /);
+  const scheduled = spawnSync("/bin/sh", ["-c", command], { cwd: tmpdir(), env: {}, encoding: "utf8" });
+  const byHand = spawnSync("/bin/sh", [join(".orchestrator", "tick.sh")], { cwd, encoding: "utf8" });
+  assert.equal(scheduled.status, 1);
+  assert.match(scheduled.stderr, /^error: no orca Run: /);
+  assert.equal(byHand.status, scheduled.status);
+  assert.equal(byHand.stderr, scheduled.stderr);
 });
