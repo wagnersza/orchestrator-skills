@@ -494,12 +494,218 @@ test("start on an issue that is not eligible prints one line and writes nothing"
   }
 });
 
-test("start refuses a role whose harness is not claude, before it claims", () => {
-  const cwd = repoWithConfig('```json\n{ "roles": { "heavy": { "harness": "codex" } } }\n```\n');
-  const result = run(["start", "10", "--run", "run_1", "--role", "heavy"], startReplies(10), cwd);
+// A repo whose config gives the medium role `role`.
+function repoWithRole(role: Record<string, string>): string {
+  return repoWithConfig(`\`\`\`json\n${JSON.stringify({ roles: { medium: role } })}\n\`\`\`\n`);
+}
+
+const WT_CREATE = (n: number) => `orca worktree create --name issue-${n} --repo path:/repo --base-branch main --no-parent --json`;
+const TERMINAL_CREATE = "orca terminal create *";
+const WAIT = (handle: string) => `orca terminal wait --terminal ${handle} --for tui-idle --timeout-ms 5000 --json`;
+const ENTER = (handle: string) => `orca terminal send --terminal ${handle} --enter --json`;
+const CLOSE = (handle: string) => `orca terminal close --terminal ${handle} --json`;
+const TERMINAL = "term_w10";
+
+// The `terminal wait` reply for a harness at its prompt, or held at a dialog.
+function waited(blockedReason?: string) {
+  return receipt({ wait: { handle: TERMINAL, condition: "tui-idle", satisfied: !blockedReason, status: "running", blockedReason } });
+}
+
+// The replies a terminal start on issue 10 needs, past the ones every start needs.
+const TERMINAL_STARTS = {
+  [WT_CREATE(10)]: receipt({ worktree: { path: "/wt/issue-10" } }),
+  [TERMINAL_CREATE]: receipt({ terminal: { handle: TERMINAL } }),
+  [WAIT(TERMINAL)]: waited("agent-trust-workspace"),
+  [ENTER(TERMINAL)]: receipt({ send: { accepted: true } }),
+};
+
+// The orca calls a start made, after its claim.
+function orcaCalls(result: { argvs: string[][]; calls: string[] }): string[][] {
+  const claim = result.calls.indexOf(PATCH(10));
+  return result.argvs.slice(claim + 1);
+}
+
+test("start renders each harness row's start arguments", () => {
+  const cases: [string, Record<string, string>, string[][]][] = [
+    ["claude", { harness: "claude", model: "opus", effort: "high" }, [
+      ["--agent", "claude", "--model", "opus", "--effort", "high"],
+    ]],
+    ["codex", { harness: "codex", model: "gpt-5.5", effort: "medium" }, [
+      ["--agent", "codex", "--model", "gpt-5.5", "--effort", "medium"],
+    ]],
+    ["cursor, an anthropic model", { harness: "cursor", model: "claude-opus-5", effort: "xhigh" }, [
+      ["--agent", "cursor", "--model", "claude-opus-5-thinking-xhigh"],
+    ]],
+    ["cursor, any other model", { harness: "cursor", model: "gpt-5.6-terra", effort: "low" }, [
+      ["--agent", "cursor", "--model", "gpt-5.6-terra-low"],
+    ]],
+  ];
+  for (const [name, role, [flags]] of cases) {
+    const result = run(["start", "10", "--run", "run_1"], startReplies(10), repoWithRole(role));
+    assert.deepEqual(result.err, [], name);
+    const argv = workerStart(result) ?? [];
+    assert.deepEqual(argv, [
+      "orca", "orchestration", "worker-start",
+      "--spec", flag(argv, "--spec") ?? "",
+      "--task-title", "issue-10",
+      "--worktree", "new-top-level", "--name", "issue-10", "--repo", "path:/repo", "--base-branch", "main",
+      ...(flags ?? []),
+      "--run", "run_1", "--from", COORDINATOR, "--json",
+    ], name);
+  }
+});
+
+test("start runs pi in a terminal it creates, then binds that terminal as the worker", () => {
+  const role = { harness: "pi", model: "anthropic/claude-sonnet-4-5", effort: "high" };
+  const result = run(["start", "10", "--run", "run_1"], startReplies(10, {}, TERMINAL_STARTS), repoWithRole(role));
+  assert.deepEqual(result.err, []);
+  assert.equal(result.code, 0);
+  const calls = orcaCalls(result);
+  const spec = flag(calls.at(-1), "--spec") ?? "";
+  assert.deepEqual(calls, [
+    ["orca", "worktree", "create", "--name", "issue-10", "--repo", "path:/repo", "--base-branch", "main", "--no-parent", "--json"],
+    ["orca", "terminal", "create", "--worktree", "name:issue-10", "--title", "issue-10",
+      "--command", "pi -t read,bash,edit,write,grep,find,ls --model anthropic/claude-sonnet-4-5 --thinking high", "--json"],
+    ["orca", "orchestration", "worker-start", "--spec", spec, "--task-title", "issue-10", "--worktree", "name:issue-10",
+      "--terminal", TERMINAL, "--run", "run_1", "--from", COORDINATOR, "--json"],
+  ]);
+  assert.deepEqual(result.out, [
+    "started #10 in worktree issue-10: pi anthropic/claude-sonnet-4-5 @ high (medium role), dispatch ctx_54923f33c600",
+  ]);
+});
+
+test("start runs copilot in a terminal, and answers its trust dialog once orca reports it", () => {
+  const role = { harness: "copilot", model: "gpt-5-mini", effort: "medium" };
+  // copilot idles at boot before it draws the dialog, so the first reading is idle.
+  let waits = 0;
+  const result = run(["start", "10", "--run", "run_1"], startReplies(10, {}, {
+    ...TERMINAL_STARTS,
+    [WAIT(TERMINAL)]: () => (waits++ === 0 ? waited() : waited("agent-trust-workspace")),
+    "sleep 1": "",
+  }), repoWithRole(role));
+  assert.deepEqual(result.err, []);
+  assert.equal(result.code, 0);
+  const calls = orcaCalls(result).map((argv) => argv.join(" "));
+  assert.deepEqual(calls.slice(0, 6), [
+    WT_CREATE(10),
+    "orca terminal create --worktree name:issue-10 --title issue-10 --command copilot --allow-all --model gpt-5-mini --effort medium --json",
+    WAIT(TERMINAL),
+    "sleep 1",
+    WAIT(TERMINAL),
+    ENTER(TERMINAL),
+  ]);
+  assert.match(calls[6] ?? "", new RegExp(`^orca orchestration worker-start --spec .* --terminal ${TERMINAL} --run run_1 `, "s"));
+  assert.equal(calls.length, 7);
+});
+
+test("start sends no key where copilot's trust dialog never shows", () => {
+  const role = { harness: "copilot", model: "gpt-5-mini", effort: "medium" };
+  const result = run(["start", "10", "--run", "run_1"], startReplies(10, {}, {
+    ...TERMINAL_STARTS, [WAIT(TERMINAL)]: waited(), "sleep 1": "",
+  }), repoWithRole(role));
+  assert.equal(result.code, 0);
+  assert.equal(result.calls.filter((c) => c === WAIT(TERMINAL)).length, 30);
+  assert.equal(result.calls.includes(ENTER(TERMINAL)), false);
+});
+
+test("start on a terminal row resumes in the existing worktree, with no worktree create", () => {
+  const role = { harness: "pi", model: "openai/gpt-5.5", effort: "low" };
+  const result = run(["start", "10", "--run", "run_1"], startReplies(10, {}, {
+    ...TERMINAL_STARTS, [SHOW(10)]: receipt({ worktree: { path: "/wt/issue-10" } }),
+  }), repoWithRole(role));
+  assert.equal(result.code, 0);
+  assert.equal(result.calls.includes(WT_CREATE(10)), false);
+  assert.equal(flag(workerStart(result), "--worktree"), "name:issue-10");
+  assert.ok(flag(workerStart(result), "--spec")?.includes(RESUME_LINE));
+});
+
+test("start on a terminal row closes its terminal and unclaims when orca refuses the worker", () => {
+  const role = { harness: "pi", model: "openai/gpt-5.5", effort: "low" };
+  const result = run(["start", "10", "--run", "run_1"], startReplies(10, {}, {
+    ...TERMINAL_STARTS, [WORKER_START]: REFUSED, [CLOSE(TERMINAL)]: receipt({ closed: true }),
+  }), repoWithRole(role));
   assert.equal(result.code, 1);
-  assert.deepEqual(result.err, ["#10 is not started: its heavy role runs on codex, and start launches only claude for now"]);
-  assert.deepEqual(result.calls, [VIEW(10), SCAN, ME]);
+  assert.deepEqual(result.err, [
+    "error: orca worker-start failed, so #10 is unclaimed again: repo_not_found Orchestration mutation request ID: 6de9.",
+  ]);
+  assert.deepEqual(result.calls.slice(-2), [CLOSE(TERMINAL), PATCH(10)]);
+  assert.deepEqual(patches(result).at(-1), { labels: ["ready-for-agent"], assignees: [] });
+});
+
+test("start on a terminal row unclaims when orca cannot make the worktree", () => {
+  const role = { harness: "copilot", model: "gpt-5-mini", effort: "low" };
+  const result = run(["start", "10", "--run", "run_1"], startReplies(10, {}, {
+    [WT_CREATE(10)]: { fail: { code: 1, stdout: JSON.stringify({ ok: false, error: { code: "repo_not_found", message: "no repo" } }), stderr: "" } },
+  }), repoWithRole(role));
+  assert.equal(result.code, 1);
+  assert.deepEqual(result.err, ["error: orca worktree create issue-10 failed, so #10 is unclaimed again: no repo"]);
+  assert.equal(result.calls.some((c) => c.startsWith("orca terminal")), false);
+});
+
+test("start clamps an effort the harness cannot take, and reports the clamp", () => {
+  const cases: [Record<string, string>, string[], string][] = [
+    [{ harness: "codex", model: "gpt-5.5", effort: "xhigh" }, ["--effort", "high"],
+      "codex gpt-5.5 @ high (medium role; effort xhigh clamped to high, the most codex takes)"],
+    [{ harness: "codex", model: "gpt-5.5", effort: "max" }, ["--effort", "high"],
+      "codex gpt-5.5 @ high (medium role; effort max clamped to high, the most codex takes)"],
+    [{ harness: "pi", model: "openai/gpt-5.5", effort: "max" }, ["--thinking", "xhigh"],
+      "pi openai/gpt-5.5 @ xhigh (medium role; effort max clamped to xhigh, the most pi takes)"],
+  ];
+  for (const [role, [name, value], line] of cases) {
+    const result = run(["start", "10", "--run", "run_1"], startReplies(10, {}, TERMINAL_STARTS), repoWithRole(role));
+    assert.deepEqual(result.err, [], line);
+    assert.deepEqual(result.out, [`started #10 in worktree issue-10: ${line}, dispatch ctx_54923f33c600`]);
+    const launched = role.harness === "pi"
+      ? (result.argvs.find((argv) => argv[1] === "terminal" && argv[2] === "create") ?? [])[8]?.split(" ") ?? []
+      : workerStart(result) ?? [];
+    assert.equal(flag(launched, name ?? ""), value, line);
+  }
+});
+
+test("start passes an effort the harness takes unchanged, with no clamp line", () => {
+  for (const role of [
+    { harness: "claude", model: "opus", effort: "max" },
+    { harness: "codex", model: "gpt-5.5", effort: "high" },
+    { harness: "copilot", model: "gpt-5-mini", effort: "max" },
+  ]) {
+    const result = run(["start", "10", "--run", "run_1"], startReplies(10, {}, TERMINAL_STARTS), repoWithRole(role));
+    assert.equal(result.code, 0, role.harness);
+    assert.doesNotMatch(result.out[0] ?? "", /clamped/, role.harness);
+    assert.match(result.out[0] ?? "", new RegExp(`@ ${role.effort} \\(medium role\\)`), role.harness);
+  }
+});
+
+test("start refuses a role its harness cannot launch in one line, before it claims", () => {
+  const cases: [Record<string, string>, string][] = [
+    [{ harness: "claude", model: "gpt-5.5" }, 'its medium role pairs model "gpt-5.5" with claude, which launches only anthropic models'],
+    [{ harness: "codex", model: "opus" }, 'its medium role pairs model "opus" with codex, which launches only openai models'],
+    [{ harness: "jules" }, 'its medium role names harness "jules", which is not one of claude, codex, cursor, pi, copilot'],
+    [{ effort: "superhigh" }, 'its medium role asks effort "superhigh", which is not one of low, medium, high, xhigh, max'],
+  ];
+  for (const [role, why] of cases) {
+    const result = run(["start", "10", "--run", "run_1"], startReplies(10), repoWithRole(role));
+    assert.equal(result.code, 1, why);
+    assert.deepEqual(result.err, [`#10 is not started: ${why}`]);
+    assert.deepEqual(result.out, []);
+    assert.deepEqual(result.calls, [VIEW(10), SCAN, ME], why);
+  }
+});
+
+test("start names each skill the way the harness names one", () => {
+  const cases: [Record<string, string>, string, string][] = [
+    [{ harness: "claude", model: "sonnet" }, "2. Run /implement on it.", "Write its body with /pr,"],
+    ...(["codex", "cursor", "pi", "copilot"].map((harness): [Record<string, string>, string, string] => [
+      { harness, model: harness === "codex" ? "gpt-5.5" : "openai/gpt-5.5" },
+      "2. Use the `implement` skill on it.",
+      "Write its body with the `pr` skill,",
+    ])),
+  ];
+  for (const [role, implement, pr] of cases) {
+    const result = run(["start", "10", "--run", "run_1"], startReplies(10, {}, { ...TERMINAL_STARTS, "sleep 1": "" }), repoWithRole(role));
+    const spec = flag(workerStart(result), "--spec") ?? "";
+    assert.equal(spec.split("\n")[3], implement, role.harness);
+    assert.ok(spec.split("\n")[5]?.includes(pr), `${role.harness}: ${spec}`);
+  }
 });
 
 test("start reads the Run id from the run file when no --run is given", () => {

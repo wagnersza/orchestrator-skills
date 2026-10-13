@@ -9,6 +9,7 @@ import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, wr
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
+import { launchFor, launchLine, skill, useSkill, type Harness, type Launch } from "./harnesses.ts";
 import { sh as realSh, type Result, type Sh } from "./sh.ts";
 import { github } from "./trackers/github.ts";
 import { gitlab } from "./trackers/gitlab.ts";
@@ -125,17 +126,18 @@ function pickRole(config: Config, issue: Issue, manual: RoleName | undefined): R
 // The line a resumed worker gets: its worktree already exists, so an earlier worker stopped here.
 const RESUMED = "This issue was resumed. Read the latest comments first: they answer why you stopped.";
 
-// The worker's whole prompt. orca adds its own preamble with the Task, the Dispatch and
-// the exact `worker_done` and `ask` commands. The worker reads the issue itself.
-function render(tracker: Tracker, issue: Issue, base: string, note: string | undefined, resumed: boolean): string {
+// The worker's whole prompt, with each skill named the way `harness` names one. orca adds
+// its own preamble with the Task, the Dispatch and the exact `worker_done` and `ask`
+// commands. The worker reads the issue itself.
+function render(tracker: Tracker, harness: Harness, issue: Issue, base: string, note: string | undefined, resumed: boolean): string {
   const lines = [
     `You are working on issue ${tracker.ref(issue.id)}: "${issue.title}", in the orca worktree `
       + `${worktreeName(issue.id)}, on the branch it checked out.`,
     "",
     `1. Read the issue and every comment: ${tracker.viewCommand(issue.id)}`,
-    "2. Run /implement on it.",
+    `2. ${useSkill(harness, "implement")} on it.`,
     "3. Commit in slices: one logical change per commit, Conventional Commits.",
-    `4. ${tracker.reviewStep(issue.id, base, "/pr")}`,
+    `4. ${tracker.reviewStep(issue.id, base, skill(harness, "pr"))}`,
     "5. Never change the issue's state or labels, and never merge.",
     "6. If you are blocked on a decision only a human can make, use the orchestration `ask` "
       + "command from your preamble, and stop.",
@@ -237,8 +239,7 @@ function start(config: Config, tracker: Tracker, sh: Sh, cwd: string, args: Star
 }
 
 // Claim one eligible issue and start a supervised worker on it in worktree issue-N. An
-// issue that is not eligible, or a role on a harness start cannot launch yet, changes
-// nothing.
+// issue that is not eligible, or a role its harness cannot launch, changes nothing.
 function startLeaf(config: Config, tracker: Tracker, sh: Sh, cwd: string, issue: Issue, args: LeafArgs, deps: Deps): number {
   const ref = tracker.ref(issue.id);
   const why = whyNotEligible(tracker, issue, tracker.me());
@@ -247,9 +248,9 @@ function startLeaf(config: Config, tracker: Tracker, sh: Sh, cwd: string, issue:
     return 1;
   }
   const role = pickRole(config, issue, args.role);
-  const { harness, model, effort } = config.roles[role];
-  if (harness !== "claude") {
-    deps.err(`${ref} is not started: its ${role} role runs on ${harness}, and start launches only claude for now`);
+  const launch = launchFor(config.roles[role]);
+  if (typeof launch === "string") {
+    deps.err(`${ref} is not started: its ${role} role ${launch}`);
     return 1;
   }
   const name = worktreeName(issue.id);
@@ -260,30 +261,111 @@ function startLeaf(config: Config, tracker: Tracker, sh: Sh, cwd: string, issue:
   // an existing worktree. A worktree that is gone gets a new one from base.
   const resumed = worktreeExists(sh, cwd, name);
   tracker.claim(issue.id);
+  const spec = render(tracker, launch.harness, issue, config.base, args.note, resumed);
+  const placed = { name, repo, base: config.base, resumed };
+  const started = launch.harness.start === "agent"
+    ? startAgent(sh, cwd, launch, spec, placed, args.run, from)
+    : startTerminal(sh, cwd, launch, spec, placed, args.run, from);
+  if ("failed" in started) {
+    tracker.unclaim(issue.id);
+    deps.err(`error: ${started.failed} failed, so ${ref} is unclaimed again: ${started.why}`);
+    return 1;
+  }
+  const { harness, model, effort, clamped } = launch;
+  deps.out(
+    `started ${ref} in worktree ${name}: ${harness.name} ${model} @ ${effort} (${role} role${clamped ? `; ${clamped}` : ""}), `
+      + `dispatch ${orcaReply(started).result?.dispatchId ?? "unknown"}`,
+  );
+  return 0;
+}
+
+// Where a worker starts: worktree `name` of `repo`, new from `base` unless `resumed`.
+type Placement = { name: string; repo: string; base: string; resumed: boolean };
+
+// The `worker-start` flags that name the Task and its worktree, with the creation flags
+// only for a new one.
+function placementFlags(spec: string, placed: Placement, create: boolean): string[] {
+  return [
+    "--spec", spec,
+    "--task-title", placed.name,
+    ...(create
+      ? ["--worktree", "new-top-level", "--name", placed.name, "--repo", `path:${placed.repo}`, "--base-branch", placed.base]
+      : ["--worktree", `name:${placed.name}`]),
+  ];
+}
+
+// A start step that failed, and orca's message.
+type Failed = { failed: string; why: string };
+
+// orca launches the harness itself. Returns the receipt, or the step that failed.
+function startAgent(sh: Sh, cwd: string, launch: Launch, spec: string, placed: Placement, run: string, from: string): Result | Failed {
   const worker = sh("orca", [
     "orchestration", "worker-start",
-    "--spec", render(tracker, issue, config.base, args.note, resumed),
-    "--task-title", name,
-    ...(resumed
-      ? ["--worktree", `name:${name}`]
-      : ["--worktree", "new-top-level", "--name", name, "--repo", `path:${repo}`, "--base-branch", config.base]),
-    "--agent", harness,
-    "--model", model,
-    "--effort", effort,
-    "--run", args.run,
+    ...placementFlags(spec, placed, !placed.resumed),
+    "--agent", launch.harness.name,
+    ...launch.harness.flags(launch.model, launch.effort),
+    "--run", run,
     "--from", from,
     "--json",
   ], { cwd });
-  if (worker.code !== 0) {
-    tracker.unclaim(issue.id);
-    deps.err(`error: orca worker-start failed, so ${ref} is unclaimed again: ${orcaError(worker)}`);
-    return 1;
+  return worker.code === 0 ? worker : { failed: "orca worker-start", why: orcaError(worker) };
+}
+
+// The `blockedReason` orca reports for a harness held at its trust dialog.
+const TRUST_BLOCKED = "agent-trust-workspace";
+
+// How often, and how many times, a terminal start asks orca whether the trust dialog is
+// up. The harness idles at boot before it draws the dialog, so one idle reading proves
+// nothing, and a key sent then is lost.
+const TRUST_POLLS = 30;
+const TRUST_POLL_SECONDS = "1";
+
+// Wait for the trust dialog of the harness in terminal `handle`, then send its key.
+// Returns the failed call, or null. A dialog that never shows sends nothing.
+function answerTrust(sh: Sh, cwd: string, handle: string, keys: string[]): Result | null {
+  for (let poll = 0; poll < TRUST_POLLS; poll++) {
+    if (poll > 0) sh("sleep", [TRUST_POLL_SECONDS], { cwd });
+    const wait = sh("orca", ["terminal", "wait", "--terminal", handle, "--for", "tui-idle", "--timeout-ms", "5000", "--json"], { cwd });
+    const blocked = (orcaReply(wait) as { result?: { wait?: { blockedReason?: string | null } } }).result?.wait?.blockedReason;
+    if (blocked !== TRUST_BLOCKED) continue;
+    const answer = sh("orca", ["terminal", "send", "--terminal", handle, ...keys, "--json"], { cwd });
+    return answer.code === 0 ? null : answer;
   }
-  deps.out(
-    `started ${ref} in worktree ${name}: ${harness} ${model} @ ${effort} (${role} role), `
-      + `dispatch ${orcaReply(worker).result?.dispatchId ?? "unknown"}`,
-  );
-  return 0;
+  return null;
+}
+
+// orca's `--agent` does not know the harness. Make the worktree where it is new, run
+// the launch line in a terminal there, answer the trust dialog where the row has a key,
+// then bind the terminal as a supervised worker. Returns the receipt, or the step that
+// failed. A terminal whose worker did not start is closed again.
+function startTerminal(sh: Sh, cwd: string, launch: Launch, spec: string, placed: Placement, run: string, from: string): Result | Failed {
+  if (!placed.resumed) {
+    const made = sh("orca", [
+      "worktree", "create", "--name", placed.name, "--repo", `path:${placed.repo}`, "--base-branch", placed.base, "--no-parent", "--json",
+    ], { cwd });
+    if (made.code !== 0) return { failed: `orca worktree create ${placed.name}`, why: orcaError(made) };
+  }
+  const command = launchLine(launch).map((word) => (/^[\w@%+=:,./-]+$/.test(word) ? word : shellQuote(word))).join(" ");
+  const terminal = sh("orca", [
+    "terminal", "create", "--worktree", `name:${placed.name}`, "--title", placed.name, "--command", command, "--json",
+  ], { cwd });
+  if (terminal.code !== 0) return { failed: `orca terminal create in ${placed.name}`, why: orcaError(terminal) };
+  const handle = (JSON.parse(terminal.stdout) as { result: { terminal: { handle: string } } }).result.terminal.handle;
+  const fail = (failed: string, call: Result): Failed => {
+    sh("orca", ["terminal", "close", "--terminal", handle, "--json"], { cwd });
+    return { failed, why: orcaError(call) };
+  };
+  const answer = launch.harness.trust ? answerTrust(sh, cwd, handle, launch.harness.trust) : null;
+  if (answer) return fail(`answering the trust dialog of ${launch.harness.name}`, answer);
+  const worker = sh("orca", [
+    "orchestration", "worker-start",
+    ...placementFlags(spec, placed, false),
+    "--terminal", handle,
+    "--run", run,
+    "--from", from,
+    "--json",
+  ], { cwd });
+  return worker.code === 0 ? worker : fail("orca worker-start", worker);
 }
 
 // The slots `live`, the in-progress issues, take: one per issue that is not a parent.
