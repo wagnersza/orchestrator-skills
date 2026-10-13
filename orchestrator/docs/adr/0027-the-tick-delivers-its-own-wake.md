@@ -122,5 +122,5 @@ Both keep their own text.
   says the tick is unavailable there.
 - **One work item wires this ADR. Nothing here is declared and deferred.** The `wake` subcommand,
   the precheck in *Start the tick* of [`orchestrator/SKILL.md`](../../SKILL.md), operation
-  11's example in [`references/tools/orca.md`](../../references/tools/orca.md) and step 5a
+  11's example in [`references/tools/orca.md`](https://github.com/wagnersza/orchestrator-skills/blob/v1.0.0/orchestrator/references/tools/orca.md) and step 5a
   of [`orchestrator-setup/SKILL.md`](../../../orchestrator-setup/SKILL.md) land with it.

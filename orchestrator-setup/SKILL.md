@@ -118,7 +118,7 @@ moves. So the strip is not a one-time repair. It runs after every update, which 
 lives here.
 
 Strip the line from the skills the routing table
-([`../orchestrator/references/skill-routing.md`](../orchestrator/references/skill-routing.md))
+([`../orchestrator/references/skill-routing.md`](https://github.com/wagnersza/orchestrator-skills/blob/v1.0.0/orchestrator/references/skill-routing.md))
 names, and from those alone. The names come from the `Skill` column of a table row, so no
 list of names sits here to go stale. A skill that file names in its prose alone keeps its
 flag, and this setup skill is one of those.
@@ -241,7 +241,7 @@ Don't assume — read the repo first:
 ### 1a. Detect the language family
 
 A language family is one column of the gate matrix in
-[`references/quality-gates.md`](../orchestrator/references/quality-gates.md). Each column
+[`references/quality-gates.md`](https://github.com/wagnersza/orchestrator-skills/blob/v1.0.0/orchestrator/references/quality-gates.md). Each column
 names the tools that family needs. The Python and TypeScript columns have landed.
 
 Read the repo root for a marker file of each landed family:
@@ -275,7 +275,7 @@ landed.
 where that family is on, and nowhere else. One condition, read in two steps, so the two
 cannot disagree about when a tool is required. The **Browser surface** gate in step 4 has
 the same shape. Requirements in that catalog are conditional on config already
-([`references/requirements.md`](../orchestrator/references/requirements.md)), and this gate
+([`references/requirements.md`](https://github.com/wagnersza/orchestrator-skills/blob/v1.0.0/orchestrator/references/requirements.md)), and this gate
 obeys that rule.
 
 ## 2. Ensure the tracker config exists
@@ -287,7 +287,7 @@ in the orchestrator config. If present, note the tracker + labels and move on.
 
 **Then point that file at the verified reads.** Append one line to
 `docs/agents/issue-tracker.md` that names
-[`references/tracker-reads.md`](../orchestrator/references/tracker-reads.md) as the home
+[`references/tracker-reads.md`](https://github.com/wagnersza/orchestrator-skills/blob/v1.0.0/orchestrator/references/tracker-reads.md) as the home
 of every read the flows make, with the command for `gh` and the command for `glab`.
 **Write no read command into the per-project file.** That file holds per-repo data: the
 CLI name, the host, the label vocabulary and the board coordinates. A read command is
@@ -412,7 +412,7 @@ Take these in order; each leads with a recommendation.
 2. **Harness** — the agent CLI that runs in a worker terminal.
 3. **Models per role — lead with a cost profile.** Don't open with a
    role-by-role interrogation. Offer the three presets from the **Cost profiles**
-   table in [`references/models.md`](../orchestrator/references/models.md) and let
+   table in [`references/models.md`](https://github.com/wagnersza/orchestrator-skills/blob/v1.0.0/orchestrator/references/models.md) and let
    the user pick one, then show the resolved pairs:
 
    | Profile | heavy | medium | light | review | Relative cost |
@@ -475,7 +475,7 @@ Take these in order; each leads with a recommendation.
 
 Now that the choices are made, the required dependency set is known. Check
 **exactly** what this config needs, then **install every missing one yourself** —
-run the install command from [`references/requirements.md`](../orchestrator/references/requirements.md)
+run the install command from [`references/requirements.md`](https://github.com/wagnersza/orchestrator-skills/blob/v1.0.0/orchestrator/references/requirements.md)
 (the full catalog with check + install commands). Don't just print commands for
 the user to run.
 
@@ -500,7 +500,7 @@ Scope — only the chosen pieces apply:
   [ADR 0012](../orchestrator/docs/adr/0012-playwright-cli-is-the-only-browser-surface.md)).
 - **gate tools — conditional on the language family step 1a turned on.** Each family has
   one table of tool rows in
-  [`references/requirements.md`](../orchestrator/references/requirements.md).
+  [`references/requirements.md`](https://github.com/wagnersza/orchestrator-skills/blob/v1.0.0/orchestrator/references/requirements.md).
   `## Python gate tools` and `## TypeScript gate tools` are the two that landed. Where a
   family is on, its table is part of the required set — a repo where step 1a turned on
   both `python` and `typescript` installs both tables. Where no family is on, no row of
@@ -540,7 +540,7 @@ it by running the command from `requirements.md`:
   `requirements.md` — the CLI row, the browsers row, and the check block — rather
   than typing them here. The steps, the verification that a browser really opens,
   the update command, and the failure modes are in
-  [`../playwright-cli/references/installation.md`](../playwright-cli/references/installation.md).
+  [`../playwright-cli/references/installation.md`](https://github.com/wagnersza/orchestrator-skills/blob/v1.0.0/playwright-cli/references/installation.md).
   **A present CLI was not brought up to date in step 0a**, unlike the plugins —
   step 0a runs before the recipe is known, so it cannot apply this gate. Update a
   present CLI here, with the line the update block in `requirements.md` already
@@ -550,7 +550,7 @@ it by running the command from `requirements.md`:
   on, `## TypeScript gate tools` too. Install each missing one with that row's install
   command. **Never name a tool that has no row there.** The matrix
   and the catalog are held together by
-  [`../scripts/test_quality_gates.py`](../scripts/test_quality_gates.py), and a name
+  [`../scripts/test_quality_gates.py`](https://github.com/wagnersza/orchestrator-skills/blob/v1.0.0/scripts/test_quality_gates.py), and a name
   invented here escapes that test. Every command in that table carries a **(verify)**
   note, because none of them has run on this machine yet. That note is not the
   **(verify)** of an unpinned installer, and these commands are exact. So run each one,
@@ -591,7 +591,7 @@ it by running the command from `requirements.md`:
   unattended and a node install can ask for a password. Stop, report the row as
   **needs the user**, and give the exact remaining command from `requirements.md`.
   Point at the **No node** failure mode in
-  [`../playwright-cli/references/installation.md`](../playwright-cli/references/installation.md).
+  [`../playwright-cli/references/installation.md`](https://github.com/wagnersza/orchestrator-skills/blob/v1.0.0/playwright-cli/references/installation.md).
   A **missing CLI on a machine that has node is not this case** — install it and
   move on.
 
@@ -645,13 +645,13 @@ writing. Then:
 Each layer command in `gates:` needs a file behind it. Write those files here, from the two
 templates beside this skill:
 
-- [`templates/Makefile.template`](templates/Makefile.template) → `Makefile`
-- [`templates/checks.sh.template`](templates/checks.sh.template) → `scripts/checks.sh`,
+- [`templates/Makefile.template`](https://github.com/wagnersza/orchestrator-skills/blob/v1.0.0/orchestrator-setup/templates/Makefile.template) → `Makefile`
+- [`templates/checks.sh.template`](https://github.com/wagnersza/orchestrator-skills/blob/v1.0.0/orchestrator-setup/templates/checks.sh.template) → `scripts/checks.sh`,
   and make that file executable
 
 Each Makefile target runs one layer of the script, and CI runs the same script. So a step
 cannot be green here and red in CI for a reason that is not the code. The layers are in
-[`references/quality-gates.md`](../orchestrator/references/quality-gates.md), and the
+[`references/quality-gates.md`](https://github.com/wagnersza/orchestrator-skills/blob/v1.0.0/orchestrator/references/quality-gates.md), and the
 rationale is
 [ADR 0032](../orchestrator/docs/adr/0032-quality-gates-are-a-layered-contract.md).
 
@@ -664,7 +664,7 @@ supported configuration and not a gap.
 `make deep` into `gates.deep`. There is no profile question to answer here. A maintainer
 who wants fewer layers blanks `gates.deep` by hand afterward, and a blank command is what
 drops the layer 4 box from the checklist
-([`references/checklist.template.md`](../orchestrator/references/checklist.template.md)).
+([`references/checklist.template.md`](https://github.com/wagnersza/orchestrator-skills/blob/v1.0.0/orchestrator/references/checklist.template.md)).
 
 **Each threshold goes to the file that reads it.** Config is the source of truth for a
 threshold. Write the number the config holds, and never a second number:
@@ -715,7 +715,7 @@ which number reached the tool that reads it.
 The plugin ships a **hook plane**: three hooks that inject the item facts, deny a write
 that only a seam makes, and record what a gate command did. They are the one layer that
 can refuse a command before it runs
-([`../orchestrator/references/hooks.md`](../orchestrator/references/hooks.md);
+([`../orchestrator/references/hooks.md`](https://github.com/wagnersza/orchestrator-skills/blob/v1.0.0/orchestrator/references/hooks.md);
 [ADR 0051](../orchestrator/docs/adr/0051-a-hook-refuses-and-a-seam-performs.md)).
 
 **This step installs nothing.** The hooks ship with the plugin, so there is no file to
@@ -758,7 +758,7 @@ next start, and never from this one.
 ### 5c. Run each gate command once
 
 **Why this step exists: a `git push` is denied while a configured gate has no green line
-at `HEAD`** ([`../orchestrator/references/hooks.md`](../orchestrator/references/hooks.md)).
+at `HEAD`** ([`../orchestrator/references/hooks.md`](https://github.com/wagnersza/orchestrator-skills/blob/v1.0.0/orchestrator/references/hooks.md)).
 So a `gates:` field can name a command that does not exist. That field then denies every
 push in this repo, and the message names a command nobody can run. One run per command
 here turns that from a mystery at push time into a message at setup time.
@@ -774,7 +774,7 @@ make full;  echo "full exit: $?"
 - **Read the commands from the config this setup wrote**, and never from this page. A
   blank field is not a Gate: run nothing for it, and say so in one line. The `story` field
   is not a Gate either, because it has no exit code
-  ([`references/quality-gates.md`](../orchestrator/references/quality-gates.md)).
+  ([`references/quality-gates.md`](https://github.com/wagnersza/orchestrator-skills/blob/v1.0.0/orchestrator/references/quality-gates.md)).
 - **A command that does not exist is the fault this step looks for.** `No rule to make
   target` and `command not found` each mean no push can land. Name the field, the command
   and the repair, which is either step 5a or the field itself.
@@ -792,7 +792,7 @@ middle of the loop
 ([ADR 0045](../orchestrator/docs/adr/0045-a-story-start-is-automatic-under-two-roofs.md)).
 
 Create it with operation 11 of the tool reference
-([`../orchestrator/references/tools/_operations.md`](../orchestrator/references/tools/_operations.md)),
+([`../orchestrator/references/tools/_operations.md`](https://github.com/wagnersza/orchestrator-skills/blob/v1.0.0/orchestrator/references/tools/_operations.md)),
 with three changes from the per-item form. The name is `orchestrator-queue`. The precheck
 is the `queue` subcommand. And the schedule binds to the main checkout, because it watches
 the tracker rather than a worktree:
@@ -812,7 +812,7 @@ the tracker rather than a worktree:
   this string and runs it a minute later, in a shell that saw no assignment. The
   `SessionStart` hook resolves the value into this session's context, and this step
   writes it in, the same way a per-item precheck carries it
-  ([`../orchestrator/references/hooks.md`](../orchestrator/references/hooks.md)).
+  ([`../orchestrator/references/hooks.md`](https://github.com/wagnersza/orchestrator-skills/blob/v1.0.0/orchestrator/references/hooks.md)).
 - **Read every other value from the config this setup wrote**, and never from this page.
   The two roofs are `max_stories` and `max_workers`, the gate mode is `parallel_check`, and
   the three board coordinates come from the `## Project board` section of

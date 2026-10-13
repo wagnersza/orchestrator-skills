@@ -24,9 +24,9 @@ exception.** The maintainer merges on the tracker
 | a queue question ("what next", "what's ready") | ["What next?"](#what-next--pick-the-next-work) |
 | a work verb + item number, item carries `user-story` | batch-spawn its unblocked children — [Spawn a worker](#spawn-a-worker) |
 | a work verb + item number, no `user-story` | one worker, one worktree — [Spawn a worker](#spawn-a-worker) |
-| an item-writing verb (ticket, spec, triage) | [`references/skill-routing.md`](references/skill-routing.md), lane `inline` |
-| a code-writing verb (implement, debug, TDD, review-diff, prototype) | [`references/skill-routing.md`](references/skill-routing.md), lane `worker`, spliced into the spawn prompt |
-| a review, close or merge-train ask | [Adversarial review](#adversarial-review-is-a-verb) below. Close and the train are questions, answered in [`references/reporting.md`](references/reporting.md) |
+| an item-writing verb (ticket, spec, triage) | [`references/skill-routing.md`](https://github.com/wagnersza/orchestrator-skills/blob/v1.0.0/orchestrator/references/skill-routing.md), lane `inline` |
+| a code-writing verb (implement, debug, TDD, review-diff, prototype) | [`references/skill-routing.md`](https://github.com/wagnersza/orchestrator-skills/blob/v1.0.0/orchestrator/references/skill-routing.md), lane `worker`, spliced into the spawn prompt |
+| a review, close or merge-train ask | [Adversarial review](#adversarial-review-is-a-verb) below. Close and the train are questions, answered in [`references/reporting.md`](https://github.com/wagnersza/orchestrator-skills/blob/v1.0.0/orchestrator/references/reporting.md) |
 
 ## "What next?" — pick the next work
 
@@ -39,7 +39,7 @@ already asks this every minute and starts at most one item —
 `python3 <plugin root>/scripts/worker_queue.py queue --help` holds the roofs and the
 descent, and `python3 <plugin root>/scripts/worker_queue.py start --help` answers the
 gate for one item. Report per
-[`references/reporting.md`](references/reporting.md): every ready item first, then
+[`references/reporting.md`](https://github.com/wagnersza/orchestrator-skills/blob/v1.0.0/orchestrator/references/reporting.md): every ready item first, then
 enough blocked ones to reach 5, then every item at `to-review` beside them.
 
 ## Board status
@@ -60,12 +60,12 @@ batch that mixes a bug and a feature splices a different skill into each prompt,
 one blanket model for the whole batch is the same defect. **Never hardcode a model.**
 Classify the item's role first — `heavy` on a named signal, `light` where all three
 light conditions hold, `medium` otherwise — then resolve `(model, effort)` from
-[`references/models.md`](references/models.md). `scripts/spawn_item.py` runs the rest
+[`references/models.md`](https://github.com/wagnersza/orchestrator-skills/blob/v1.0.0/orchestrator/references/models.md). `scripts/spawn_item.py` runs the rest
 in its own seven ordered steps (worktree, terminal, rendered prompt, readiness gate,
 the `in-progress` label, the panel, the item schedule); read its `--help` and its
 module docstring, and never restate that order here. Preflight the routed skill and the
 plugin dependencies before the first spawn of a session
-([`references/requirements.md`](references/requirements.md)). Report four fields per
+([`references/requirements.md`](https://github.com/wagnersza/orchestrator-skills/blob/v1.0.0/orchestrator/references/requirements.md)). Report four fields per
 child, in order: the routed skill, the role, the model, the effort.
 
 ## Adversarial review is a verb
@@ -75,13 +75,13 @@ pair from `models.review` — and the reviewer posts one comment on the work ite
 There is no round, no fix loop and no counter: a judgement has no exit code, so
 nothing parses the comment and nothing re-prompts the impl worker with it. The spawn
 steps, the vendor assert and the four prompt substitutions a review draft needs are in
-[`references/models.md`](references/models.md#running-an-adversarial-review). Run it
+[`references/models.md`](https://github.com/wagnersza/orchestrator-skills/blob/v1.0.0/orchestrator/references/models.md#running-an-adversarial-review). Run it
 whenever the maintainer asks, at any point in the item's life.
 
 ## Resolve the verb before you act
 
 A verb the table above does not name can still match a row in
-[`references/skill-routing.md`](references/skill-routing.md) — read it at the moment
+[`references/skill-routing.md`](https://github.com/wagnersza/orchestrator-skills/blob/v1.0.0/orchestrator/references/skill-routing.md) — read it at the moment
 you need it, never from memory, and never copy a row into this body. Lane `inline`
 runs the skill here, in the main checkout. **An inline item-writing flow writes
 `ready-for-agent` on each item it files**, beside the `## Touches` block and the parent edge
@@ -105,7 +105,7 @@ flow this skill owns directly are not verbs, and never reach this question.
 - **Stall detection:** unchecked boxes and an idle terminal mean the worker stopped
   early. Reset its context, then re-prompt with the remaining steps. **One re-prompt,
   and then a human** — a stalled worker keeps its Role, and the tick applies both
-  swaps itself ([`references/reporting.md`](references/reporting.md)).
+  swaps itself ([`references/reporting.md`](https://github.com/wagnersza/orchestrator-skills/blob/v1.0.0/orchestrator/references/reporting.md)).
 
 ## Safety
 

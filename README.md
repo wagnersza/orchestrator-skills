@@ -24,7 +24,7 @@ session coordinates **worker** sessions: each worker is a
 | **Model** | Frontier model + **vendor** (anthropic / openai) + **effort**. Never hardcoded — resolved per role. |
 | **Effort** | How much the model *thinks*: `low`…`max`, default `high`. Some harnesses clamp the top (codex → `high`). |
 | **Role** | The class of job that picks the `(model, effort)` pair — **heavy** (a contract, a schema, a code seam, three or more files, or an open decision → strongest @ `high`), **medium** (the ordinary work item, and the default → cheaper @ `medium`), **light** (one file, criteria fully enumerated, no open decision → cheaper @ `low`), **review** (cross-vendor @ `high`). |
-| **Cost profile** | A preset of all three role pairs — **conservative** / **balanced** (default) / **max-capability**. Setup asks this instead of interrogating role-by-role. Table + per-MTok prices in [`models.md`](orchestrator/references/models.md). |
+| **Cost profile** | A preset of all three role pairs — **conservative** / **balanced** (default) / **max-capability**. Setup asks this instead of interrogating role-by-role. Table + per-MTok prices in [`models.md`](https://github.com/wagnersza/orchestrator-skills/blob/v1.0.0/orchestrator/references/models.md). |
 | **Worker** | A `(tool, harness, model)` triple on one work item. |
 | **Adversarial review** | Optional review by a second worker on a **different-vendor** model (e.g. implement opus-5, review gpt-5.6). Prompted for **coverage**, not self-filtering. |
 | **Prose deliverable** | Text a worker routes through `simple-english` before it commits — the markdown in its diff, its review note, its PR body, and any string a Python file prints. Code, identifiers, paths, commands and link targets stay byte-identical. |
@@ -61,7 +61,7 @@ and harness CLIs, the MCP — is handled by setup below.
 needs — it runs the install commands itself, pausing only where it genuinely
 can't automate (an unpinned installer, a login, or the local-only MCP). Full
 catalog with check + install commands:
-[`orchestrator/references/requirements.md`](orchestrator/references/requirements.md).
+[`orchestrator/references/requirements.md`](https://github.com/wagnersza/orchestrator-skills/blob/v1.0.0/orchestrator/references/requirements.md).
 
 **Always:** git · `mattpocock-skills` plugin (tracker config + ticket
 conventions) · [`prompt-improver`](https://github.com/wagnersza/prompt-improver)
@@ -79,7 +79,7 @@ session happens to expose is not a sanctioned surface, whichever one it is. Tool
 availability is not tool endorsement
 ([ADR 0012](orchestrator/docs/adr/0012-playwright-cli-is-the-only-browser-surface.md)).
 Steps, verification and failure modes:
-[`playwright-cli/references/installation.md`](playwright-cli/references/installation.md).
+[`playwright-cli/references/installation.md`](https://github.com/wagnersza/orchestrator-skills/blob/v1.0.0/playwright-cli/references/installation.md).
 
 `simple-english` is the one dependency that is not a Claude plugin. It installs
 with the `skills` CLI — `npx skills add AminBlg/SimpleEnglish --global --all` — so
@@ -127,7 +127,7 @@ unattended — it hands you the exact command.
 
 The config is human-editable markdown — edit it directly later; re-run setup only
 to switch tools/harnesses. Worked example:
-[`orchestrator/references/examples/run.md`](orchestrator/references/examples/run.md).
+[`orchestrator/references/examples/run.md`](https://github.com/wagnersza/orchestrator-skills/blob/v1.0.0/orchestrator/references/examples/run.md).
 
 ## Use
 

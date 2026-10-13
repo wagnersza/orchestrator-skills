@@ -7,7 +7,7 @@
 > the hook denies it until a seam performs it.
 
 Three files described the end of implementation, and two of them agreed. The last box of
-[`orchestrator/references/checklist.template.md`](../../references/checklist.template.md)
+[`orchestrator/references/checklist.template.md`](https://github.com/wagnersza/orchestrator-skills/blob/v1.0.0/orchestrator/references/checklist.template.md)
 tells the **Worker** to flip the work item to the review state and move its board card.
 [`docs/agents/issue-tracker.md`](../../../docs/agents/issue-tracker.md) says `in-progress`
 is "Held through the whole adversarial-review loop". Step 4 of *Adversarial review* in

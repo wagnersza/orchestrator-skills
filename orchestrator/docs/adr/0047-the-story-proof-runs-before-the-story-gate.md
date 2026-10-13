@@ -42,7 +42,7 @@ boots the app per the **Project recipe**, and it walks every user story of the p
 story that does not work is premature. Layer 5 asks which module is too shallow, and it
 costs minutes. That question has no value while the feature is broken. So the story proof
 is first and layer 5 is second, in the layer model that
-[`orchestrator/references/quality-gates.md`](../../references/quality-gates.md) holds.
+[`orchestrator/references/quality-gates.md`](https://github.com/wagnersza/orchestrator-skills/blob/v1.0.0/orchestrator/references/quality-gates.md) holds.
 
 **A failed proof stops the parent close.** This step can block where layer 5 cannot. The
 reason is the kind of answer each one gives. A pass or a fail is a fact, and depth is a

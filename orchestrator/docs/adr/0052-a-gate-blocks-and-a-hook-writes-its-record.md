@@ -24,7 +24,7 @@ third fact the **Completion signal** reads.
 
 **The record contract does not change.** The keys stay `command`, `exit`, `utc` and
 `head_sha`, and the format keeps its one home in
-[`../../references/quality-gates.md`](../../references/quality-gates.md). A line is
+[`../../references/quality-gates.md`](https://github.com/wagnersza/orchestrator-skills/blob/v1.0.0/orchestrator/references/quality-gates.md). A line is
 appended whatever the exit code is, because a red run that writes no line reads as a run
 that never happened. A stale `head_sha` still reads as not green.
 

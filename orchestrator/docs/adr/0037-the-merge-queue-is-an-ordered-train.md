@@ -64,7 +64,7 @@ holds perfectly and prose holds poorly. That is the reason
 seam. The new seam test-merges each queued branch in a throwaway checkout, then prints a
 plan. **It plans, and it merges nothing.** The three ordering steps, the park rule and
 the seam's contract live in that module's own docstring,
-[`scripts/merge_train.py`](../../../scripts/merge_train.py).
+[`scripts/merge_train.py`](https://github.com/wagnersza/orchestrator-skills/blob/v1.0.0/scripts/merge_train.py).
 
 The train then runs one full **Close transaction** per item in the planned order,
 teardown included. **None of the eight steps changes, and their order does not change.**

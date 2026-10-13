@@ -4,7 +4,7 @@
 between `worker-create` and the first prompt, and it chose the right signal: a live
 agent process whose working directory is the worktree. It then put the concrete command
 in the tool reference, as step **3a** of op 3, and
-[`references/tools/orca.md`](../../references/tools/orca.md) holds the `orca` copy of
+[`references/tools/orca.md`](https://github.com/wagnersza/orchestrator-skills/blob/v1.0.0/orchestrator/references/tools/orca.md) holds the `orca` copy of
 it.
 
 That placement was correct for the rule it followed. A command that changes per tool

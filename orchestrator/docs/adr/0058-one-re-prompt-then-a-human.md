@@ -40,7 +40,7 @@ another name, and the climb is what this decision deletes.
 [`orchestrator/SKILL.md`](../../SKILL.md).** Nothing computes a rung, and no session diagnoses
 why a worker stopped. The effort step a fix round takes after a review round is a different
 rule with a different trigger, and it stays where it is
-([`references/models.md`](../../references/models.md)).
+([`references/models.md`](https://github.com/wagnersza/orchestrator-skills/blob/v1.0.0/orchestrator/references/models.md)).
 
 ## What the seam still refuses to do
 
@@ -79,7 +79,7 @@ This is a new ADR and not an edit to either of them, per
   the item alone with no second mechanism.
 - **Keep the rung climb, and count per item** (rejected) — it fixes the count and keeps the
   judgement. A rung up costs two spawns plus a review cycle
-  ([`references/models.md`](../../references/models.md)), and nothing on the tracker says a
+  ([`references/models.md`](https://github.com/wagnersza/orchestrator-skills/blob/v1.0.0/orchestrator/references/models.md)), and nothing on the tracker says a
   bigger model is the repair.
 - **Re-prompt with no bound** (rejected) — a worker that cannot finish then burns a comment a
   minute, and no tick ever asks for a human.
@@ -102,7 +102,7 @@ This is a new ADR and not an edit to either of them, per
   pattern needs one of two values after the literal.
 - **The literal `Re-prompt:` is quoted here, in the Completion signal entry of
   [`orchestrator/CONTEXT.md`](../../CONTEXT.md), and in
-  [`references/tracker-reads.md`](../../references/tracker-reads.md).** A writing pass leaves
+  [`references/tracker-reads.md`](https://github.com/wagnersza/orchestrator-skills/blob/v1.0.0/orchestrator/references/tracker-reads.md).** A writing pass leaves
   it byte-identical, the same rule `Verdict:` already carries.
 - **A maintainer reads both counts the same way.** The **Review round** number is the count of
   `Verdict:` comments, and the retry count is the count of `Re-prompt:` comments. One tracker
