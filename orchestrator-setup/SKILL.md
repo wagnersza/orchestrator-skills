@@ -110,17 +110,45 @@ npx -y skills@latest add mattpocock/skills -s implement tdd code-review diagnosi
 Separate the values of `-s` and `-a` with spaces. The `skills` CLI reads `-s a,b` as one
 skill named `a,b`, and it then installs nothing.
 
-Then check that each harness lists all five. Give the `skills list` name of each harness:
+Then make the five worker skills model-invocable. A worker's model cannot call a skill
+that carries `disable-model-invocation: true`, so the brief's "Run /implement" would have
+nothing to call. Remove that line from the `SKILL.md` of each of the five, in every
+installed copy. `~/.agents/skills/<name>/` and `~/.claude/skills/<name>/` are separate
+copies, not symlinks. Touch no other skill: `setup-matt-pocock-skills` stays user-only,
+because a human runs it. This runs on every re-run, so it repairs a skill that a `skills`
+update has made user-only again.
+
+```sh
+node -e '
+const fs = require("fs"), path = require("path"), os = require("os");
+for (const dot of fs.readdirSync(os.homedir()).filter((d) => d.startsWith(".")))
+  for (const name of ["implement", "tdd", "code-review", "diagnosing-bugs", "pr"]) {
+    const file = path.join(os.homedir(), dot, "skills", name, "SKILL.md");
+    if (!fs.existsSync(file)) continue;
+    const text = fs.readFileSync(file, "utf8");
+    const out = text.replace(/^disable-model-invocation:\s*true\s*\n/m, "");
+    if (out !== text) fs.writeFileSync(file, out);
+  }'
+```
+
+Then check that each harness lists all five, and that none of them is still user-only. Give the `skills list` name of each harness:
 
 ```sh
 npx -y skills@latest list -g --json | node -e '
-const all = JSON.parse(require("fs").readFileSync(0, "utf8"));
+const fs = require("fs");
+const all = JSON.parse(fs.readFileSync(0, "utf8"));
+const five = ["implement", "tdd", "code-review", "diagnosing-bugs", "pr"];
+const userOnly = all
+  .filter((s) => five.includes(s.name) && s.path && fs.existsSync(s.path + "/SKILL.md"))
+  .filter((s) => /^disable-model-invocation:\s*true/m.test(fs.readFileSync(s.path + "/SKILL.md", "utf8")))
+  .map((s) => `${s.name} is still user-only at ${s.path}, so a worker cannot run it`);
 const missing = process.argv.slice(1).flatMap((agent) =>
   ["implement", "tdd", "code-review", "diagnosing-bugs", "pr"]
     .filter((name) => !all.some((s) => s.name === name && s.agents.includes(agent)))
     .map((name) => `${name} is not listed for ${agent}`));
-console.log(missing.length ? missing.join("\n") : "every harness lists the five skills");
-process.exit(missing.length ? 1 : 0);' "Claude Code" "Codex"
+const bad = [...missing, ...userOnly];
+console.log(bad.length ? bad.join("\n") : "every harness lists the five skills, all model-invocable");
+process.exit(bad.length ? 1 : 0);' "Claude Code" "Codex"
 ```
 
 A non-zero exit is a stop. Report the lines it printed.
