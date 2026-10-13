@@ -1,6 +1,5 @@
-// The tracker interface and its shared types. One backend per tracker (github now,
-// gitlab and local later) implements it, and the entry point never calls a tracker CLI
-// itself.
+// The tracker interface and its shared types. One backend per tracker (github and gitlab
+// now, local later) implements it, and the entry point never calls a tracker CLI itself.
 
 // An issue id as the backend names it: "349" on GitHub, "owner/repo#12" for an issue in
 // another repo, "<feature>/NN" on the local tracker.

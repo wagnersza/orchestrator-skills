@@ -11,6 +11,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 import { sh as realSh, type Result, type Sh } from "./sh.ts";
 import { github } from "./trackers/github.ts";
+import { gitlab } from "./trackers/gitlab.ts";
 import { IN_PROGRESS, NEEDS_HUMAN, READY, READY_FOR_HUMAN, type Id, type Issue, type Label, type Tracker } from "./trackers/tracker.ts";
 
 const ROLES = ["heavy", "medium", "light"] as const;
@@ -87,6 +88,7 @@ function readConfig(root: string): Config {
 
 function trackerFor(config: Config, sh: Sh, cwd: string): Tracker {
   if (config.tracker === "github") return github(sh, cwd);
+  if (config.tracker === "gitlab") return gitlab(sh, cwd);
   throw new Error(`tracker "${config.tracker}" is not supported yet`);
 }
 
