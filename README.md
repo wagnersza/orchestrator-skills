@@ -1,59 +1,126 @@
 # orchestrator-skills
 
-Run agent workers on a tracker's `ready-for-agent` issues. One orca automation per repo
-ticks every minute at zero tokens. Each worker runs in its own worktree, on the harness and
-model its role names. The tracker's state labels are the only state.
+Label an issue, and an agent ships a PR for it. This Claude Code plugin runs agent workers
+on your tracker's `ready-for-agent` issues. Each worker gets its own worktree and runs on
+the harness and model that fit the job. You review the PR, and you say when to merge.
 
-- **Harnesses:** claude, codex, cursor, pi and copilot.
-- **Trackers:** GitHub, GitLab and local markdown.
-- **Roles:** heavy, medium and light, each a harness, a model and an effort.
+```
+you label ready-for-agent ─▶ tick claims it ─▶ worker opens a PR ─▶ you review ─▶ "merge N"
+                                                     │
+                                         stuck? ─▶ needs-human, with the worker's question
+```
 
-The terms are in [`orchestrator/CONTEXT.md`](orchestrator/CONTEXT.md), and the decisions
-are in [`orchestrator/docs/adr/`](orchestrator/docs/adr/).
+## Why use it
+
+- **Waiting costs nothing.** An orca automation checks the workers once a minute, and that
+  check runs as a precheck that never starts an agent. No session polls, and no tokens burn
+  while the workers work. Your own session answers a verb and goes idle.
+- **Your session stays yours.** "work on 42" returns at once. You keep talking about
+  something else while three workers build three issues in parallel.
+- **The right model for each issue, picked with no agent.** Each issue runs on a heavy,
+  medium or light role, and each role is its own harness, model and effort. A label or the
+  issue's `## Touches` count picks the role, so a one-line fix does not pay for your
+  strongest model.
+- **Any of five agent CLIs:** claude, codex, cursor, pi and copilot. Mix them per role, for
+  example opus for heavy work and codex for light work.
+- **Your tracker is the dashboard.** GitHub, GitLab or local markdown. An issue's state is
+  one label on the tracker, and nothing else. There is no state file to drift and no
+  database. A crash loses nothing, and the next tick picks up where the last one stopped.
+- **A stuck worker stops and asks.** A worker that fails, gives up or asks a question moves
+  its issue to `needs-human`, with its own words as a comment. Nothing re-prompts it into a
+  loop. You answer on the issue, relabel it, and a fresh worker resumes in the same
+  worktree.
+- **A whole story at once.** Label a parent issue, and each labelled child starts as soon
+  as nothing blocks it. When the last child closes, the parent closes too.
+- **You stay in charge.** You decide what is ready, you review every PR, and nothing merges
+  until you say "merge N" or merge it on the tracker yourself.
+- **Small.** One TypeScript script with no runtime dependency, two skills, five ADRs.
 
 ## Install
 
-It ships as a [Claude Code plugin](https://code.claude.com/docs/en/plugins):
+You need:
+
+- Claude Code, for the orchestrator session.
+- The Orca app, which ships the `orca` CLI. The workers and the tick run in Orca.
+- Node 22.18 or later.
+- `gh` for a GitHub tracker, or `glab` for GitLab. A local markdown tracker needs neither.
+
+Setup checks each of these and installs what it can.
+
+Install the plugin from your shell:
 
 ```bash
 claude plugin marketplace add wagnersza/orchestrator-skills
 claude plugin install orchestrator-skills@wsza
 ```
 
-Then open the repo in Orca, and in a Claude session in an Orca terminal say:
+Or from inside Claude Code:
 
 ```
-set up the orchestrator
+/plugin marketplace add wagnersza/orchestrator-skills
+/plugin install orchestrator-skills@wsza
 ```
 
-The `orchestrator-setup` skill reads the tracker from `docs/agents/issue-tracker.md`, asks
-for a cost profile, `max_workers` and the base branch, and installs what is missing: the
-tracker CLI, each harness CLI, and the worker's mattpocock skills in every harness. It
-writes `docs/agents/orchestrator.md`, then runs the script's `install`. That creates the
-state labels, the orca Run, the `orchestrator-tick` automation and one proof tick. A re-run
-is safe. This repo's own config is [`docs/agents/orchestrator.md`](docs/agents/orchestrator.md).
+## Set up a repo
 
-You need orca, Node 22.18 or later, and `gh` or `glab` for a GitHub or GitLab tracker.
+Run setup once per repo. A re-run is always safe: it keeps what exists and adds only what
+is missing.
 
-## The loop
+1. **Open the repo in Orca**, and start Claude Code in an Orca terminal, in the repo's main
+   checkout. Setup creates an orca Run, and orca accepts that only from an Orca terminal.
+2. **Say "set up the orchestrator".** The `orchestrator-setup` skill asks one question at a
+   time, each with a recommended answer:
+   - **The tracker.** It reads `docs/agents/issue-tracker.md`. If that file is missing, it
+     asks you to run `/setup-matt-pocock-skills` first.
+   - **A cost profile**, which fills all three roles at once:
 
-1. **You label an issue `ready-for-agent`.** On a parent, label each child that is ready
-   too.
-2. **The tick claims it.** Every minute it assigns you each eligible issue, moves it to
-   `in-progress` and starts a worker in worktree `issue-N`, up to `max_workers`. "work on
-   N" does the same at once.
-3. **The worker does the work.** It runs the `implement` skill, commits in slices, opens a
-   PR with `Closes #N`, and reports to orca.
-4. **The tick reads the report.** Done with an open PR moves the issue to
-   `ready-for-human`. A failure, a question or a dead worker moves it to `needs-human`, with
-   the worker's own words as a comment.
-5. **You review.** Say "merge N" and the session merges and tears down, or merge on the
-   tracker and the next tick tears down. To resume a `needs-human` issue, answer on the
-   issue and relabel it `ready-for-agent`. A fresh worker picks up in the same worktree.
+     | Profile | heavy | medium | light |
+     |---|---|---|---|
+     | **balanced** (recommended) | opus @ high | sonnet @ medium | sonnet @ low |
+     | **economy** | sonnet @ high | sonnet @ low | haiku @ low |
+     | **quality** | opus @ xhigh | opus @ high | sonnet @ medium |
 
-Say "status" to see the claimed issues, the ready queue and why each other issue waits.
+     Then you can change the harness, model or effort of any one role.
+   - **`max_workers`**, how many workers run at once. The default is 3.
+   - **The base branch** each worktree starts from and each PR targets.
+3. **Setup installs the rest.** It installs and checks the tracker CLI and each harness CLI
+   the roles name. It installs the mattpocock skills each worker uses (`implement`, `tdd`,
+   `code-review`, `diagnosing-bugs` and `pr`) into every one of those harnesses. A harness
+   that needs a login gets the exact command to run.
+4. **Setup writes the config and starts the loop.** It writes `docs/agents/orchestrator.md`,
+   then runs the script's `install`. That creates the state labels, the orca Run, the
+   `orchestrator-tick` automation and one proof tick. The install ends with
+   `the precheck works` when the loop is live.
 
-## Layout
+This repo's own config is [`docs/agents/orchestrator.md`](docs/agents/orchestrator.md).
+Edit its JSON block by hand, or re-run setup to change it.
+
+## Use it
+
+Label an issue `ready-for-agent`, then talk to your Claude session:
+
+| Say | What happens |
+|---|---|
+| "work on 42" | Claims #42 now and starts its worker. On a parent, starts each eligible child. |
+| "status" | The claimed issues with their state, role, harness and PR, then the ready queue, then why each other issue waits. |
+| "merge 42" | Merges the PR of a `ready-for-human` issue, then removes its worker and worktree and closes it. |
+| "set up the orchestrator" | Runs setup again. |
+
+You can also say nothing: the next tick claims each eligible issue on its own, up to
+`max_workers`.
+
+An issue moves through four state labels, and only the script writes them:
+
+| Label | Means | Who moves it on |
+|---|---|---|
+| `ready-for-agent` | Ready to start. | The tick or "work on N" claims it. |
+| `in-progress` | A worker is on it. | The worker's report. |
+| `ready-for-human` | A PR is open for your review. | You: "merge N", or a merge on the tracker. |
+| `needs-human` | The worker failed, asked or died. Its comment says why. | You: answer on the issue, then relabel it `ready-for-agent`. |
+
+Add the `heavy` or `light` label to an issue to pick its role, or say "work on 42 as heavy".
+
+## How it works
 
 ```
 orchestrator/            the orchestrator skill, its glossary and ADRs
@@ -63,7 +130,9 @@ scripts/harnesses.ts     how each harness starts
 scripts/trackers/        github · gitlab · local
 ```
 
-`make quick` runs the typecheck and the test suite.
+The terms are in [`orchestrator/CONTEXT.md`](orchestrator/CONTEXT.md). The five decisions
+the loop rests on are in [`orchestrator/docs/adr/`](orchestrator/docs/adr/). `make quick`
+runs the typecheck and the test suite.
 
 ## v1
 
