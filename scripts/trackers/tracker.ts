@@ -1,5 +1,5 @@
-// The tracker interface and its shared types. One backend per tracker (github and gitlab
-// now, local later) implements it, and the entry point never calls a tracker CLI itself.
+// The tracker interface and its shared types. One backend per tracker (github, gitlab and
+// local) implements it, and the entry point never calls a tracker CLI itself.
 
 // An issue id as the backend names it: "349" on GitHub, "owner/repo#12" for an issue in
 // another repo, "<feature>/NN" on the local tracker.
@@ -76,3 +76,9 @@ export const NEEDS_HUMAN = "needs-human";
 export const USER_STORY = "user-story";
 // Every state label, one of which an issue in the loop holds.
 export const STATES = [READY, IN_PROGRESS, NEEDS_HUMAN, READY_FOR_HUMAN];
+
+// The orca worktree of an issue: `issue-349`, and `issue-<feature>-NN` on the local
+// tracker, where `01` exists in every feature.
+export function worktreeName(id: Id): string {
+  return `issue-${id.replace(/^.*#/, "").replaceAll("/", "-")}`;
+}
