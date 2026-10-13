@@ -30,8 +30,9 @@ you label ready-for-agent ─▶ tick claims it ─▶ worker opens a PR ─▶ 
   its issue to `needs-human`, with its own words as a comment. Nothing re-prompts it into a
   loop. You answer on the issue, relabel it, and a fresh worker resumes in the same
   worktree.
-- **A whole story at once.** Label a parent issue, and each labelled child starts as soon
-  as nothing blocks it. When the last child closes, the parent closes too.
+- **A whole story at once.** Label each child of a story, and each one starts as soon as
+  nothing blocks it, so the story runs in dependency order. Label the parent too, and the
+  tick closes it when the last child closes.
 - **You stay in charge.** You decide what is ready, you review every PR, and nothing merges
   until you say "merge N" or merge it on the tracker yourself.
 - **Small.** One TypeScript script with no runtime dependency, two skills, five ADRs.

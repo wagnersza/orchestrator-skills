@@ -25,16 +25,16 @@ fenced `json` block below. A field you leave out takes its default. Re-run the
   [`issue-tracker.md`](issue-tracker.md), so the tracker is stated in one place. Default
   `github`.
 - **`base`**: the branch each worktree starts from and each PR targets. Default `main`.
-- **`max_workers`**: how many workers run at once. A parent issue takes no slot. Default
-  `3`. It is `1` here on purpose, for the first dogfood run of v2.
+- **`max_workers`**: how many workers the tick keeps running at once. A parent issue takes
+  no slot. Default `3`. It is `1` here on purpose, for the first dogfood run of v2.
 - **`roles`**: the `harness`, `model` and `effort` of each role. This is the `balanced` cost
   profile. On `claude`, the model is the CLI's own alias, because it refuses a versioned id
   such as `sonnet-5`. `harness` is one of `claude`, `codex`, `cursor`, `pi` and `copilot`.
   `effort` is one of `low`, `medium`, `high`, `xhigh` and `max`. A harness that cannot take
-  an effort runs the nearest one below it, and the start line says so. A model the harness
-  cannot launch refuses the start.
-- **`role_labels`**: the labels that pick a role. An issue with the `heavy` label runs on
-  the heavy role, and one with the `light` label on the light role.
+  an effort runs the nearest one below it, and the start line says so. An openai model
+  under `claude`, or an anthropic model under `codex`, refuses the start.
+- **`role_labels`**: the labels that pick a role, on GitHub and GitLab. An issue with the
+  `heavy` label runs on the heavy role, and one with the `light` label on the light role.
 - **`heavy_touches`**: an issue with no role label runs on the heavy role when its
   `## Touches` block lists at least this many paths. Every other issue runs on the medium
   role. Default `3`.

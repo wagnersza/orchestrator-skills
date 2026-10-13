@@ -12,14 +12,16 @@ workers, tears down merged issues, closes finished parents and fills free slots,
 order. Reading first frees slots before filling them, so a worker that finished this minute
 makes room in the same tick.
 
-**The precheck exits non-zero on every path.** orca records each run as skipped and never
-starts the automation's agent. So a tick costs no tokens.
+**The precheck exits non-zero on every path**, so orca never starts the automation's
+agent. A tick costs no tokens.
 
 **A lock file keeps two ticks apart.** A lock older than five minutes is left over from a
 crash, and the next tick takes it.
 
-**Setup creates the automation, and a re-run keeps it.** The install step finds the labels,
-the Run and the automation that already exist and creates only what is missing.
+**Setup creates the automation, and a re-run keeps it.** The install step creates the
+labels, the Run and the automation where they are missing. It repairs an automation that
+differs from what the loop needs, and it replaces a Run that orca no longer knows. Then it
+runs one tick by hand, and that proof tick shows the loop is live.
 
 ## Rejected
 

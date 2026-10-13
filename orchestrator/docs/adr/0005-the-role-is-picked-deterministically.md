@@ -7,7 +7,9 @@ from prose signals that an agent read on every spawn, which cost tokens on every
 ## The decision
 
 **Three roles, `heavy`, `medium` and `light`, each a harness, a model and an effort in
-config.** Setup fills all three from a cost profile, and the human may change any one.
+config.** Setup fills all three from a cost profile, `balanced`, `economy` or `quality`,
+and the human may change any one. On `claude` the model is the CLI's own alias, such as
+`opus`, because the CLI refuses a versioned id.
 
 **The script picks the role in this order, and the first match wins:**
 
@@ -17,12 +19,14 @@ config.** Setup fills all three from a cost profile, and the human may change an
 4. A `## Touches` block that lists at least `heavy_touches` paths: heavy.
 5. Otherwise, medium.
 
-**A manual start is the only time a role costs tokens**, and only when the human asks in
-person. The main session may read the issue and pass `--role`.
+The local tracker has no labels, so there only steps 1, 4 and 5 apply.
 
-**The script refuses a role its harness cannot run**, such as an openai model under
-`claude`. It runs an effort the harness cannot take at the nearest effort below it, and the
-start line says so.
+**The main session passes `--role` only when the human names a role.** So no role ever
+costs tokens.
+
+**The script refuses a model its harness cannot launch**: an openai model under `claude`,
+or an anthropic model under `codex`. It runs an effort the harness cannot take at the
+nearest effort below it, and the start line says so.
 
 ## Rejected
 
@@ -32,4 +36,5 @@ start line says so.
 ## Consequences
 
 The role of an issue is visible before it starts: read its labels and count its Touches. A
-human who wants a different role adds a label or starts the issue by hand.
+human who wants a different role adds a label, or starts the issue by hand and names the
+role.

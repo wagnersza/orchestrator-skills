@@ -36,4 +36,4 @@ fenced `json` block below. A field you leave out takes its default. Re-run the
   `## Touches` block lists at least this many paths. Every other issue runs on the medium
   role. Default `3`.
 
-`start N --role <role>` overrides all of these for one start.
+`start N --role <role>` overrides the role pick for one start.

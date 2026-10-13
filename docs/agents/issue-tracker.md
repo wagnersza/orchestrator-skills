@@ -24,7 +24,7 @@ Infer the repo from `git remote -v` — `gh` does this automatically when run in
 #348
 ```
 
-This is the portable form, because it works on every tracker. On GitHub, also add the child
+The block lives in the body, so it needs no tracker feature. On GitHub, also add the child
 as a native sub-issue of the parent, so a human sees the tree. One command writes both:
 
 ```bash
@@ -47,16 +47,16 @@ closed.
 
 The orchestrator moves an issue through four state labels, and an issue holds at most one.
 The script writes every change, and a worker never does. A human writes only
-`ready-for-agent`: to queue an issue, or to resume one from `needs-human` after answering
-it in a comment. See [ADR 0003](../../orchestrator/docs/adr/0003-state-labels-are-the-only-state.md).
+`ready-for-agent`: to queue an issue, or to resume one by swapping `needs-human` for it after
+answering in a comment. See [ADR 0003](../../orchestrator/docs/adr/0003-state-labels-are-the-only-state.md).
 
 | Label | Meaning |
 |-------|---------|
 | `ready-for-agent` | Fully specified. The orchestrator may claim it. |
 | `in-progress` | Claimed. A worker is on it. |
 | `ready-for-human` | The worker is done and a PR is open for review. |
-| `needs-human` | The worker failed, asked a question, escalated or died. Its comment says why. |
-| *(closed)* | The PR is merged and the worktree is gone. |
+| `needs-human` | The worker failed, asked a question, escalated, died, or finished with no PR. Its comment says why. |
+| *(closed)* | The PR is merged. The next tick removes the worker and the worktree. |
 
 Two more labels pick a role: `heavy` and `light`. The orchestrator's install creates all
 six labels where they are missing.

@@ -10,12 +10,14 @@ two steps for the human.
 **This reverses v1 ADR 0057. The human's own "merge N" is the authorisation.** The session
 runs `merge N`, and the script merges the PR and tears down.
 
-**The merge refuses unless every precondition holds**, and a refusal changes nothing:
+**The merge refuses unless every precondition holds.** A refusal prints one line that says
+why, and it changes nothing. The session relays it and does not retry. The main ones:
 
 - The issue is `ready-for-human`.
 - The worktree `issue-N` holds no uncommitted work.
-- The tracker allows the merge. On GitHub and GitLab the PR is mergeable and has no
-  changes requested. On the local tracker the main checkout is clean and on the base branch.
+- The tracker allows the merge. On GitHub and GitLab the PR is open, mergeable and has no
+  changes requested. On the local tracker the main checkout is clean and on the base
+  branch, and the issue's branch has commits ahead of base that merge with no conflict.
 
 **A merge made on the tracker is honoured too.** The next tick sees the merged PR and runs
 the same teardown.
