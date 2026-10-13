@@ -1,6 +1,6 @@
 {
   "name": "orchestrator-skills",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "Run agent workers over a tracker's ready-for-agent issues: one orca automation per repo ticks every minute at zero tokens, each worker runs on the harness and model its role names, and the tracker's state labels are the only state.",
   "author": {
     "name": "wagnersza",
