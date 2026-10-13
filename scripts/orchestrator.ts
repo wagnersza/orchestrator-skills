@@ -12,6 +12,7 @@ import { parseArgs } from "node:util";
 import { sh as realSh, type Result, type Sh } from "./sh.ts";
 import { github } from "./trackers/github.ts";
 import { gitlab } from "./trackers/gitlab.ts";
+import { local } from "./trackers/local.ts";
 import { IN_PROGRESS, NEEDS_HUMAN, READY, READY_FOR_HUMAN, worktreeName, type Id, type Issue, type Label, type Tracker } from "./trackers/tracker.ts";
 
 const ROLES = ["heavy", "medium", "light"] as const;
@@ -89,6 +90,7 @@ function readConfig(root: string): Config {
 function trackerFor(config: Config, sh: Sh, cwd: string): Tracker {
   if (config.tracker === "github") return github(sh, cwd);
   if (config.tracker === "gitlab") return gitlab(sh, cwd);
+  if (config.tracker === "local") return local(sh, cwd, config.base);
   throw new Error(`tracker "${config.tracker}" is not supported yet`);
 }
 
@@ -141,9 +143,11 @@ function render(tracker: Tracker, issue: Issue, base: string, note: string | und
   return lines.join("\n") + "\n";
 }
 
-// The issue a Task title or a worktree name `issue-N` names, or undefined.
+// The issue a Task title or a worktree name names, or undefined: `N` for `issue-N`, and
+// `<feature>/NN` for `issue-<feature>-NN`.
 function issueNamed(name: string | null | undefined): Id | undefined {
-  return /^issue-(\d+)$/.exec(name ?? "")?.[1];
+  const named = /^issue-(?:(\d+)|(.+)-(\d+))$/.exec(name ?? "");
+  return named?.[1] ?? (named ? `${named[2]}/${named[3]}` : undefined);
 }
 
 function readRun(root: string): string {
@@ -875,9 +879,9 @@ function startArgs(argv: string[]): StartArgs | null {
   }
   const { positionals, values } = parsed;
   const role = values.role as RoleName | undefined;
-  if (positionals.length !== 1 || !/^#?\d+$/.test(positionals[0] ?? "")) return null;
+  if (positionals.length !== 1) return null;
   if (role !== undefined && !ROLES.includes(role)) return null;
-  return { id: (positionals[0] ?? "").replace("#", ""), role, note: values.note, run: values.run };
+  return { id: positionals[0] ?? "", role, note: values.note, run: values.run };
 }
 
 // The `tick` arguments, or null where they do not parse.
@@ -898,8 +902,15 @@ function mergeArgs(argv: string[]): MergeArgs | null {
     return null;
   }
   const { positionals, values } = parsed;
-  if (positionals.length !== 1 || !/^#?\d+$/.test(positionals[0] ?? "")) return null;
-  return { id: (positionals[0] ?? "").replace("#", ""), run: values.run };
+  if (positionals.length !== 1) return null;
+  return { id: positionals[0] ?? "", run: values.run };
+}
+
+// The id a command-line argument names on `tracker`, or null where it names none: `N`
+// or `#N`, and on the local tracker `<feature>/NN`, or `<feature>` for its spec.
+function idArg(tracker: string, arg: string): Id | null {
+  if (tracker === "local") return /^[A-Za-z0-9_][\w.-]*(?:\/\d+)?$/.test(arg) ? arg : null;
+  return /^#?(\d+)$/.exec(arg)?.[1] ?? null;
 }
 
 export function main(argv: string[], deps: Deps): number {
@@ -914,6 +925,15 @@ export function main(argv: string[], deps: Deps): number {
   }
   try {
     const config = readConfig(deps.cwd);
+    const target = args ?? merging;
+    if (target) {
+      const id = idArg(config.tracker, target.id);
+      if (id === null) {
+        deps.err(USAGE);
+        return 2;
+      }
+      target.id = id;
+    }
     const tracker = trackerFor(config, deps.sh, deps.cwd);
     if (args) return start(config, tracker, deps.sh, deps.cwd, args, deps);
     if (ticking) return tick(config, tracker, deps.sh, deps.cwd, ticking.run, deps);
