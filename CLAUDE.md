@@ -1,78 +1,32 @@
 # orchestrator-skills
 
-Skills for driving multi-agent development work: an **orchestrator** session
-coordinates **worker** sessions, each a `(tool, harness, model)` triple
-implementing one work item in its own worktree. See [`README.md`](README.md) for
-the layout and [`orchestrator/CONTEXT.md`](orchestrator/CONTEXT.md) for the
-vocabulary.
+Two skills, `orchestrator` and `orchestrator-setup`, and the TypeScript script they call.
+The orchestrator session runs agent workers on this repo's tracker issues, one worker per
+issue in its own worktree. See [`README.md`](README.md) for the loop and
+[`orchestrator/CONTEXT.md`](orchestrator/CONTEXT.md) for the terms.
 
-This repo is mostly markdown skills plus JSON manifests — nothing to build, boot,
-or migrate. The exceptions are three seams, `scripts/close_item.py` (the close
-transaction), `scripts/worker_state.py` (the worker watch) and
-`scripts/worker_queue.py` (the start gate and the queue tick), plus the
-`scripts/tracker.py` adapter they share (the tracker commands, the work-state label
-swap and the flags that name one tracker), each with a stdlib-only test suite: **run the
-tests when you touch a Python file**, per the
-`evidence` bar in [`docs/agents/orchestrator.md`](docs/agents/orchestrator.md).
-`scripts/test_links.py` puts every Markdown file in the repo under that same suite.
-So **run the tests when you touch a Markdown file too**.
+The script is `scripts/orchestrator.ts`, with `scripts/harnesses.ts` and
+`scripts/trackers/`. Node 22.18 or later runs it directly, with no build step and no
+runtime dependency. **Run `make quick` when you touch a TypeScript or Markdown file.** It
+runs the typecheck and the `node --test` suite.
 
 ## Working here
 
-- **Prompting rules live in the `prompt-improver` skill, not here.** The
-  orchestrator drafts a prompt and runs it through that dependency. Don't
-  re-vendor prompting guidance into this repo — see
-  [ADR 0006](orchestrator/docs/adr/0006-delegate-prompting-to-prompt-improver.md).
-- **Writing rules live in the `simple-english` skill, not here.** Before you
-  commit, run the prose you changed through that dependency in pragmatic mode.
-  This covers the markdown in your diff, your review note, your PR body, and each
-  string a Python file prints. Code blocks, identifiers, paths, commands, quoted
-  error strings, YAML and JSON keys, link targets and proper nouns stay
-  byte-identical. This repo defines only what counts as a **prose deliverable**
-  ([`orchestrator/CONTEXT.md`](orchestrator/CONTEXT.md)) and restates no rule of
-  the standard, per
-  [ADR 0011](orchestrator/docs/adr/0011-delegate-technical-writing-to-simple-english.md).
-- **Commit in slices, not one blob per item.** One commit holds one logical change. It
-  also leaves the branch self-consistent, so every cross-reference it adds resolves
-  inside the same commit. Commit each slice as soon as it is complete. Conventional
-  Commits prefix, imperative subject, and a body that says why when the subject cannot
-  carry it. A trivial item is one commit, and that is not a violation. The unit is the
-  **Commit slice** entry in [`orchestrator/CONTEXT.md`](orchestrator/CONTEXT.md). The
-  rationale is
-  [ADR 0013](orchestrator/docs/adr/0013-workers-commit-in-contextualised-slices.md).
-- **Closing a work item is a transaction, not a checklist.** Its five steps hold one
-  order, and they keep the numbers 4 to 8. `scripts/close_item.py` owns them and refuses
-  rather than warns. **A merged pull request is what fires it**, and no verb and no label
-  authorises a close. The tick reads that merge and runs the seam in its own process. The
-  maintainer merges on the tracker, and no session merges. The unit is the **Close
-  transaction** entry in [`orchestrator/CONTEXT.md`](orchestrator/CONTEXT.md). The
-  rationale is
-  [ADR 0015](orchestrator/docs/adr/0015-close-is-a-deterministic-transaction.md) and
-  [ADR 0057](orchestrator/docs/adr/0057-the-merge-is-the-second-act.md).
-- **Every claim in a skill body traces to a reference file or an ADR.** A rule with
-  no home rots.
-- **A decision that reverses or narrows an earlier one gets a new ADR** under
-  `orchestrator/docs/adr/`, rather than a silent edit to the old one. **The older file
-  also gains one pointer forward**, in its preamble, naming the new ADR and what
-  survives. Its decision text stays as it was written. Every edge has a row in
-  [the ADR ledger](orchestrator/docs/adr/README.md), which also names the numbers that
-  are void. `scripts/test_links.py` fails when a row has no pointer behind it, and when a
-  pointer has no row.
-- **Renaming or deleting a reference file means updating every link to it.** A
-  dangling cross-reference is this repo's main failure mode.
+- **Commit in slices, not one blob per item.** One commit holds one logical change. It also
+  leaves the branch self-consistent, so every cross-reference it adds resolves inside the
+  same commit. Commit each slice as soon as it is complete. Use a Conventional Commits
+  prefix, an imperative subject, and a body that says why when the subject cannot carry it.
+  A trivial item is one commit, and that is not a violation.
+- **Every rule in a skill body traces to an ADR or the glossary.** ADRs live under
+  `orchestrator/docs/adr/`. A decision that reverses an earlier one gets a new ADR.
 - **Bump `version` in `.claude-plugin/plugin.json` when a user story finishes.** The bump
   lands with the last child of the story, and never once per work item. Minor for a story
-  that changed a contract or a dependency, patch for a docs-only story. **The story sets
-  that level, and the file types of its last child never change it.** So a
-  documentation-only last child of a contract-changing story still takes the minor. A
-  worker on one child leaves the version untouched. Two children that each bump pick the
-  same number, and the merge then keeps one bump and loses the other.
-- **A work item with no `user-story` parent bumps a patch, in its own branch.** The
-  condition is that the item changes what an installed session or a seam does. An item
-  that changes only this repo's own files bumps nothing: `CLAUDE.md`, a page under
-  `docs/`, an ADR, or a test. The rationale, the rejected release step and the collision
-  between two standalone items are in
-  [ADR 0050](orchestrator/docs/adr/0050-a-standalone-item-bumps-a-patch.md).
+  that changed a contract or a dependency, patch for a docs-only story. The story sets that
+  level, and the file types of its last child never change it. A worker on one child leaves
+  the version untouched.
+- **A work item with no `user-story` parent bumps a patch, in its own branch**, when it
+  changes what an installed skill or the script does. An item that changes only this repo's
+  own files bumps nothing: `CLAUDE.md`, a page under `docs/`, an ADR, or a test.
 
 ## Agent skills
 
@@ -90,8 +44,6 @@ Single-context — `orchestrator/CONTEXT.md` plus ADRs under `orchestrator/docs/
 
 ### Orchestrator
 
-Runs claude workers via orca — `sonnet-5` @ `medium` by default. `opus-5` @ `high` runs on a named `heavy` signal, `sonnet-5` @ `low` on all three `light` conditions. Adversarial review off (on demand only). See `docs/agents/orchestrator.md`.
-
-### Quality gates
-
-`make quick` runs layers 1 and 2, `make full` runs layer 3, and layer 4 is off because `gates.deep` is blank. A non-zero exit is a stop, and `hooks/record.py` appends one line per run to `.orchestrator/gates-<item>.jsonl`. See `orchestrator/references/quality-gates.md`.
+Runs claude workers via orca, one at a time for the first dogfood run. `sonnet` @ `medium`
+by default, `opus` @ `high` on the `heavy` label or three Touches paths, `sonnet` @ `low` on the
+`light` label. See `docs/agents/orchestrator.md`.
