@@ -129,7 +129,8 @@ A non-zero exit is a stop. Report the lines it printed.
 
 Write `docs/agents/orchestrator.md` from [`orchestrator.template.md`](orchestrator.template.md),
 with each `{{...}}` replaced by an answer. Keep the JSON valid. Add `.orchestrator/` to
-`.gitignore` where it is missing, because the Run id and the tick lock live there.
+`.gitignore` where it is missing, because the Run id, the tick file and the tick lock live
+there.
 
 Then run the install from the main checkout:
 
@@ -137,9 +138,13 @@ Then run the install from the main checkout:
 node <plugin root>/scripts/orchestrator.ts install
 ```
 
-It prints one line per label, the Run and the automation, then the proof tick's lines.
-Exit `0` and `the precheck works` mean the loop is live. Any other exit is a stop:
-report its lines.
+It prints one line per label, the Run, the tick file and the automation, then the proof
+tick's lines. Exit `0` and `the precheck works` mean the loop is live. Any other exit is a
+stop: report its lines.
+
+The automation's precheck is one line, `sh '<repo>/.orchestrator/tick.sh'`. To debug a
+tick, run `sh .orchestrator/tick.sh` in the main checkout. That is the same tick, with the
+same exit code.
 
 ## 7. Report
 

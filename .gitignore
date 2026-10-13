@@ -1,4 +1,4 @@
-# The orca Run id and the tick lock. Setup writes them, and they stay local.
+# The orca Run id, the tick file and the tick lock. Setup writes them, and they stay local.
 .orchestrator/
 
 # The dev-only TypeScript tools for the typecheck. npm ci rebuilds them.
