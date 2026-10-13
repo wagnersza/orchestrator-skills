@@ -121,6 +121,11 @@ An issue moves through four state labels, and only the script writes them:
 
 Add the `heavy` or `light` label to an issue to pick its role, or say "work on 42 as heavy".
 
+`node scripts/orchestrator.ts status` prints the same view as "status". It lists the live
+issues first, each with its state, role, harness and PR. Then it lists the ready queue, the
+issues the next tick would claim. Last come the issues that are not eligible, each with the
+reason it waits.
+
 ## How it works
 
 ```
