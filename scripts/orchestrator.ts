@@ -315,23 +315,34 @@ function startAgent(sh: Sh, cwd: string, launch: Launch, spec: string, placed: P
 const TRUST_BLOCKED = "agent-trust-workspace";
 
 // How often, and how many times, a terminal start asks orca whether the trust dialog is
-// up. The harness idles at boot before it draws the dialog, so one idle reading proves
-// nothing, and a key sent then is lost.
+// up, first for it to show and then for it to go. The harness idles at boot before it
+// draws the dialog, so one idle reading proves nothing, and a key sent then is lost.
+// orca still reports the dialog for a second or two after the key, and a bind in that
+// window fails at `agent_readiness`.
 const TRUST_POLLS = 30;
 const TRUST_POLL_SECONDS = "1";
 
-// Wait for the trust dialog of the harness in terminal `handle`, then send its key.
-// Returns the failed call, or null. A dialog that never shows sends nothing.
-function answerTrust(sh: Sh, cwd: string, handle: string, keys: string[]): Result | null {
+// Read whether the trust dialog is up in terminal `handle` until `done` accepts a
+// reading. Returns false where none did.
+function pollTrust(sh: Sh, cwd: string, handle: string, done: (shown: boolean) => boolean): boolean {
   for (let poll = 0; poll < TRUST_POLLS; poll++) {
     if (poll > 0) sh("sleep", [TRUST_POLL_SECONDS], { cwd });
     const wait = sh("orca", ["terminal", "wait", "--terminal", handle, "--for", "tui-idle", "--timeout-ms", "5000", "--json"], { cwd });
     const blocked = (orcaReply(wait) as { result?: { wait?: { blockedReason?: string | null } } }).result?.wait?.blockedReason;
-    if (blocked !== TRUST_BLOCKED) continue;
-    const answer = sh("orca", ["terminal", "send", "--terminal", handle, ...keys, "--json"], { cwd });
-    return answer.code === 0 ? null : answer;
+    if (done(blocked === TRUST_BLOCKED)) return true;
   }
-  return null;
+  return false;
+}
+
+// Wait for the trust dialog of the harness in terminal `handle`, send its key, then wait
+// for the dialog to go. Returns why that failed, or null. A dialog that never shows sends
+// nothing.
+function answerTrust(sh: Sh, cwd: string, handle: string, keys: string[]): string | null {
+  if (!pollTrust(sh, cwd, handle, (shown) => shown)) return null;
+  const answer = sh("orca", ["terminal", "send", "--terminal", handle, ...keys, "--json"], { cwd });
+  if (answer.code !== 0) return orcaError(answer);
+  if (pollTrust(sh, cwd, handle, (shown) => !shown)) return null;
+  return `orca still reported the dialog ${TRUST_POLLS} readings after the key`;
 }
 
 // orca's `--agent` does not know the harness. Make the worktree where it is new, run
@@ -351,12 +362,12 @@ function startTerminal(sh: Sh, cwd: string, launch: Launch, spec: string, placed
   ], { cwd });
   if (terminal.code !== 0) return { failed: `orca terminal create in ${placed.name}`, why: orcaError(terminal) };
   const handle = (JSON.parse(terminal.stdout) as { result: { terminal: { handle: string } } }).result.terminal.handle;
-  const fail = (failed: string, call: Result): Failed => {
+  const fail = (failed: string, why: string): Failed => {
     sh("orca", ["terminal", "close", "--terminal", handle, "--json"], { cwd });
-    return { failed, why: orcaError(call) };
+    return { failed, why };
   };
-  const answer = launch.harness.trust ? answerTrust(sh, cwd, handle, launch.harness.trust) : null;
-  if (answer) return fail(`answering the trust dialog of ${launch.harness.name}`, answer);
+  const trust = launch.harness.trust ? answerTrust(sh, cwd, handle, launch.harness.trust) : null;
+  if (trust) return fail(`answering the trust dialog of ${launch.harness.name}`, trust);
   const worker = sh("orca", [
     "orchestration", "worker-start",
     ...placementFlags(spec, placed, false),
@@ -365,7 +376,7 @@ function startTerminal(sh: Sh, cwd: string, launch: Launch, spec: string, placed
     "--from", from,
     "--json",
   ], { cwd });
-  return worker.code === 0 ? worker : fail("orca worker-start", worker);
+  return worker.code === 0 ? worker : fail("orca worker-start", orcaError(worker));
 }
 
 // The slots `live`, the in-progress issues, take: one per issue that is not a parent.

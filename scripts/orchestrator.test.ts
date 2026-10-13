@@ -511,11 +511,12 @@ function waited(blockedReason?: string) {
   return receipt({ wait: { handle: TERMINAL, condition: "tui-idle", satisfied: !blockedReason, status: "running", blockedReason } });
 }
 
-// The replies a terminal start on issue 10 needs, past the ones every start needs.
+// The replies a terminal start on issue 10 needs, past the ones every start needs. The
+// trust dialog is up until the key is sent.
 const TERMINAL_STARTS = {
   [WT_CREATE(10)]: receipt({ worktree: { path: "/wt/issue-10" } }),
   [TERMINAL_CREATE]: receipt({ terminal: { handle: TERMINAL } }),
-  [WAIT(TERMINAL)]: waited("agent-trust-workspace"),
+  [WAIT(TERMINAL)]: (calls: string[]) => waited(calls.includes(ENTER(TERMINAL)) ? undefined : "agent-trust-workspace"),
   [ENTER(TERMINAL)]: receipt({ send: { accepted: true } }),
 };
 
@@ -574,28 +575,53 @@ test("start runs pi in a terminal it creates, then binds that terminal as the wo
   ]);
 });
 
-test("start runs copilot in a terminal, and answers its trust dialog once orca reports it", () => {
+test("start runs copilot in a terminal, answers its trust dialog, and binds once the dialog is gone", () => {
   const role = { harness: "copilot", model: "gpt-5-mini", effort: "medium" };
-  // copilot idles at boot before it draws the dialog, so the first reading is idle.
+  // Measured on orca 1.4.223 and copilot 1.0.96: copilot idles at boot before it draws
+  // the dialog, and orca still reports the dialog for a second or two after the key.
+  const readings = [undefined, "agent-trust-workspace", "agent-trust-workspace", "agent-trust-workspace", undefined];
   let waits = 0;
   const result = run(["start", "10", "--run", "run_1"], startReplies(10, {}, {
     ...TERMINAL_STARTS,
-    [WAIT(TERMINAL)]: () => (waits++ === 0 ? waited() : waited("agent-trust-workspace")),
+    [WAIT(TERMINAL)]: () => waited(readings[waits++]),
     "sleep 1": "",
   }), repoWithRole(role));
   assert.deepEqual(result.err, []);
   assert.equal(result.code, 0);
   const calls = orcaCalls(result).map((argv) => argv.join(" "));
-  assert.deepEqual(calls.slice(0, 6), [
+  assert.deepEqual(calls.slice(0, -1), [
     WT_CREATE(10),
     "orca terminal create --worktree name:issue-10 --title issue-10 --command copilot --allow-all --model gpt-5-mini --effort medium --json",
     WAIT(TERMINAL),
     "sleep 1",
     WAIT(TERMINAL),
     ENTER(TERMINAL),
+    WAIT(TERMINAL),
+    "sleep 1",
+    WAIT(TERMINAL),
+    "sleep 1",
+    WAIT(TERMINAL),
   ]);
-  assert.match(calls[6] ?? "", new RegExp(`^orca orchestration worker-start --spec .* --terminal ${TERMINAL} --run run_1 `, "s"));
-  assert.equal(calls.length, 7);
+  assert.match(calls.at(-1) ?? "", new RegExp(`^orca orchestration worker-start --spec .* --terminal ${TERMINAL} --run run_1 `, "s"));
+});
+
+test("start closes copilot's terminal and unclaims when its trust dialog stays up after the key", () => {
+  const role = { harness: "copilot", model: "gpt-5-mini", effort: "medium" };
+  const result = run(["start", "10", "--run", "run_1"], startReplies(10, {}, {
+    ...TERMINAL_STARTS,
+    [WAIT(TERMINAL)]: waited("agent-trust-workspace"),
+    [CLOSE(TERMINAL)]: receipt({ closed: true }),
+    "sleep 1": "",
+  }), repoWithRole(role));
+  assert.equal(result.code, 1);
+  assert.deepEqual(result.err, [
+    "error: answering the trust dialog of copilot failed, so #10 is unclaimed again: "
+      + "orca still reported the dialog 30 readings after the key",
+  ]);
+  assert.equal(result.calls.filter((c) => c === ENTER(TERMINAL)).length, 1);
+  assert.equal(workerStart(result), undefined);
+  assert.deepEqual(result.calls.slice(-2), [CLOSE(TERMINAL), PATCH(10)]);
+  assert.deepEqual(patches(result).at(-1), { labels: ["ready-for-agent"], assignees: [] });
 });
 
 test("start sends no key where copilot's trust dialog never shows", () => {
