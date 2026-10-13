@@ -76,3 +76,9 @@ export const NEEDS_HUMAN = "needs-human";
 export const USER_STORY = "user-story";
 // Every state label, one of which an issue in the loop holds.
 export const STATES = [READY, IN_PROGRESS, NEEDS_HUMAN, READY_FOR_HUMAN];
+
+// The orca worktree of an issue: `issue-349`, and `issue-<feature>-NN` on the local
+// tracker, where `01` exists in every feature.
+export function worktreeName(id: Id): string {
+  return `issue-${id.replace(/^.*#/, "").replaceAll("/", "-")}`;
+}

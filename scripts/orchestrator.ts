@@ -12,7 +12,7 @@ import { parseArgs } from "node:util";
 import { sh as realSh, type Result, type Sh } from "./sh.ts";
 import { github } from "./trackers/github.ts";
 import { gitlab } from "./trackers/gitlab.ts";
-import { IN_PROGRESS, NEEDS_HUMAN, READY, READY_FOR_HUMAN, type Id, type Issue, type Label, type Tracker } from "./trackers/tracker.ts";
+import { IN_PROGRESS, NEEDS_HUMAN, READY, READY_FOR_HUMAN, worktreeName, type Id, type Issue, type Label, type Tracker } from "./trackers/tracker.ts";
 
 const ROLES = ["heavy", "medium", "light"] as const;
 
@@ -139,10 +139,6 @@ function render(tracker: Tracker, issue: Issue, base: string, note: string | und
   ];
   if (note) lines.push("", note);
   return lines.join("\n") + "\n";
-}
-
-function worktreeName(id: string): string {
-  return `issue-${id.replace(/^.*#/, "")}`;
 }
 
 // The issue a Task title or a worktree name `issue-N` names, or undefined.
