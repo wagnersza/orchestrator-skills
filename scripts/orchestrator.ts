@@ -5,7 +5,7 @@
 // Every dependency comes in through `main`, so a test drives the script exactly as the
 // skill calls it, with a fake process runner in place of the real one.
 
-import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
@@ -915,7 +915,8 @@ function precheckFor(root: string): string {
 }
 
 // The tick file, written where it is missing and rewritten where it differs, so a new
-// node path or a moved plugin needs no change to the automation.
+// node path or a moved plugin needs no change to the automation. The write goes through a
+// rename, because a tick that read a half-written file could exit 0 and wake the agent.
 function ensureTickFile(cwd: string, deps: Deps): void {
   const path = join(cwd, TICK_PATH);
   const text = tickFileFor(cwd);
@@ -925,7 +926,8 @@ function ensureTickFile(cwd: string, deps: Deps): void {
     return;
   }
   mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, text);
+  writeFileSync(`${path}.tmp`, text);
+  renameSync(`${path}.tmp`, path);
   deps.out(`tick file ${TICK_PATH}: ${found === undefined ? "created" : "repaired"}`);
 }
 
