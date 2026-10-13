@@ -4,6 +4,9 @@ Label an issue, and an agent ships a PR for it. This Claude Code plugin runs age
 on your tracker's `ready-for-agent` issues. Each worker gets its own worktree and runs on
 the harness and model that fit the job. You review the PR, and you say when to merge.
 
+Note: v1 is still available at the v1.0.0 tag: https://github.com/wagnersza/orchestrator-skills/tree/v1.0.0
+
+
 ```
 you label ready-for-agent ─▶ tick claims it ─▶ worker opens a PR ─▶ you review ─▶ "merge N"
                                                      │
