@@ -10,9 +10,9 @@ fenced `json` block below. A field you leave out takes its default. Re-run the
   "base": "{{base}}",
   "max_workers": {{max_workers}},
   "roles": {
-    "heavy":  { "harness": "{{heavy.harness}}",  "model": "{{heavy.model}}",  "effort": "{{heavy.effort}}" },
+    "heavy": { "harness": "{{heavy.harness}}", "model": "{{heavy.model}}", "effort": "{{heavy.effort}}" },
     "medium": { "harness": "{{medium.harness}}", "model": "{{medium.model}}", "effort": "{{medium.effort}}" },
-    "light":  { "harness": "{{light.harness}}",  "model": "{{light.model}}",  "effort": "{{light.effort}}" }
+    "light": { "harness": "{{light.harness}}", "model": "{{light.model}}", "effort": "{{light.effort}}" }
   },
   "role_labels": { "heavy": "heavy", "light": "light" },
   "heavy_touches": 3

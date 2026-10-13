@@ -24,13 +24,15 @@ its values as the recommended answer.
 
 ## 1. Tracker
 
-Read `docs/agents/issue-tracker.md`. If it is missing, run mattpocock's
-`setup-matt-pocock-skills` skill first. Where that skill is not installed, install it,
-then run it:
+Read `docs/agents/issue-tracker.md`. If it is missing, mattpocock's
+`setup-matt-pocock-skills` skill writes it. Where that skill is not installed, install it:
 
 ```sh
 npx -y skills@latest add mattpocock/skills -s setup-matt-pocock-skills -a claude-code -g -y
 ```
+
+That skill runs only when the user types it, so ask the user to run
+`/setup-matt-pocock-skills`, and continue here once the file exists.
 
 The file's heading names the tracker. Map it to the `tracker` field: GitHub is `github`,
 GitLab is `gitlab`, and local markdown is `local`. Any other tracker is not supported, so
@@ -60,8 +62,9 @@ sets that role's `harness`, `model` or `effort`:
 
 Ask for `max_workers`, with `3` as the recommended answer. Then ask for the base branch.
 The recommended answer is the remote's default branch,
-`git symbolic-ref --short refs/remotes/origin/HEAD` without its `origin/` prefix, or
-`main` where that prints nothing.
+`git symbolic-ref --short refs/remotes/origin/HEAD` without its `origin/` prefix. A new
+clone may lack that ref, so run `git remote set-head origin -a` first, and fall back to
+`main` where both fail.
 
 ## 4. Dependencies
 
@@ -71,6 +74,7 @@ is a stop. Name the tool, and give the user the command to run.
 | Needed for | Check | Install |
 |---|---|---|
 | orca | `orca --version` | the Orca app, which ships the CLI |
+| this repo in orca | `orca repo list --json` lists the main checkout's path | `orca repo add --path <main checkout>` |
 | Node ≥ 22.18 | `node --version` | `nvm install 24`, or the user's own Node manager |
 | `tracker` `github` | `gh auth status` | `brew install gh`, then `! gh auth login` |
 | `tracker` `gitlab` | `glab auth status` | `brew install glab`, then `! glab auth login` |
