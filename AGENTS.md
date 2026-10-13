@@ -45,6 +45,6 @@ Single-context — `orchestrator/CONTEXT.md` plus ADRs under `orchestrator/docs/
 
 ### Orchestrator
 
-Runs claude workers via orca, one at a time for the first dogfood run. `sonnet` @ `medium`
+Runs up to 3 claude workers at once via orca. `sonnet` @ `medium`
 by default, `opus` @ `high` on the `heavy` label or three Touches paths, `sonnet` @ `low` on the
 `light` label. See `docs/agents/orchestrator.md`.

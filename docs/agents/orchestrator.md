@@ -8,7 +8,7 @@ fenced `json` block below. A field you leave out takes its default. Re-run the
 {
   "tracker": "github",
   "base": "main",
-  "max_workers": 1,
+  "max_workers": 3,
   "roles": {
     "heavy": { "harness": "claude", "model": "opus", "effort": "high" },
     "medium": { "harness": "claude", "model": "sonnet", "effort": "medium" },
@@ -26,7 +26,7 @@ fenced `json` block below. A field you leave out takes its default. Re-run the
   `github`.
 - **`base`**: the branch each worktree starts from and each PR targets. Default `main`.
 - **`max_workers`**: how many workers the tick keeps running at once. A parent issue takes
-  no slot. Default `3`. It is `1` here on purpose, for the first dogfood run of v2.
+  no slot. Default `3`.
 - **`roles`**: the `harness`, `model` and `effort` of each role. This is the `balanced` cost
   profile. On `claude`, the model is the CLI's own alias, because it refuses a versioned id
   such as `sonnet-5`. `harness` is one of `claude`, `codex`, `cursor`, `pi` and `copilot`.
