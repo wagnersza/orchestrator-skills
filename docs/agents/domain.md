@@ -7,8 +7,8 @@ How the engineering skills should consume this repo's domain documentation when 
 **In this repo the domain docs are not at the root** — they sit with the skill they
 describe:
 
-- **`orchestrator/CONTEXT.md`** — the vocabulary (Tool, Harness, Model, Effort,
-  Role, Worker, Checklist, …). Read it before touching any skill body.
+- **`orchestrator/CONTEXT.md`** — the vocabulary (Worker, Harness, Role, Tick,
+  State label, Claim, …). Read it before touching any skill body.
 - **`orchestrator/docs/adr/`** — read the ADRs that touch the area you're about to
   work in.
 

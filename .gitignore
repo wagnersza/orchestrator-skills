@@ -1,8 +1,5 @@
-# Worker checklist files — live in the worktree, torn down with it.
+# The orca Run id and the tick lock. Setup writes them, and they stay local.
 .orchestrator/
 
-# Python bytecode from running the seam's test suite.
-__pycache__/
-
-# The dev-only TypeScript tools for the v2 typecheck. npm ci rebuilds them.
+# The dev-only TypeScript tools for the typecheck. npm ci rebuilds them.
 node_modules/
