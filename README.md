@@ -94,8 +94,8 @@ is missing.
 4. **Setup writes the config and starts the loop.** It writes `docs/agents/orchestrator.md`,
    then runs the script's `install`. That creates the state labels, the orca Run, the
    `orchestrator-tick` automation and one proof tick. The automation runs
-   `.orchestrator/tick.sh`, and `sh .orchestrator/tick.sh` runs the same tick by hand. The install ends with
-   `the precheck works` when the loop is live.
+   `.orchestrator/tick.sh`, and `sh .orchestrator/tick.sh` runs the same tick by hand. The
+   install ends with `the precheck works` when the loop is live.
 
 This repo's own config is [`docs/agents/orchestrator.md`](docs/agents/orchestrator.md).
 Edit its JSON block by hand, or re-run setup to change it.

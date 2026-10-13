@@ -1826,13 +1826,14 @@ function tickFile(cwd: string): string {
   ].join("\n");
 }
 
-// A repo that a past install left with `run` saved and the current tick file.
-function installed(run: string): string {
-  const cwd = withRunFile(run);
+// A repo that a past install left with the run file `text` and the current tick file.
+function installed(text: string): string {
+  const cwd = withRunFile(text);
   writeFileSync(join(cwd, ".orchestrator", "tick.sh"), tickFile(cwd));
   return cwd;
 }
 
+// The tick file install wrote in `cwd`.
 function writtenTickFile(cwd: string): string {
   return readFileSync(join(cwd, ".orchestrator", "tick.sh"), "utf8");
 }

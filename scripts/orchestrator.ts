@@ -1009,8 +1009,8 @@ function ensureAutomation(sh: Sh, cwd: string, deps: Deps): void {
 }
 
 // `install`: labels, then the Run, then the tick file, then the automation, then one tick
-// through the exact precheck string, as proof it runs. Each step that finds its part present creates
-// nothing, so a re-run repairs a broken install and duplicates nothing.
+// through the exact precheck string, as proof it runs. Each step that finds its part
+// present creates nothing, so a re-run repairs a broken install and duplicates nothing.
 function install(config: Config, tracker: Tracker, sh: Sh, cwd: string, deps: Deps): number {
   const created = new Set(tracker.ensureLabels(labelsFor(config)));
   for (const label of labelsFor(config)) deps.out(`label ${label.name}: ${created.has(label.name) ? "created" : "present"}`);
