@@ -962,6 +962,63 @@ test("tick moves a question to needs-human, posts it with its options, and stops
   assert.equal(result.calls.some((c) => c.includes("worktree")), false);
 });
 
+// The replies orca gave a release and a stop of a worker on a terminal the script
+// created, on the copilot proof of run_caa3a9907dfe. The stop exits 1.
+const KEPT_RELEASE = receipt({ dispatchId: "ctx_10", state: "retained", reason: "external_terminal", processAction: "none" });
+const KEPT_STOP = {
+  fail: {
+    code: 1,
+    stdout: JSON.stringify(receipt({
+      dispatchId: "ctx_10", state: "stop_unknown", alreadySettled: false, processAction: "none",
+      lastError: "The worker terminal is external; no terminal was closed.",
+    })),
+    stderr: "",
+  },
+};
+
+test("tick closes the terminal of a terminal-start worker that orca releases but keeps running", () => {
+  const result = run(TICK, tickReplies(
+    {
+      messages: [message(10, "worker_done", { outcome: "succeeded" })],
+      tasks: [task(10)],
+      workers: [{ ...worker(10), agentTerminalHandle: "term_w10" }],
+      issues: { 10: ["in-progress"] },
+    },
+    { [PRS(10)]: prs([12, "OPEN"]), [RELEASE(10)]: KEPT_RELEASE, [CLOSE("term_w10")]: receipt({ closed: true }) },
+  ));
+  assert.deepEqual(result.err, []);
+  assert.deepEqual(result.out, ["#10: in-progress -> ready-for-human (worker_done succeeded, PR #12); released ctx_10, closed its terminal"]);
+  assert.deepEqual(result.calls.slice(6, 9), [RELEASE(10), CLOSE("term_w10"), PATCH(10)]);
+});
+
+test("tick closes the terminal of a terminal-start worker whose stop orca cannot finish", () => {
+  const result = run(TICK, tickReplies(
+    {
+      messages: [message(10, "question", { body: "Keep the old flag?" })],
+      tasks: [task(10)],
+      workers: [{ ...worker(10), agentTerminalHandle: "term_w10" }],
+      issues: { 10: ["in-progress"] },
+    },
+    { [STOP(10)]: KEPT_STOP, [CLOSE("term_w10")]: receipt({ closed: true }) },
+  ));
+  assert.deepEqual(result.err, []);
+  assert.deepEqual(result.out, ["#10: in-progress -> needs-human (question); stopped ctx_10, closed its terminal, commented"]);
+});
+
+test("tick reports a terminal it cannot close, and still moves the issue", () => {
+  const result = run(TICK, tickReplies(
+    {
+      messages: [message(10, "question", { body: "Keep the old flag?" })],
+      tasks: [task(10)],
+      workers: [{ ...worker(10), agentTerminalHandle: "term_w10" }],
+      issues: { 10: ["in-progress"] },
+    },
+    { [STOP(10)]: KEPT_STOP },
+  ));
+  assert.deepEqual(result.err, ["tick: #10: orca terminal close term_w10 failed: unexpected call: orca terminal close --terminal term_w10 --json"]);
+  assert.deepEqual(result.out, ["#10: in-progress -> needs-human (question); commented"]);
+});
+
 test("tick moves an escalation to needs-human and stops the worker", () => {
   const result = run(TICK, tickReplies(
     { messages: [message(10, "escalation", { body: "I need repo admin." })], tasks: [task(10)], issues: { 10: ["in-progress"] } },

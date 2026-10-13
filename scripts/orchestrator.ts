@@ -484,13 +484,19 @@ type Task = { id: string; task_title?: string | null; result?: string | null };
 type Worker = {
   dispatchId: string;
   taskId?: string;
+  agentTerminalHandle?: string | null;
   resource?: { worktreeId?: string } | null;
   projection?: { liveness?: { verdict?: string } };
 };
 
 // What the tick reads from orca before it acts: each Task by id, and each Dispatch,
-// newest first, with the issue it works on.
-type Observed = { tasks: Map<string, Task>; workers: Worker[]; issueOf: (task?: string, dispatch?: string) => Id | undefined };
+// newest first, with the issue it works on and its agent terminal.
+type Observed = {
+  tasks: Map<string, Task>;
+  workers: Worker[];
+  issueOf: (task?: string, dispatch?: string) => Id | undefined;
+  terminalOf: (dispatch: string) => string | undefined;
+};
 
 function observe(sh: Sh, cwd: string, run: string): Observed {
   const tasks = new Map(orca<{ tasks: Task[] }>(sh, cwd, ["task-list", "--run", run]).tasks.map((t) => [t.id, t]));
@@ -510,7 +516,24 @@ function observe(sh: Sh, cwd: string, run: string): Observed {
     return issueNamed(tasks.get(task ?? worker?.taskId ?? "")?.task_title)
       ?? issueNamed(basename(worker?.resource?.worktreeId ?? ""));
   };
-  return { tasks, workers, issueOf };
+  return { tasks, workers, issueOf, terminalOf: (dispatch) => byDispatch.get(dispatch)?.agentTerminalHandle ?? undefined };
+}
+
+// Release or stop the worker on `dispatch`. Returns what it did, or the step that
+// failed. orca leaves a terminal start's worker running, because the script and not orca
+// created its terminal. It says so, and exits 1 on a stop, so the script closes that
+// terminal itself.
+function settle(sh: Sh, cwd: string, verb: "worker-release" | "worker-stop", dispatch: string, seen: Observed): { done: string } | Failed {
+  const call = sh("orca", ["orchestration", verb, "--dispatch", dispatch, "--json"], { cwd });
+  const reply = orcaReply(call) as OrcaReply & { result?: { processAction?: string; reason?: string; lastError?: string } };
+  const kept = reply.result?.processAction === "none"
+    && (reply.result.reason === "external_terminal" || /terminal is external/.test(reply.result.lastError ?? ""));
+  const handle = seen.terminalOf(dispatch);
+  const done = verb === "worker-stop" ? `stopped ${dispatch}` : `released ${dispatch}`;
+  if (!kept || !handle) return call.code === 0 ? { done } : { failed: `orca ${verb} ${dispatch}`, why: orcaError(call) };
+  const close = sh("orca", ["terminal", "close", "--terminal", handle, "--json"], { cwd });
+  if (close.code !== 0) return { failed: `orca terminal close ${handle}`, why: orcaError(close) };
+  return { done: `${done}, closed its terminal` };
 }
 
 // A message's payload, which orca sends as a JSON string.
@@ -576,13 +599,13 @@ function transitionFor(tracker: Tracker, id: Id, message: Message): Transition |
 // Apply one transition to an in-progress issue. The orca call and the comment come
 // first and the label last, so a replay before the label redoes them, and a replay
 // after it finds the issue out of in-progress and writes nothing.
-function apply(tracker: Tracker, sh: Sh, cwd: string, issue: Issue, step: Transition, dispatch: string | undefined, deps: Deps): void {
+function apply(tracker: Tracker, sh: Sh, cwd: string, seen: Observed, issue: Issue, step: Transition, dispatch: string | undefined, deps: Deps): void {
   const ref = tracker.ref(issue.id);
   const done: string[] = [];
   if (step.orca && dispatch) {
-    const call = sh("orca", ["orchestration", step.orca, "--dispatch", dispatch, "--json"], { cwd });
-    if (call.code === 0) done.push(step.orca === "worker-stop" ? `stopped ${dispatch}` : `released ${dispatch}`);
-    else deps.err(`tick: ${ref}: orca ${step.orca} ${dispatch} failed: ${orcaError(call)}`);
+    const settled = settle(sh, cwd, step.orca, dispatch, seen);
+    if ("done" in settled) done.push(settled.done);
+    else deps.err(`tick: ${ref}: ${settled.failed} failed: ${settled.why}`);
   }
   if (step.comment) {
     tracker.comment(issue.id, step.comment);
@@ -620,7 +643,7 @@ function drain(tracker: Tracker, sh: Sh, cwd: string, run: string, from: () => s
       }
       const issue = inProgress(tracker, id, `${message.type} ${message.id}`, deps);
       const step = issue && transitionFor(tracker, id, message);
-      if (issue && step) apply(tracker, sh, cwd, issue, step, dispatch, deps);
+      if (issue && step) apply(tracker, sh, cwd, seen, issue, step, dispatch, deps);
     }
     batch = orca(sh, cwd, [...check, "--ack", batch.deliveryId]);
   }
@@ -640,7 +663,7 @@ function catchDeaths(tracker: Tracker, sh: Sh, cwd: string, seen: Observed, hand
     if (reported(seen.tasks.get(worker.taskId ?? ""))) continue;
     const issue = tracker.view(id);
     if (!issue.open || !issue.labels.includes(IN_PROGRESS)) continue;
-    apply(tracker, sh, cwd, issue, {
+    apply(tracker, sh, cwd, seen, issue, {
       to: NEEDS_HUMAN,
       why: "worker exited without reporting",
       comment: `The worker exited without sending worker_done, so it left no report. ${RESUME}`,
