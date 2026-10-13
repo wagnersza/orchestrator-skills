@@ -1,180 +1,39 @@
-<!--
-Seed for docs/agents/orchestrator.md in a target repo.
-Written by /orchestrator-setup. Human-editable afterwards.
-The orchestrator skill reads the values in the fenced block; the prose explains each.
--->
-
 # Orchestrator config
 
-How the orchestrator runs workers in **this** repo. Edit freely; re-run
-`/orchestrator-setup` only to start over.
+How the orchestrator runs workers in this repo. `scripts/orchestrator.ts` reads the first
+fenced `json` block below. A field you leave out takes its default. Re-run the
+`orchestrator-setup` skill to change it, or edit the block and keep it valid JSON.
 
-```yaml
-# --- workspace + agent CLI ---
-tool:     orca            # orca | cmux | herdr  -> references/tools/<tool>.md
-harness:  claude          # claude | codex | pi | copilot | cursor -> references/harnesses/<h>.md
-yolo:     on              # required; the harness ref supplies the actual flag
-
-# --- right model for the job: one (model, effort) pair per role ---
-# Roles, the routing rule, and the cost profiles are in references/models.md.
-# This block is the `balanced` profile; swap any pair freely.
-models:
-  heavy:                  # multi-file feature, refactor, migration, open decisions
-    model:  opus-5
-    effort: high          # `xhigh` = max-capability profile; `medium` = conservative
-  medium:                 # the default role: every other work item, see
-    model:  sonnet-5      # references/models.md for the signal lists that route
-    effort: medium        # an item to `heavy` or `light` instead
-  light:                  # single-file/scoped edit, fully enumerated criteria
-    model:  sonnet-5
-    effort: low
-  review:                 # the adversarial reviewer (see `review` below)
-    model:  gpt-5.6-terra
-    effort: high
-
-# --- adversarial review ---
-# It is a verb: `review N` spawns the reviewer, and no tick reaches one. There is no
-# switch and no round bound (ADR 0066). The pair comes from models.review above, and
-# its vendor MUST differ from the impl role's.
-
-# --- the two roofs on live work (ADR 0045) ---
-# The queue tick reads both, and the lower one wins. It starts nothing where either roof
-# is full.
-max_stories: 2            # live Story runs at once. A run holds its slot until the parent
-                          # closes, story proof included
-max_workers: 4            # live Workers across every run. The worst case is 4 workers, and
-                          # never 2 times 4
-
-# --- parallel spawn gate (ADR 0046) ---
-parallel_check: touches   # touches | off -> compare declared Touch sets before a parallel
-                          # spawn. `off` compares nothing. An item with no `## Touches`
-                          # block runs alone under `touches`
-
-# --- repo + tracker ---
-repo:     /abs/path/to/this/repo   # the main checkout; stays on the default branch
-tracker:  # read from docs/agents/issue-tracker.md; do NOT redefine labels or
-          # board coordinates here
-
-# --- project recipe (the completion contract's project-specific parts) ---
-setup_cmd:  ""            # e.g. "pnpm install" — run by the tool's setup hook
-run_recipe: ""            # e.g. "scripts/run.sh start -d -a $BE -w $FE -g $GA"
-ports:      ""            # e.g. "FE=3000+N BE=8000+N GA=3100+N"  (N = work-item number)
-db_gate:    ""            # e.g. "alembic upgrade head; verify new column/table exists"
-evidence:   "make deep green + real-data proof"  # the evidence bar
-
-# --- quality gates (the layered completion bar) ---
-# The layer model and every language gate matrix are in references/quality-gates.md.
-# Config is the source of truth for a threshold.
-gates:
-  langs:   python         # the language families that setup found, comma-separated
-  quick:   "make quick"   # layers 1 + 2 — format, lint, types, tests, complexity
-  full:    "make full"    # layer 3 — coverage, import boundaries, secrets
-  deep:    "make deep"    # layer 4 — mutation score, SAST, dependency CVEs
-  story:   "/improve-codebase-architecture"  # layer 5 — advisory, once per story
-  thresholds:             # blank = no cap, so the tool's own default stands
-    complexity: 10        # cyclomatic branches per function
-    cognitive:  ""        # the Python matrix declares no default
-    funlen:     ""        # the Python matrix declares no default
-    coverage:   85        # percent of lines
-    branch:     ""        # the Python matrix declares no default
-    mutation:   70        # percent of mutants the suite kills
-  infra:                  # every field blank until the Terraform column lands
-    plan_role:    ""      # blank = no plan gate
-    policy_dir:   ""      # where the policy files live
-    fixtures:     ""      # the saved plans those policies read
-    halt_on:      ""      # the halt conditions that stop an apply
-    zero_changes: ""      # the target a second plan must report with no change
+```json
+{
+  "tracker": "{{tracker}}",
+  "base": "{{base}}",
+  "max_workers": {{max_workers}},
+  "roles": {
+    "heavy": { "harness": "{{heavy.harness}}", "model": "{{heavy.model}}", "effort": "{{heavy.effort}}" },
+    "medium": { "harness": "{{medium.harness}}", "model": "{{medium.model}}", "effort": "{{medium.effort}}" },
+    "light": { "harness": "{{light.harness}}", "model": "{{light.model}}", "effort": "{{light.effort}}" }
+  },
+  "role_labels": { "heavy": "heavy", "light": "light" },
+  "heavy_touches": 3
+}
 ```
 
-## Notes
+## The fields
 
-- **tool / harness** pick the workspace and the agent CLI. The skill reads the
-  matching reference files for concrete commands; nothing tool-specific is
-  hardcoded in the skill body.
-- **models** picks the right model for the job — one `(model, effort)` pair per
-  **role**, not one global model. The orchestrator classifies each work item into
-  a role at spawn time (`heavy` / `medium` / `light`). `medium` is the default
-  role — the orchestrator takes `heavy` or `light` only on a named signal. The
-  routing rule, the signal lists, and the effort ladder live in
-  `references/models.md`.
-  - **Effort** tunes how much the model *thinks*: `low | medium | high | xhigh | max`.
-    Both frontier models default to `high`.
-  - The **harness clamps** what it can express — `codex` tops out at `high`,
-    `pi` at `xhigh`, `cursor` bakes effort into the model id. The harness
-    reference holds the map, and the orchestrator reports any clamp.
-  - **Cost profile.** The block above is `balanced`. `conservative` drops heavy to
-    `medium` effort, and it runs both `medium` and `light` roles at `low` on
-    `sonnet-5`. `max-capability` runs heavy at `xhigh`, medium on `opus-5` @
-    `high`, and light on `sonnet-5` @ `high`. Full table + per-MTok prices in
-    `references/models.md`. Cheaper is not always cheaper — a worker that
-    under-thinks costs a whole round trip, more than the effort saved.
-  - **Single-model setup?** Replace the `models:` block with a flat
-    `model:`/`effort:` pair — every role then uses it (with `models.review`, or the
-    legacy `review.model`, still honoured for review).
-- **yolo** is always required for a worker (nobody approves its prompts). The
-  harness reference names the actual flag.
-- **review** — a verb. On `review N` the orchestrator asserts `models.review.model`'s
-  vendor differs from the impl role's (see `references/models.md`). The reviewer posts
-  one comment on the work item, and nothing parses it.
-- **Work-state labels** — one family, four values, and it never stacks
-  (`ready-for-agent`, `in-progress`, `to-review`, `needs-human`) — come from
-  `docs/agents/issue-tracker.md`, not this file — single source of truth. So do the
-  **project board** coordinates, in its `## Project board` section: the project
-  owner/number, and the name of the start column. **The board is an input, and nothing
-  writes it.** One question is asked of it: is this item's card in the start column. So
-  the token needs `read:project` and no write scope. A repo with no board omits that
-  section, and the label alone is the whole gate. **The board's own built-in
-  item closed to Done workflow is what moves a card to `Done`, and the maintainer
-  enables it.** Rationale:
-  `orchestrator/docs/adr/0054-the-board-is-an-input-not-a-mirror.md`.
-- **Project recipe** fields are the only place project specifics live. Leave a
-  field blank if it doesn't apply (e.g. `db_gate` for a repo with no database).
-- `N` in `ports` is the work-item number, so parallel workers never collide.
-- **evidence** stays a **superset** of the gates. `make deep green` is the machine
-  half. `real-data proof` is the half that no gate command produces, because no gate
-  drives a browser through the **Browser surface**. So the field asks for both.
-- **gates** is the completion bar. Layers 1 to 4 each run one command inside the
-  worker's own worktree, before the push. A non-zero exit stops the work. Layer 5
-  runs once per user story, and it is advisory. The layer model, the gate matrix of
-  each language family and the default for each number are in
-  `references/quality-gates.md`. The rationale is
-  `orchestrator/docs/adr/0032-quality-gates-are-a-layered-contract.md`.
-  - **langs** lists the language families that setup found, comma-separated. `python`
-    and `typescript` each have a gate matrix today, and each other family is a work
-    item of its own. The marker for `typescript` is a `tsconfig.json`. One hit turns
-    the column on. So several `tsconfig.json` files in a monorepo are one hit and not
-    several, because the gate commands run from the repo root.
-  - **quick / full / deep** are layers 1+2, 3 and 4. A worker runs `quick` after
-    each edit and before each commit, `full` before the push, and `deep` once per
-    item. `story` is layer 5, and the orchestrator session runs it.
-  - **A blank command field drops that layer's box** from the checklist, before the
-    orchestrator sends it. A blank recipe field does the same. A repo with no
-    mutation runner leaves `deep` blank. The worker then cannot fail a box that no
-    command can satisfy. **A blank command is a supported configuration and not a
-    gap.**
-  - **thresholds** hold the numbers that the gates read, and **config is the source
-    of truth for a threshold**. A maintainer raises coverage here, in one place, and
-    not in five tool configs. `references/quality-gates.md` holds the default for
-    each one, so no number stands twice with two values. `complexity` counts
-    cyclomatic branches per function, and `coverage`, `branch` and `mutation` are
-    percentages. A blank threshold is no cap, so the tool's own default stands.
-    `cognitive`, `funlen` and `branch` ship blank, because the `python` family in this
-    seed declares no default for them. The TypeScript column declares a default for
-    each of the three. So a repo whose `langs` holds `typescript` carries a number in
-    every threshold.
-  - **Each TypeScript threshold has one tool config that reads it.** `complexity` maps
-    to the `eslint` rule option of the same name. `cognitive` maps to the option of
-    `sonarjs/cognitive-complexity`, and `funlen` to the option of
-    `max-lines-per-function`. The coverage pair maps to the `vitest` coverage
-    thresholds: `coverage` to `lines`, and `branch` to `branches`.
-  - **Setup writes each threshold into the tool config that reads it**, so the number
-    reaches that tool with no hand step. **Setup never rewrites a tool config that it
-    did not create.** If that file already exists, setup reports both values, asks
-    which threshold is correct, and then writes only that key.
-  - **infra** configures the plan gate of an infrastructure repo. `plan_role` names
-    the role that the plan runs as, and **a blank `plan_role` means no plan gate**.
-    `policy_dir` holds the policy files, and `fixtures` holds the saved plans that
-    those policies read. `halt_on` holds the **Halt condition** list that stops an
-    apply, and `zero_changes` names the target that a second plan must report with no
-    change. Every field ships blank, because the Terraform and Kubernetes columns are
-    each a work item of their own.
+- **`tracker`**: `github`, `gitlab` or `local`. Setup reads it from
+  `docs/agents/issue-tracker.md`, so the tracker is stated in one place. Default `github`.
+- **`base`**: the branch each worktree starts from and each PR targets. Default `main`.
+- **`max_workers`**: how many workers run at once. A parent issue takes no slot. Default `3`.
+- **`roles`**: the `harness`, `model` and `effort` of each role. `harness` is one of
+  `claude`, `codex`, `cursor`, `pi` and `copilot`. `effort` is one of `low`, `medium`,
+  `high`, `xhigh` and `max`. A harness that cannot take an effort runs the nearest one
+  below it, and the start line says so. A model the harness cannot launch, such as an
+  openai model under `claude`, refuses the start.
+- **`role_labels`**: the labels that pick a role. An issue with the `heavy` label runs on
+  the heavy role, and one with the `light` label on the light role.
+- **`heavy_touches`**: an issue with no role label runs on the heavy role when its
+  `## Touches` block lists at least this many paths. Every other issue runs on the medium
+  role. Default `3`.
+
+`start N --role <role>` overrides all of these for one start.

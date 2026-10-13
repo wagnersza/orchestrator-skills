@@ -15,9 +15,9 @@ interface as wide as its implementation, and every box is ticked.
 
 A fifth layer reads that shape. It runs once per user story, on the close of the last
 child, and it runs `/improve-codebase-architecture` in the main checkout. The layer model
-is [`orchestrator/references/quality-gates.md`](../../references/quality-gates.md), and
+is [`orchestrator/references/quality-gates.md`](https://github.com/wagnersza/orchestrator-skills/blob/v1.0.0/orchestrator/references/quality-gates.md), and
 the trigger is the story-gate section of
-[`orchestrator/references/story-flows.md`](../../references/story-flows.md#the-layer-5-story-gate).
+[`orchestrator/references/story-flows.md`](https://github.com/wagnersza/orchestrator-skills/blob/v1.0.0/orchestrator/references/story-flows.md#the-layer-5-story-gate).
 
 ## The decision
 
@@ -45,9 +45,9 @@ report the skill writes. A second copy of that shape drifts from the maintained 
 ## One routing row, and no new dependency
 
 `improve-codebase-architecture` ships inside `mattpocock-skills`, which
-[`orchestrator/references/requirements.md`](../../references/requirements.md) already
+[`orchestrator/references/requirements.md`](https://github.com/wagnersza/orchestrator-skills/blob/v1.0.0/orchestrator/references/requirements.md) already
 declares **Always required**. So the note on
-[`orchestrator/references/skill-routing.md`](../../references/skill-routing.md) still
+[`orchestrator/references/skill-routing.md`](https://github.com/wagnersza/orchestrator-skills/blob/v1.0.0/orchestrator/references/skill-routing.md) still
 holds: every routed skill ships in that plugin. This row needs **no** new dependency row,
 and `requirements.md` is unchanged by this decision.
 

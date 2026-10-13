@@ -22,7 +22,7 @@ candidate work items instead of an exit code, so it can never fail a push or a m
 
 The five layers, the budget for each, and the threshold and tool per Gate live in one
 reference file:
-[`orchestrator/references/quality-gates.md`](../../references/quality-gates.md). Every
+[`orchestrator/references/quality-gates.md`](https://github.com/wagnersza/orchestrator-skills/blob/v1.0.0/orchestrator/references/quality-gates.md). Every
 claim about a Gate traces there. The vocabulary lands with that file, in
 [`orchestrator/CONTEXT.md`](../../CONTEXT.md): **Gate**, **Layer** and **Halt
 condition**.
@@ -83,7 +83,7 @@ ADR is the rule that block obeys, so the rule exists before the block does.
   one lowers it in config, which is a supported answer and not a breach.
 - **Accepted risk: the matrix can name a tool no machine can install.** One test closes
   half of that risk: every tool in the matrix has a row in
-  [`orchestrator/references/requirements.md`](../../references/requirements.md). The
+  [`orchestrator/references/requirements.md`](https://github.com/wagnersza/orchestrator-skills/blob/v1.0.0/orchestrator/references/requirements.md). The
   test is `scripts/test_quality_gates.py`, and this ADR names it before it exists, in the
   same shape as the **Worker watch** seam. No test runs an install command, so a stale
   install command stays possible.

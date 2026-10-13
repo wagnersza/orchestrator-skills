@@ -55,7 +55,7 @@ ceiling is still refused.
 ## The number is not a config field
 
 A threshold in config is the **Gate** pattern
-([`references/quality-gates.md`](../../references/quality-gates.md),
+([`references/quality-gates.md`](https://github.com/wagnersza/orchestrator-skills/blob/v1.0.0/orchestrator/references/quality-gates.md),
 [ADR 0032](0032-quality-gates-are-a-layered-contract.md)). A coverage bar earns that
 place, because a coverage bar is a property of the target repo. The maintainer of that
 repo sets it, and setup writes the number into the tool that reads it.

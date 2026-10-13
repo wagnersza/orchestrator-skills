@@ -26,7 +26,7 @@ step 0a, on **every** invocation and in both modes.
 Three limits hold it in place.
 
 1. **The names come from the `Skill` column of a row in
-   [`orchestrator/references/skill-routing.md`](../../references/skill-routing.md).** No
+   [`orchestrator/references/skill-routing.md`](https://github.com/wagnersza/orchestrator-skills/blob/v1.0.0/orchestrator/references/skill-routing.md).** No
    list of names lives in the setup skill, so nothing goes stale when a row moves. A skill
    that file names in its prose alone keeps its flag, and `orchestrator-setup` itself is
    one of those.
@@ -108,7 +108,7 @@ prompt.
   **Browser surface** rule as well
   ([ADR 0012](0012-playwright-cli-is-the-only-browser-surface.md)).
 - **Accepted risk: the loop can miss an install shape.** It searches the shapes
-  [`orchestrator/references/requirements.md`](../../references/requirements.md) declares. An
+  [`orchestrator/references/requirements.md`](https://github.com/wagnersza/orchestrator-skills/blob/v1.0.0/orchestrator/references/requirements.md) declares. An
   unknown shape keeps its flag, and the setup report does not name it, because the loop
   never found the file.
 - **Accepted risk: the grep for names is a text match.** It reads the `Skill` column of a

@@ -56,7 +56,7 @@ resolver reads the cache first. The cache holds the skill body that the session 
 and a seam from one version beside a skill body from another is drift. **The
 `SessionStart` hook now performs this resolution and injects the result into the
 session's context**, so no command runs it by hand any more
-([`orchestrator/references/hooks.md`](../../references/hooks.md)).
+([`orchestrator/references/hooks.md`](https://github.com/wagnersza/orchestrator-skills/blob/v1.0.0/orchestrator/references/hooks.md)).
 
 **The spawn preflight runs the resolved command before the first Item automation
 exists.** It runs `--help`, which mutates nothing, and a non-zero exit **aborts the

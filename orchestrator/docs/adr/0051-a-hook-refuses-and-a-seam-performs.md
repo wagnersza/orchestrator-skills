@@ -36,13 +36,13 @@ job:
 A hook never writes a label, never merges a pull request and never starts a worker.
 That is what keeps a hook fast, safe, and testable through one JSON payload. The three
 hooks, their events and the failure each one kills are in
-[`orchestrator/references/hooks.md`](../../references/hooks.md).
+[`orchestrator/references/hooks.md`](https://github.com/wagnersza/orchestrator-skills/blob/v1.0.0/orchestrator/references/hooks.md).
 
 **`record.py` is the one named exception, and the reason is stated rather than
 hidden: a record a model writes is a record a model can fake.** That hook appends one
 line to `.orchestrator/gates-<item>.jsonl`. It is not a mutation of the tracker, and
 it is not a decision. It is an append-only note of what a command already did, in the
-format [`orchestrator/references/quality-gates.md`](../../references/quality-gates.md)
+format [`orchestrator/references/quality-gates.md`](https://github.com/wagnersza/orchestrator-skills/blob/v1.0.0/orchestrator/references/quality-gates.md)
 already holds. No other hook writes a file, and a second exception needs an ADR of its
 own.
 

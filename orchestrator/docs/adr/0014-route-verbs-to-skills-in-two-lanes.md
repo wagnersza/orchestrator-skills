@@ -16,7 +16,7 @@ Both failures are silent. Nothing errors, and the output is plausible. The cost 
 quality lower than what the declared dependencies already provide.
 
 A verb now resolves through one table:
-[`orchestrator/references/skill-routing.md`](../../references/skill-routing.md).
+[`orchestrator/references/skill-routing.md`](https://github.com/wagnersza/orchestrator-skills/blob/v1.0.0/orchestrator/references/skill-routing.md).
 Each row gives a verb and its aliases, the skill that owns the job, the **Lane**,
 and what the skill needs handed to it. The vocabulary is the **Skill routing** and
 **Lane** entries in [`orchestrator/CONTEXT.md`](../../CONTEXT.md).
@@ -115,7 +115,7 @@ for.
   plugin set.
 - **Every row must name a declared dependency.** Each skill in the table ships in
   `mattpocock-skills`, already **Always required** in
-  [`orchestrator/references/requirements.md`](../../references/requirements.md). A
+  [`orchestrator/references/requirements.md`](https://github.com/wagnersza/orchestrator-skills/blob/v1.0.0/orchestrator/references/requirements.md). A
   row that needs a new dependency row points at something uninstalled — drop the row.
 - **Routing is independent of Role.** Verb → skill and work item →
   `(model, effort)` are two resolutions over the same item. A light-role

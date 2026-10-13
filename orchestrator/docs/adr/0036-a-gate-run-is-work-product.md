@@ -6,7 +6,7 @@ A worker ticks its own gate box. Nothing on disk says the command ran, and nothi
 it exited 0.
 
 [ADR 0032](0032-quality-gates-are-a-layered-contract.md) gave each **Layer** a command
-and an exit code, and [`../../references/checklist.template.md`](../../references/checklist.template.md)
+and an exit code, and [`../../references/checklist.template.md`](https://github.com/wagnersza/orchestrator-skills/blob/v1.0.0/orchestrator/references/checklist.template.md)
 gave each layer a box. So the bar moved from *trust my evidence* to *trust that my
 command was green*. Both are a claim a reviewer has to accept. A **Worker watch** tick
 reads the ticked box and reports `implementation-complete`, and the session moves the
@@ -17,7 +17,7 @@ item to review on a fact nobody measured.
 Each gate command appends one line to `.orchestrator/gates-<item>.jsonl` in the worker's
 own worktree. The line carries four keys: `command`, `exit`, `utc` and `head_sha`. The
 format and its one home are
-[`../../references/quality-gates.md`](../../references/quality-gates.md), and the
+[`../../references/quality-gates.md`](https://github.com/wagnersza/orchestrator-skills/blob/v1.0.0/orchestrator/references/quality-gates.md), and the
 vocabulary is the **Gate record** entry of [`../../CONTEXT.md`](../../CONTEXT.md).
 
 `head_sha` is what ties a green run to a commit. A green line against a stale commit

@@ -17,7 +17,7 @@ in one tracker's own terms.
 ## The decision
 
 **A board column is one concept with two representations, and
-[`scripts/tracker.py`](../../../scripts/tracker.py) is where the difference lives.** No seam
+[`scripts/tracker.py`](https://github.com/wagnersza/orchestrator-skills/blob/v1.0.0/scripts/tracker.py) is where the difference lives.** No seam
 and no skill body learns which representation it holds.
 
 | Tracker | A column is | What addresses it |

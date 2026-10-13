@@ -125,7 +125,7 @@ This repo copies none of it. That is [ADR 0006](0006-delegate-prompting-to-promp
 and [ADR 0011](0011-delegate-technical-writing-to-simple-english.md) applied a third
 time, for the same reason: a copied rule set drifts from the upstream that maintains
 it. The skill therefore joins the always-required table in
-[`orchestrator/references/requirements.md`](../../references/requirements.md), so a
+[`orchestrator/references/requirements.md`](https://github.com/wagnersza/orchestrator-skills/blob/v1.0.0/orchestrator/references/requirements.md), so a
 close never begins against a missing dependency.
 
 ## Consequences

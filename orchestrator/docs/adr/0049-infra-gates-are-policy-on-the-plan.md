@@ -18,13 +18,13 @@ the JSON that `tofu show -json` writes, and it denies the plan or it passes it. 
 an exit code, so a rule in a document becomes a rule that a run obeys.
 
 Four Layers carry that model, and they live in one reference file:
-[`orchestrator/references/quality-gates-infra.md`](../../references/quality-gates-infra.md).
+[`orchestrator/references/quality-gates-infra.md`](https://github.com/wagnersza/orchestrator-skills/blob/v1.0.0/orchestrator/references/quality-gates-infra.md).
 Every claim about an infra Gate traces there. The four Layers hold the same numbers as the
 application Layers, so `make quick` and layer 1 mean the same band in both files.
 
 **The application matrix file gains one cross-reference line, and no infra section.** These
 are different gates, and one file that holds both stops being readable. The application file
-is [`orchestrator/references/quality-gates.md`](../../references/quality-gates.md).
+is [`orchestrator/references/quality-gates.md`](https://github.com/wagnersza/orchestrator-skills/blob/v1.0.0/orchestrator/references/quality-gates.md).
 
 **A fired Halt condition is the stop, and the diff is not.** A **Halt condition** is a
 policy that stops a plan before it applies, and
@@ -98,7 +98,7 @@ that the rule reads the plan.
   fixture can pass a rule that a live plan breaks.
 - **Accepted risk: the matrix can name a tool that no machine can install.** One test closes
   half of that risk. Every tool in the infra matrix has a row in
-  [`orchestrator/references/requirements.md`](../../references/requirements.md), and
+  [`orchestrator/references/requirements.md`](https://github.com/wagnersza/orchestrator-skills/blob/v1.0.0/orchestrator/references/requirements.md), and
   `scripts/test_quality_gates.py` reports each tool with no such row. No test runs an
   install command, so a stale install command stays possible.
 - **This repo never enables the plan gate.** It provisions nothing, so every field of

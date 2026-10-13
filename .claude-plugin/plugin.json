@@ -1,7 +1,7 @@
 {
   "name": "orchestrator-skills",
   "version": "1.0.0",
-  "description": "Orchestrate agent worker sessions across any workspace tool (orca/cmux/herdr), harness (claude/codex/pi/copilot/cursor), and frontier model. Zero-touch install + setup; optional cross-vendor adversarial review.",
+  "description": "Run agent workers over a tracker's ready-for-agent issues: one orca automation per repo ticks every minute at zero tokens, each worker runs on the harness and model its role names, and the tracker's state labels are the only state.",
   "author": {
     "name": "wagnersza",
     "url": "https://github.com/wagnersza"
@@ -13,13 +13,10 @@
     "orchestration",
     "multi-agent",
     "worktree",
-    "orca",
-    "cmux",
-    "adversarial-review"
+    "orca"
   ],
   "skills": [
     "./orchestrator",
-    "./orchestrator-setup",
-    "./playwright-cli"
+    "./orchestrator-setup"
   ]
 }

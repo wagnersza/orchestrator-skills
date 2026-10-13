@@ -7,9 +7,9 @@ Layer 5 runs when a user story finishes. The orchestrator session invokes
 The session then saves a copy here, as a docs-only commit
 ([ADR 0048](../../orchestrator/docs/adr/0048-the-story-gate-report-is-a-repo-artifact.md)). The
 five layers are in
-[`../../orchestrator/references/quality-gates.md`](../../orchestrator/references/quality-gates.md),
+[`../../orchestrator/references/quality-gates.md`](https://github.com/wagnersza/orchestrator-skills/blob/v1.0.0/orchestrator/references/quality-gates.md),
 and the flow is
-[The layer 5 story gate](../../orchestrator/references/story-flows.md#the-layer-5-story-gate).
+[The layer 5 story gate](https://github.com/wagnersza/orchestrator-skills/blob/v1.0.0/orchestrator/references/story-flows.md#the-layer-5-story-gate).
 
 ## What each file is
 

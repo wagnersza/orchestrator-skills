@@ -24,7 +24,7 @@ and never names the flag.
 ## The decision
 
 **One reference file holds the reads, with a command for `gh` and a command for
-`glab`.** It is [`references/tracker-reads.md`](../../references/tracker-reads.md).
+`glab`.** It is [`references/tracker-reads.md`](https://github.com/wagnersza/orchestrator-skills/blob/v1.0.0/orchestrator/references/tracker-reads.md).
 One read per section, and the section heading is the query in the flow's own words.
 Every command in it ran against a real GitHub repo and a real GitLab project before
 it landed.
@@ -45,7 +45,7 @@ the *command* for a read lives. A third CLI now needs a skill change as well as 
 `issue-tracker.md`, and this repo supports two.
 
 That price is small and the gain is measured. Two CLIs are what the repo declares
-today ([`references/requirements.md`](../../references/requirements.md)), and
+today ([`references/requirements.md`](https://github.com/wagnersza/orchestrator-skills/blob/v1.0.0/orchestrator/references/requirements.md)), and
 `scripts/worker_state.py` already holds a builder for each one. So the reference file
 records what the code already knows, in the place a session reads.
 

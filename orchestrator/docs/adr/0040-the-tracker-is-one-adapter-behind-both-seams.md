@@ -40,7 +40,7 @@ values on it: the CLI name, the host, the repository and the fixture. Where two
 trackers disagree about a command, the branch is inside the one method that differs.
 
 **The commands in it are the verified ones.**
-[`references/tracker-reads.md`](../../references/tracker-reads.md) holds each read as
+[`references/tracker-reads.md`](https://github.com/wagnersza/orchestrator-skills/blob/v1.0.0/orchestrator/references/tracker-reads.md) holds each read as
 prose with a command per tracker ([ADR 0039](0039-a-tracker-read-has-a-verified-command-in-the-skill.md)),
 and this module is where the same commands live as code. A read is checked before it is
 parsed there too, so no caller parses an error block.
@@ -84,7 +84,7 @@ it edits neither, per [`CLAUDE.md`](../../../CLAUDE.md):
   deferral bought, and the price came due. The close could not run at all on the second
   tracker, and the two fixture formats cost a test author twice.
 - **A plugin mechanism, a registry or a class per tracker** (rejected). Two CLIs are what
-  [`references/requirements.md`](../../references/requirements.md) declares, and a branch
+  [`references/requirements.md`](https://github.com/wagnersza/orchestrator-skills/blob/v1.0.0/orchestrator/references/requirements.md) declares, and a branch
   inside one method is shorter than a class that holds one command. A third CLI is a
   third branch, and a registry is worth its cost no earlier than that.
 - **A wrapper script per tracker, outside these seams** (rejected). A script needs its

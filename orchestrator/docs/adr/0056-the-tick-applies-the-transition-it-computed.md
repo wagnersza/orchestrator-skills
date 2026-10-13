@@ -52,7 +52,7 @@ outcome and makes at most one label swap. So a wrong computation cannot cascade 
 minute. This is a mechanism with its own test, and not advice.
 
 **`phase` is the plan and `tick` is the execute.** That is the split
-[`scripts/close_item.py`](../../../scripts/close_item.py) already holds
+[`scripts/close_item.py`](https://github.com/wagnersza/orchestrator-skills/blob/v1.0.0/scripts/close_item.py) already holds
 ([ADR 0015](0015-close-is-a-deterministic-transaction.md)). One test reads a decision with
 no mutation, another proves `phase` leaves no tracker write behind, and a maintainer
 dry-runs one item against a live tracker before the first write.

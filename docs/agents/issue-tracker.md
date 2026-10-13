@@ -3,7 +3,7 @@
 Issues and PRDs for this repo live as GitHub issues. Use the `gh` CLI for all operations.
 
 **The reads the orchestrator flows make live in
-[`orchestrator/references/tracker-reads.md`](../../orchestrator/references/tracker-reads.md)**,
+[`orchestrator/references/tracker-reads.md`](https://github.com/wagnersza/orchestrator-skills/blob/v1.0.0/orchestrator/references/tracker-reads.md)**,
 with the command for `gh` and the command for `glab`. That file also holds the rule that
 an exit code is checked before a parse. The conventions in this file stay the generic
 surface every skill uses, and a flow read gets no second copy here.
@@ -67,7 +67,7 @@ two disagree, the child stays in the answer, so a wrong edge shows up as an extr
 never as a missing one. A preference order hides that disagreement. A child a maintainer
 linked by hand in the UI is a real child here, and that is the case a body scan alone missed.
 The full recipe, with the GitLab read beside it, is in
-[`orchestrator/references/tracker-reads.md`](../../orchestrator/references/tracker-reads.md).
+[`orchestrator/references/tracker-reads.md`](https://github.com/wagnersza/orchestrator-skills/blob/v1.0.0/orchestrator/references/tracker-reads.md).
 
 **GitLab has no parent link between two issues, and this claims no parity.** Its issue links
 endpoint offers `relates_to`, `blocks` and `is_blocked_by` only, and its real hierarchy is an

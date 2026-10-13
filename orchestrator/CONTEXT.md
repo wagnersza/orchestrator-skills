@@ -379,7 +379,7 @@ reports the conflicting paths on the work item and carries on with the next bran
 unattended decides what a merged file means. **No tick calls a train.** The whole run exists
 for one case: a maintainer who wants ten branches ordered and test-merged before they merge
 any of them. The three ordering steps, the park rule and the seam's contract are one home
-now, the module docstring of [`scripts/merge_train.py`](../scripts/merge_train.py).
+now, the module docstring of [`scripts/merge_train.py`](https://github.com/wagnersza/orchestrator-skills/blob/v1.0.0/scripts/merge_train.py).
 Rationale, the rejected
 alternatives and the accepted risk:
 [`docs/adr/0037-the-merge-queue-is-an-ordered-train.md`](docs/adr/0037-the-merge-queue-is-an-ordered-train.md),
@@ -574,7 +574,7 @@ What a **Gate** run leaves on disk. `hooks/record.py` appends one line per gate 
 that ran, `exit` is the code it returned, `utc` is when the run ended, and `head_sha` is
 the commit it saw. `head_sha` is what ties a green run to a commit, because a green line
 against a stale commit proves nothing. The format and its one home are
-[`references/quality-gates.md`](references/quality-gates.md).
+[`references/quality-gates.md`](https://github.com/wagnersza/orchestrator-skills/blob/v1.0.0/orchestrator/references/quality-gates.md).
 
 **The hook is the one writer, and the line is appended whatever the exit code is.** A gate
 command runs and it exits, so a worker records nothing. A red run that writes no line
