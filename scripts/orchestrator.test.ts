@@ -133,8 +133,8 @@ test("status lists the ready queue, then each other issue with its reason", () =
     ...NO_LIVE,
     [ME]: "me\n",
     [LIST]: [[
-      issue(16, { title: "line blocker, closed", body: "Blocked by: #31" }),
-      issue(15, { title: "native blocker, closed", blockedBy: 1 }),
+      issue(16, { title: "line blocker, closed", body: "Blocked by: #31", assignees: ["me"] }),
+      issue(15, { title: "native blocker, closed", blockedBy: 1, assignees: ["me"] }),
       issue(14, { title: "line blocker, open", body: "## Notes\n\nBlocked by: #21, #22\n" }),
       issue(13, { title: "native blocker, open", blockedBy: 1 }),
       issue(12, { title: "assigned to someone else", assignees: ["alice"] }),
@@ -146,16 +146,17 @@ test("status lists the ready queue, then each other issue with its reason", () =
     [VIEW(21)]: issue(21),
     [VIEW(22)]: issue(22, { state: "closed" }),
     [VIEW(31)]: issue(31, { state: "closed" }),
+    [SCAN]: [[]],
   });
   assert.deepEqual(result.err, []);
   assert.equal(result.code, 0);
   assert.deepEqual(result.out, [
-    "ready queue (4)",
-    "  #10  unassigned",
+    "ready queue (3)",
     "  #11  assigned to me",
     "  #15  native blocker, closed",
     "  #16  line blocker, closed",
-    "not eligible (3)",
+    "not eligible (4)",
+    "  #10  unassigned  (unassigned: the tick takes it once assigned to me)",
     "  #12  assigned to someone else  (assigned to alice)",
     "  #13  native blocker, open  (blocked by #20)",
     "  #14  line blocker, open  (blocked by #21)",
@@ -199,7 +200,7 @@ test("status skips pull requests, which the issues endpoint also returns", () =>
   const result = run(["status"], {
     ...NO_LIVE,
     [ME]: "me\n",
-    [LIST]: [[issue(10), issue(11, { pr: true })], [issue(12)]],
+    [LIST]: [[issue(10, { assignees: ["me"] }), issue(11, { pr: true })], [issue(12, { assignees: ["me"] })]],
   });
   assert.deepEqual(result.out, ["ready queue (2)", "  #10  issue 10", "  #12  issue 12"]);
 });
@@ -216,7 +217,7 @@ test("status reads the tracker from the first json block in the config doc", () 
 
 test("status falls back to the defaults when the config doc has no json block", () => {
   const cwd = repoWithConfig("# Orchestrator config\n\n```yaml\ntracker: gitlab\n```\n");
-  const result = run(["status"], { ...NO_LIVE, [ME]: "me\n", [LIST]: [[issue(10)]] }, cwd);
+  const result = run(["status"], { ...NO_LIVE, [ME]: "me\n", [LIST]: [[issue(10, { assignees: ["me"] })]] }, cwd);
   assert.equal(result.code, 0);
   assert.deepEqual(result.out, ["ready queue (1)", "  #10  issue 10"]);
 });
@@ -878,7 +879,8 @@ type TickFixture = {
   tasks?: unknown[];
   workers?: unknown[];
   issues?: Record<number, string[]>;
-  // The ready-for-agent issues, in the order the tracker lists them.
+  // The ready-for-agent issues, in the order the tracker lists them, assigned to me
+  // unless the fixture names the assignees.
   queue?: [number, Fixture?][];
 };
 
@@ -886,6 +888,7 @@ type TickFixture = {
 // in-progress list holds the issues that hold the label and have no PATCH yet, and the
 // ready list holds the queue.
 function tickReplies(fixture: TickFixture = {}, extra: Record<string, unknown> = {}) {
+  const queue = (fixture.queue ?? []).map(([n, f]): [number, Fixture] => [n, { assignees: ["me"], ...f }]);
   const issues = Object.entries(fixture.issues ?? {}).flatMap(([n, labels]) => [
     [VIEW(Number(n)), issue(Number(n), { labels, assignees: ["me"] })],
     [PATCH(Number(n)), issue(Number(n), { labels: ["patched"], assignees: ["me"] })],
@@ -902,10 +905,10 @@ function tickReplies(fixture: TickFixture = {}, extra: Record<string, unknown> =
     [LIST_OF("in-progress")]: (calls: string[]) => [Object.entries(fixture.issues ?? {})
       .filter(([n, labels]) => labels.includes("in-progress") && !calls.includes(PATCH(Number(n))))
       .map(([n, labels]) => issue(Number(n), { labels, assignees: ["me"] }))],
-    [LIST]: [(fixture.queue ?? []).map(([n, f]) => issue(n, { ...f, labels: ["ready-for-agent", ...(f?.labels ?? [])] }))],
+    [LIST]: [queue.map(([n, f]) => issue(n, { ...f, labels: ["ready-for-agent", ...(f.labels ?? [])] }))],
     [SCAN]: [[]],
     [ME]: "me\n",
-    ...Object.fromEntries((fixture.queue ?? []).flatMap(([n, f]) => Object.entries(startReplies(n, f)))),
+    ...Object.fromEntries(queue.flatMap(([n, f]) => Object.entries(startReplies(n, f)))),
     ...extra,
   };
 }
@@ -1282,6 +1285,24 @@ test("tick skips an issue that is not eligible, and keeps queue order for the re
   assert.deepEqual(started(result), ["issue-21", "issue-22"]);
 });
 
+test("tick waits on an unassigned issue or parent, and takes each one assigned to me", () => {
+  const result = run(TICK, tickReplies({
+    queue: [[20, { assignees: [] }], [21, { labels: ["user-story"], assignees: [] }], [22]],
+  }), MAX(3));
+  assert.deepEqual(result.err, []);
+  assert.deepEqual(result.out, ["started #22 in worktree issue-22: claude sonnet @ medium (medium role), dispatch ctx_54923f33c600"]);
+  assert.deepEqual(result.calls.filter((c) => c.includes("-X PATCH")), [PATCH(22)]);
+});
+
+test("tick takes an unassigned child of a parent I hold, and no other unassigned issue", () => {
+  const result = run(TICK, tickReplies({ queue: [[20, { assignees: [] }], [21, { assignees: [] }]] }, {
+    [LIST_OF("in-progress")]: [[issue(10, { labels: ["in-progress", "user-story"], assignees: ["me"] })]],
+    [SCAN]: [[child(21, 10, { labels: ["ready-for-agent"] })]],
+  }), MAX(3));
+  assert.deepEqual(result.err, []);
+  assert.deepEqual(started(result), ["issue-21"]);
+});
+
 test("tick observes before it fills: a slot freed this tick is filled this tick", () => {
   const result = run(TICK, tickReplies(
     {
@@ -1340,7 +1361,7 @@ test("status prints each live issue, unassigned or mine, with its state, role, h
     ]],
     [LIVE[1] ?? ""]: [[issue(12, { title: "stuck", labels: ["needs-human", "heavy"], assignees: ["me"] })]],
     [LIVE[2] ?? ""]: [[issue(13, { title: "in review", labels: ["ready-for-human"], assignees: ["me"] })]],
-    [LIST]: [[issue(20, { title: "next" })]],
+    [LIST]: [[issue(20, { title: "next", assignees: ["me"] })]],
     [TASKS]: receipt({ tasks: [task(10), task(12), task(13)] }),
     [WORKERS]: receipt({
       workers: [worker(10), worker(12, { liveness: "exited" }), worker(13, { dispatch: 131, liveness: "exited" }), worker(13, { dispatch: 130 })],
@@ -1443,11 +1464,14 @@ test("tick closes no parent with an open child or with no child, and none held b
 });
 
 test("a story runs in order: A and C start, B starts once A closes, then the parent closes with each PR", () => {
-  // Parent #40 holds three native sub-issues. B (#42) is blocked by A (#41).
-  const blockedByA = { body: "Blocked by: #41" };
+  // Parent #40, assigned to me, holds three unassigned native sub-issues. B (#42) is
+  // blocked by A (#41).
+  const blockedByA = { body: "Blocked by: #41", assignees: [] };
   const parentLive = issue(40, { labels: ["in-progress"], assignees: ["me"], subIssues: 3 });
 
-  const first = run(TICK, tickReplies({ queue: [[40, { subIssues: 3 }], [41], [42, blockedByA], [43]] }), MAX(3));
+  const first = run(TICK, tickReplies({ queue: [[40, { subIssues: 3 }], [41, { assignees: [] }], [42, blockedByA], [43, { assignees: [] }]] }, {
+    [SUB_ISSUES(40)]: [[issue(41), issue(42, blockedByA), issue(43)]],
+  }), MAX(3));
   assert.deepEqual(first.err, []);
   assert.deepEqual(first.out.slice(0, 1), ["claimed parent #40: no worker, no slot"]);
   assert.deepEqual(started(first), ["issue-41", "issue-43"]);
