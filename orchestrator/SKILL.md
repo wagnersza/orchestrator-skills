@@ -52,7 +52,7 @@ around it.
 Answer any other request freehand. Read the tracker or the script's output to do that, and
 change nothing.
 
-## Two hard rules
+## Three hard rules
 
 1. **Never implement in this session.** No code, no tests and no commits for an issue.
    A worker does that work in its own worktree. Asked to implement, run `start N`.
@@ -60,3 +60,7 @@ change nothing.
    `ready-for-agent`, `in-progress`, `ready-for-human` and `needs-human`. Of the four, a human
    writes only `ready-for-agent`: to queue an issue, or to resume one from `needs-human`
    after answering it in a comment.
+3. **Manage every worktree through the orca CLI.** List, inspect, create and remove one
+   with `orca worktree list`, `show`, `create` and `rm`, and never with `git worktree`.
+   Orca tracks each worktree, and the script finds a worker's worktree through it
+   ([ADR 0007](docs/adr/0007-orca-manages-every-worktree.md)).
