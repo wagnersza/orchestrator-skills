@@ -1,14 +1,14 @@
 # orchestrator-skills
 
-Label an issue, and an agent ships a PR for it. This Claude Code plugin runs agent workers
-on your tracker's `ready-for-agent` issues. Each worker gets its own worktree and runs on
+Label an issue, assign it to yourself, and an agent ships a PR for it. This Claude Code
+plugin runs agent workers on your tracker's `ready-for-agent` issues. Each worker gets its own worktree and runs on
 the harness and model that fit the job. You review the PR, and you say when to merge.
 
 Note: v1 is still available at the v1.0.0 tag: https://github.com/wagnersza/orchestrator-skills/tree/v1.0.0
 
 
 ```
-you label ready-for-agent ─▶ tick claims it ─▶ worker opens a PR ─▶ you review ─▶ "merge N"
+you assign a ready-for-agent issue ─▶ tick claims it ─▶ worker opens a PR ─▶ you review ─▶ "merge N"
                                                      │
                                          stuck? ─▶ needs-human, with the worker's question
 ```
@@ -101,7 +101,8 @@ Edit its JSON block by hand, or re-run setup to change it.
 
 ## Use it
 
-Label an issue `ready-for-agent`, then talk to your Claude session:
+Label an issue `ready-for-agent`, then talk to your Claude session, or assign the issue to
+yourself and let the tick take it:
 
 | Say | What happens |
 |---|---|
@@ -110,14 +111,17 @@ Label an issue `ready-for-agent`, then talk to your Claude session:
 | "merge 42" | Merges the PR of a `ready-for-human` issue, then removes its worker and worktree and closes it. |
 | "set up the orchestrator" | Runs setup again. |
 
-You can also say nothing: the next tick claims each eligible issue on its own, up to
-`max_workers`.
+You can also say nothing: the next tick claims each eligible issue that is assigned to
+you, up to `max_workers`. Assign a parent, and the tick runs each of its children with no
+assignee of their own. An unassigned issue waits, so the `ready-for-agent` issues that
+`to-tickets` and `to-spec` file start nothing until you assign them
+([ADR 0006](orchestrator/docs/adr/0006-the-tick-takes-only-what-is-assigned-to-me.md)).
 
 An issue moves through four state labels, and only the script writes them:
 
 | Label | Means | Who moves it on |
 |---|---|---|
-| `ready-for-agent` | Ready to start. | The tick or "work on N" claims it. |
+| `ready-for-agent` | Ready to start. | "work on N" claims it, or the tick once it is assigned to you. |
 | `in-progress` | A worker is on it. | The worker's report. |
 | `ready-for-human` | A PR is open for your review. | You: "merge N", or a merge on the tracker. |
 | `needs-human` | The worker failed, asked or died. Its comment says why. | You: answer on the issue, then relabel it `ready-for-agent`. |
@@ -126,8 +130,8 @@ Add the `heavy` or `light` label to an issue to pick its role, or say "work on 4
 
 `node scripts/orchestrator.ts status` prints the same view as "status". It lists the live
 issues first, each with its state, role, harness and PR. Then it lists the ready queue, the
-issues the next tick would claim. Last come the issues that are not eligible, each with the
-reason it waits.
+issues the next tick would claim. Last come the issues the tick waits on, each with the
+reason, such as an open blocker or no assignee.
 
 ## How it works
 

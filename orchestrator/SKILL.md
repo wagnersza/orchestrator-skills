@@ -32,7 +32,10 @@ node <plugin root>/scripts/orchestrator.ts <verb> ...
   only when the user names a role. Add `--note "..."` only when the user gives extra
   context for the worker, and pass their words through as they are.
 - **`status`** prints the claimed issues, with state, role, harness, liveness and PR, then
-  the ready queue, then each issue that is not eligible and why.
+  the ready queue the tick takes, then each issue the tick waits on and why. The tick takes
+  an issue only once it is assigned to the user, or is a child of a parent assigned to them
+  ([ADR 0006](docs/adr/0006-the-tick-takes-only-what-is-assigned-to-me.md)). `start N` needs
+  no assignee.
 - **`merge N`** merges the PR of a `ready-for-human` issue, then releases the worker,
   removes the worktree and closes the issue. A merge made on the tracker works too: the
   next tick sees it and tears down.

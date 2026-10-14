@@ -52,7 +52,7 @@ answering in a comment. See [ADR 0003](../../orchestrator/docs/adr/0003-state-la
 
 | Label | Meaning |
 |-------|---------|
-| `ready-for-agent` | Fully specified. The orchestrator may claim it. |
+| `ready-for-agent` | Fully specified. "work on N" may claim it, and the tick may once it is assigned to the person who runs the orchestrator, or its parent is ([ADR 0006](../../orchestrator/docs/adr/0006-the-tick-takes-only-what-is-assigned-to-me.md)). |
 | `in-progress` | Claimed. A worker is on it. |
 | `ready-for-human` | The worker is done and a PR is open for review. |
 | `needs-human` | The worker failed, asked a question, escalated, died, or finished with no PR. Its comment says why. |
