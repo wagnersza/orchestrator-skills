@@ -298,6 +298,10 @@ export function gitlab(sh: Sh, cwd: string): Tracker {
       return null;
     },
 
+    pageUrl(id) {
+      return fetch(id).web_url;
+    },
+
     viewCommand(id) {
       return `glab issue view ${id.split("#").pop()}${repoFlag(id)} --comments`;
     },

@@ -31,6 +31,9 @@ node <plugin root>/scripts/orchestrator.ts <verb> ...
   parent it claims the parent and starts each eligible child. Add `--role heavy|medium|light`
   only when the user names a role. Add `--note "..."` only when the user gives extra
   context for the worker, and pass their words through as they are.
+  Each start opens the issue's page in an orca browser tab of the worktree, so its comments
+  and state sit beside the worker
+  ([ADR 0008](docs/adr/0008-start-opens-the-issue-in-a-tab.md)).
 - **`status`** prints the claimed issues, with state, role, harness, liveness and PR, then
   the ready queue the tick takes, then each issue the tick waits on and why. The tick takes
   an issue only once it is assigned to the user, or is a child of a parent assigned to them
