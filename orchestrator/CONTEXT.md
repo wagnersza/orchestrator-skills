@@ -60,7 +60,9 @@ in-progress, in one tracker write.
 _Avoid_: pick up, lock.
 
 **Eligible**:
-Open, ready-for-agent, unassigned or assigned to me, and nothing open blocks it.
+Open, ready-for-agent, unassigned or assigned to me, and nothing open blocks it. A work on
+N claims any eligible issue. The tick claims one only once it is assigned to me, or is a
+child of a parent I hold ([ADR 0006](docs/adr/0006-the-tick-takes-only-what-is-assigned-to-me.md)).
 _Avoid_: ready, startable.
 
 **Parent**:
@@ -71,7 +73,8 @@ _Avoid_: epic, story run.
 
 **Child**:
 An issue under a parent. It runs exactly like any other issue, and it starts only when it
-carries its own ready-for-agent and nothing blocks it.
+carries its own ready-for-agent and nothing blocks it. Once its parent is assigned to me,
+the tick takes it with no assignee of its own.
 _Avoid_: sub-task.
 
 **Slot**:
@@ -94,8 +97,9 @@ _Avoid_: close transaction, cleanup.
 ## Relationships
 
 - A **Tracker** holds many issues. An issue the loop owns holds one **State label**.
-- A **Tick** **Claims** each **Eligible** issue and starts one **Worker** on it, in a free
-  **Slot**, on the **Harness** its **Role** names. A work on N does the same at once.
+- A **Tick** **Claims** each **Eligible** issue assigned to me and starts one **Worker** on
+  it, in a free **Slot**, on the **Harness** its **Role** names. A work on N does the same
+  at once, assigned or not.
 - A **Parent** holds **Children**. Each eligible child starts on its own. A work on N on a
   parent claims it and starts its eligible children, and the parent takes no slot.
 - The tick reads each worker's report through the **Run**. It moves the issue of a worker
