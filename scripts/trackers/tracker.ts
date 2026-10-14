@@ -48,6 +48,9 @@ export interface Tracker {
   // the one reason it refuses and changes nothing: no open PR, a PR that is not
   // mergeable, or a review that requests changes. A merge command that fails throws.
   merge(id: Id): string | null;
+  // The web page a human reads the issue and its comments on, or null on a tracker that
+  // has none.
+  pageUrl(id: Id): string | null;
   // The shell command a worker runs to read the issue and every comment.
   viewCommand(id: Id): string;
   // The template step that hands the work back for review, with `prSkill` naming the

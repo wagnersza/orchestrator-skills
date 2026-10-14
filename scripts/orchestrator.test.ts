@@ -47,6 +47,7 @@ function issue(number: number, fixture: Fixture = {}) {
     ...RECORDED,
     url: `${repo}/issues/${number}`,
     repository_url: repo,
+    html_url: `${repo.replace("api.github.com/repos", "github.com")}/issues/${number}`,
     number,
     title: fixture.title ?? `issue ${number}`,
     ...(fixture.labels ? { labels: fixture.labels.map((name) => ({ name })) } : {}),
@@ -86,6 +87,11 @@ const GONE: Result = {
   stderr: "",
 };
 
+// The `orca tab list --json` reply for a worktree with no browser tab, and the
+// `orca tab create --json` reply orca printed for a tab it opened.
+const NO_TABS = { ok: true, result: { tabs: [] } };
+const TAB = { ok: true, result: { browserPageId: "627674e7-38bf-4997-9f26-5af546fbd30a" } };
+
 // A runner that answers each known command line with its recorded output, and fails
 // any other call, the way `gh` fails on a path it does not know. A key that ends in
 // " *" answers every line it prefixes. A reply that is a function gets the calls so far,
@@ -104,6 +110,9 @@ function fakeRunner(replies: Record<string, unknown>) {
       : Object.keys(replies).find((k) => k.endsWith(" *") && line.startsWith(k.slice(0, -1)));
     // An unlisted worktree is gone, the way orca answers for a name it does not know.
     if (key === undefined && line.startsWith("orca worktree show ")) return GONE;
+    // An unlisted worktree has no browser tab, and orca opens one when asked.
+    if (key === undefined && line.startsWith("orca tab list ")) return { code: 0, stdout: JSON.stringify(NO_TABS), stderr: "" };
+    if (key === undefined && line.startsWith("orca tab create ")) return { code: 0, stdout: JSON.stringify(TAB), stderr: "" };
     if (key === undefined) return { code: 1, stdout: "", stderr: `unexpected call: ${line}` };
     const raw = replies[key];
     const reply = typeof raw === "function" ? (raw as (calls: string[]) => unknown)(calls) : raw;
@@ -343,7 +352,30 @@ test("start claims an eligible issue in one write, then starts a claude worker o
     "--from", COORDINATOR,
     "--json",
   ]);
-  assert.equal(result.calls.length, 8);
+  assert.deepEqual(result.calls.slice(8), [TAB_LIST(10), TAB_CREATE(10)]);
+});
+
+const TAB_LIST = (n: number) => `orca tab list --worktree name:issue-${n} --json`;
+const TAB_CREATE = (n: number) =>
+  `orca tab create --worktree name:issue-${n} --url https://github.com/wagnersza/orchestrator-skills/issues/${n} --json`;
+
+test("start on a resume leaves the issue's tab when the worktree has it open", () => {
+  const result = run(["start", "10", "--run", "run_1"], startReplies(10, {}, {
+    [SHOW(10)]: receipt({ worktree: { path: "/wt/issue-10" } }),
+    [TAB_LIST(10)]: receipt({ tabs: [{ url: "https://github.com/wagnersza/orchestrator-skills/issues/10" }] }),
+  }));
+  assert.deepEqual(result.err, []);
+  assert.equal(result.calls.at(-1), TAB_LIST(10));
+});
+
+test("start reports a tab orca cannot open, and the worker still counts as started", () => {
+  const result = run(["start", "10", "--run", "run_1"], startReplies(10, {}, {
+    [TAB_CREATE(10)]: { fail: { code: 1, stdout: "", stderr: "orca is not running" } },
+  }));
+  assert.equal(result.code, 0);
+  assert.deepEqual(result.err, ["#10: orca tab create failed: orca is not running"]);
+  assert.equal(patches(result).length, 1);
+  assert.equal(result.out.length, 1);
 });
 
 const SHOW = (n: number) => `orca worktree show --worktree name:issue-${n} --json`;
@@ -521,10 +553,10 @@ const TERMINAL_STARTS = {
   [ENTER(TERMINAL)]: receipt({ send: { accepted: true } }),
 };
 
-// The orca calls a start made, after its claim.
+// The calls a start made to launch its worker, after its claim and before its tab.
 function orcaCalls(result: { argvs: string[][]; calls: string[] }): string[][] {
   const claim = result.calls.indexOf(PATCH(10));
-  return result.argvs.slice(claim + 1);
+  return result.argvs.slice(claim + 1).filter((argv) => argv[1] !== "tab");
 }
 
 test("start renders each harness row's start arguments", () => {
