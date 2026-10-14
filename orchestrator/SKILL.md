@@ -32,7 +32,10 @@ node <plugin root>/scripts/orchestrator.ts <verb> ...
   only when the user names a role. Add `--note "..."` only when the user gives extra
   context for the worker, and pass their words through as they are.
 - **`status`** prints the claimed issues, with state, role, harness, liveness and PR, then
-  the ready queue, then each issue that is not eligible and why.
+  the ready queue the tick takes, then each issue the tick waits on and why. The tick takes
+  an issue only once it is assigned to the user, or is a child of a parent assigned to them
+  ([ADR 0006](docs/adr/0006-the-tick-takes-only-what-is-assigned-to-me.md)). `start N` needs
+  no assignee.
 - **`merge N`** merges the PR of a `ready-for-human` issue, then releases the worker,
   removes the worktree and closes the issue. A merge made on the tracker works too: the
   next tick sees it and tears down.
@@ -49,7 +52,7 @@ around it.
 Answer any other request freehand. Read the tracker or the script's output to do that, and
 change nothing.
 
-## Two hard rules
+## Three hard rules
 
 1. **Never implement in this session.** No code, no tests and no commits for an issue.
    A worker does that work in its own worktree. Asked to implement, run `start N`.
@@ -57,3 +60,7 @@ change nothing.
    `ready-for-agent`, `in-progress`, `ready-for-human` and `needs-human`. Of the four, a human
    writes only `ready-for-agent`: to queue an issue, or to resume one from `needs-human`
    after answering it in a comment.
+3. **Manage every worktree through the orca CLI.** List, inspect, create and remove one
+   with `orca worktree list`, `show`, `create` and `rm`, and never with `git worktree`.
+   Orca tracks each worktree, and the script finds a worker's worktree through it
+   ([ADR 0007](docs/adr/0007-orca-manages-every-worktree.md)).

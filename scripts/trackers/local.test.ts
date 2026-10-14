@@ -157,7 +157,8 @@ function runMain(orca: Orca, ...argv: string[]) {
   return { code, out, err };
 }
 
-const SPEC = "# Search\n\nStatus: ready-for-agent\n\nFind things fast.\n";
+// Assigned, so the tick takes the story and each ticket under it.
+const SPEC = "# Search\n\nStatus: ready-for-agent\nAssignee: Ada Lovelace\n\nFind things fast.\n";
 const INDEX = [
   "# 01: Build the index",
   "",
@@ -300,14 +301,14 @@ test("local: status reads each line format, and only above ## Comments", () => {
   assert.deepEqual(runMain(new Orca(root), "status"), {
     code: 0,
     out: [
-      "ready queue (3)",
-      "  a/01  Plain",
+      "ready queue (1)",
       "  a/04  Mine",
-      "  b/01  Same number, other feature",
-      "not eligible (3)",
+      "not eligible (5)",
+      "  a/01  Plain  (unassigned: the tick takes it once assigned to Ada Lovelace)",
       "  a/02  Bold  (blocked by a/01, a/03)",
       "  a/03  Bold colon after  (assigned to Grace Hopper)",
       "  a/06  Across features  (blocked by b/01)",
+      "  b/01  Same number, other feature  (unassigned: the tick takes it once assigned to Ada Lovelace)",
     ],
     err: [],
   });

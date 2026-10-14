@@ -717,7 +717,12 @@ test("gitlab: tracker gitlab in config reads the ready queue through glab", () =
   ]));
   assert.deepEqual(result.err, []);
   assert.equal(result.code, 0);
-  assert.deepEqual(result.out, ["ready queue (1)", "  #10  unassigned", "not eligible (1)", "  #11  blocked  (blocked by #20)"]);
+  assert.deepEqual(result.out, [
+    "ready queue (0)",
+    "not eligible (2)",
+    "  #10  unassigned  (unassigned: the tick takes it once assigned to me)",
+    "  #11  blocked  (blocked by #20)",
+  ]);
   assert.ok(result.calls.every((line) => line.startsWith("glab ")));
 });
 

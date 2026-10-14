@@ -108,6 +108,25 @@ function whyNotEligible(tracker: Tracker, issue: Issue, me: string): string | nu
   return null;
 }
 
+// The tick also waits for a sign from me: the issue is assigned to me, or it is a child of
+// a parent I hold. So a skill that files a ready-for-agent issue starts no worker by itself
+// (ADR 0006). Returns null for an issue the tick may take, or else the one reason it waits.
+function whyTickWaits(tracker: Tracker, issue: Issue, me: string, underMine: (id: Id) => boolean): string | null {
+  const why = whyNotEligible(tracker, issue, me);
+  if (why !== null || issue.assignees.length > 0 || underMine(issue.id)) return why;
+  return `unassigned: the tick takes it once assigned to ${me}`;
+}
+
+// Whether `id` is a child of a parent I hold: an in-progress one in `live`, or a
+// ready-for-agent one in `queue`, each assigned to me. It reads the children only once an
+// unassigned issue asks.
+function underParents(tracker: Tracker, live: Issue[], queue: Issue[], me: string): (id: Id) => boolean {
+  const ids = once(() => new Set([...live, ...queue]
+    .filter((issue) => issue.assignees.includes(me) && tracker.isParent(issue.id))
+    .flatMap((parent) => tracker.children(parent.id))));
+  return (id) => ids().has(id);
+}
+
 // The `## Touches` block's paths: each list item up to the next heading.
 function touches(body: string): number {
   const block = /^##[ \t]+Touches[ \t]*\n([\s\S]*?)(?=^#|(?![\s\S]))/m.exec(body);
@@ -691,19 +710,20 @@ function reported(task: Task | undefined): boolean {
   }
 }
 
-// Walk the ready queue in order. An eligible parent is claimed, with no worker and no
-// slot, so a full house still claims it. An eligible leaf starts while a slot is free:
-// `max_workers` minus the in-progress issues in `live` that are not parents. An issue
-// that is not eligible keeps its place in the queue, and an issue whose worker does not
-// start frees its slot again.
+// Walk the ready queue in order. A parent the tick may take is claimed, with no worker
+// and no slot, so a full house still claims it. A leaf the tick may take starts while a
+// slot is free: `max_workers` minus the in-progress issues in `live` that are not
+// parents. An issue the tick waits on keeps its place in the queue, and an issue whose
+// worker does not start frees its slot again.
 function fill(config: Config, tracker: Tracker, sh: Sh, cwd: string, leaf: LeafArgs, live: Issue[], deps: Deps): void {
   let free = config.max_workers - slotsTaken(tracker, live);
   const queue = tracker.list({ label: READY });
   if (queue.length === 0) return;
   const me = tracker.me();
+  const underMine = underParents(tracker, live, queue, me);
   for (const issue of queue) {
     const parent = tracker.isParent(issue.id);
-    if ((!parent && free <= 0) || whyNotEligible(tracker, issue, me) !== null) continue;
+    if ((!parent && free <= 0) || whyTickWaits(tracker, issue, me, underMine) !== null) continue;
     if (parent) claimParent(tracker, issue, deps);
     else if (startLeaf(config, tracker, sh, cwd, issue, leaf, deps) === 0) free--;
   }
@@ -822,7 +842,8 @@ function teardownMerged(tracker: Tracker, sh: Sh, cwd: string, seen: Observed, d
 const LIVE = [IN_PROGRESS, NEEDS_HUMAN, READY_FOR_HUMAN];
 
 // Each claimed issue, unassigned or mine, with its state, role, harness, liveness and
-// PR, then the ready queue, then each other open ready-for-agent issue with its reason.
+// PR, then the ready queue the tick takes, then each other open ready-for-agent issue with
+// its reason.
 // Liveness is the newest worker's, and "-" where no Run is saved.
 function status(config: Config, tracker: Tracker, sh: Sh, cwd: string, out: (line: string) => void): number {
   const me = tracker.me();
@@ -845,8 +866,10 @@ function status(config: Config, tracker: Tracker, sh: Sh, cwd: string, out: (lin
   }
   const ready: Issue[] = [];
   const waiting: [Issue, string][] = [];
-  for (const issue of tracker.list({ label: READY })) {
-    const why = whyNotEligible(tracker, issue, me);
+  const queue = tracker.list({ label: READY });
+  const underMine = underParents(tracker, live.filter(([, label]) => label === IN_PROGRESS).map(([issue]) => issue), queue, me);
+  for (const issue of queue) {
+    const why = whyTickWaits(tracker, issue, me, underMine);
     if (why === null) ready.push(issue);
     else waiting.push([issue, why]);
   }

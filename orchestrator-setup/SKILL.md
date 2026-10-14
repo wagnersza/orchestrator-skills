@@ -145,4 +145,6 @@ report its lines.
 
 Report the config block, the five-skill check for each harness, and the install's
 output. Then tell the user how to start: label an issue `ready-for-agent`, and say
-"work on N", or wait for the next tick.
+"work on N", or assign it to themself and wait for the next tick. The tick takes only an
+issue assigned to them
+([ADR 0006](../orchestrator/docs/adr/0006-the-tick-takes-only-what-is-assigned-to-me.md)).
