@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 210" width="960" height="210">
+<style>
+.bg{fill:#fbfaf7}.card{fill:#fff;stroke:#e3e0d8;stroke-width:1.5}
+text{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Helvetica,Arial,sans-serif;fill:#1d1d1b}
+.t{font-size:17px;font-weight:700}.b{font-size:14px;fill:#55544f}.who{font-size:11px;font-weight:700;letter-spacing:.08em;fill:#8a8984}
+.ico{font-size:26px}.lt{font-family:ui-monospace,Menlo,monospace;font-size:12px;font-weight:700;fill:#fff}
+.arr{stroke:#9a978f;stroke-width:2;fill:none}.h{font-size:20px;font-weight:700}
+</style>
+<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#9a978f"/></marker></defs>
+<rect class="bg" width="960" height="210" rx="14"/>
+<text class="h" x="24" y="38">The right model for each job</text>
+<rect class="card" x="24" y="58" width="292" height="132" rx="12"/>
+<text class="ico" x="40" y="98">🏋️</text>
+<text class="t" x="82" y="94">Heavy</text>
+<text class="b" x="40" y="128">Big or tricky work: the heavy label,</text>
+<text class="b" x="40" y="148">or three or more files to touch.</text>
+<text class="b" x="40" y="172" style="font-weight:700">balanced: Opus, high effort</text>
+<rect class="card" x="336" y="58" width="292" height="132" rx="12"/>
+<text class="ico" x="352" y="98">⚖️</text>
+<text class="t" x="394" y="94">Medium</text>
+<text class="b" x="352" y="128">The everyday default for any issue</text>
+<text class="b" x="352" y="148">that is not heavy or light.</text>
+<text class="b" x="352" y="172" style="font-weight:700">balanced: Sonnet, medium effort</text>
+<rect class="card" x="648" y="58" width="292" height="132" rx="12"/>
+<text class="ico" x="664" y="98">🪶</text>
+<text class="t" x="706" y="94">Light</text>
+<text class="b" x="664" y="128">Small, simple work: the light label.</text>
+<text class="b" x="664" y="148"></text>
+<text class="b" x="664" y="172" style="font-weight:700">balanced: Sonnet, low effort</text>
+</svg>

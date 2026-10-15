@@ -1,0 +1,368 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>orchestrator-skills: how it works</title>
+<style>
+  :root {
+    --bg: #fbfaf7; --fg: #1d1d1b; --muted: #6b6a66; --line: #e3e0d8;
+    --card: #ffffff; --accent: #2f5d8a; --soft: #eef3f8; --code: #f3f1ec;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #161614; --fg: #e9e7e1; --muted: #9a978f; --line: #33322e;
+      --card: #1e1e1b; --accent: #7fb0e0; --soft: #1f2a35; --code: #26261f;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+         font: 17px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif; }
+  main { max-width: 900px; margin: 0 auto; padding: 56px 24px 96px; }
+  h1 { font-size: 2.3rem; margin: 0 0 6px; letter-spacing: -0.015em; line-height: 1.2; }
+  h2 { font-size: 1.45rem; margin: 64px 0 12px; padding-top: 16px; border-top: 1px solid var(--line); }
+  h3 { font-size: 1.1rem; margin: 28px 0 6px; }
+  p, li { max-width: 68ch; }
+  a { color: var(--accent); }
+  .lede { color: var(--muted); font-size: 1.2rem; margin: 0 0 28px; max-width: 60ch; }
+  code { font: 14.5px ui-monospace, SFMono-Regular, Menlo, monospace;
+         background: var(--code); padding: 1px 6px; border-radius: 4px; }
+  nav { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px 22px; }
+  nav b { font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+  nav ol { margin: 8px 0 0; padding-left: 20px; columns: 2; }
+  nav a { text-decoration: none; }
+  .callout { background: var(--soft); border-left: 4px solid var(--accent); border-radius: 8px;
+             padding: 14px 18px; margin: 20px 0; }
+  .callout p { margin: 0; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; margin: 18px 0; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; }
+  .card .icon { font-size: 1.6rem; line-height: 1; }
+  .card h3 { margin: 8px 0 4px; }
+  .card p { margin: 0; color: var(--muted); font-size: 15.5px; }
+  .flow { display: flex; flex-wrap: wrap; align-items: stretch; gap: 8px; margin: 20px 0; }
+  .step { flex: 1 1 150px; background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+          padding: 14px; font-size: 15px; }
+  .step b { display: block; margin-bottom: 4px; }
+  .step .who { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+  .arrow { align-self: center; color: var(--muted); font-size: 1.3rem; }
+  .lbl { font: 600 13px ui-monospace, Menlo, monospace; padding: 2px 9px; border-radius: 6px;
+         color: #fff; white-space: nowrap; }
+  .l-rfa { background: #2f7d4f; } .l-ip { background: #c78a1a; }
+  .l-rfh { background: #2f5d8a; } .l-nh { background: #a3322b; }
+  table { width: 100%; border-collapse: collapse; margin: 14px 0; font-size: 15.5px; }
+  th, td { text-align: left; vertical-align: top; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 600; font-size: 13px; text-transform: uppercase; letter-spacing: .04em; }
+  ol.steps { counter-reset: s; list-style: none; padding: 0; }
+  ol.steps > li { counter-increment: s; position: relative; padding: 0 0 18px 48px; }
+  ol.steps > li::before { content: counter(s); position: absolute; left: 0; top: 0;
+         width: 32px; height: 32px; border-radius: 50%; background: var(--accent); color: var(--bg);
+         font-weight: 700; display: grid; place-items: center; }
+  dl dt { font-weight: 700; margin-top: 14px; }
+  dl dd { margin: 2px 0 0; color: var(--muted); max-width: 68ch; }
+  details { background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+            padding: 12px 16px; margin: 10px 0; }
+  details summary { cursor: pointer; font-weight: 600; }
+  details p { margin: 10px 0 0; }
+  footer { margin-top: 64px; color: var(--muted); font-size: 14px; }
+</style>
+</head>
+<body>
+<main>
+
+<h1>Hand an issue to an agent, get a pull request back</h1>
+<p class="lede">A friendly tour of <b>orchestrator-skills</b>: what it does, how a piece of
+work moves through it, and how to set it up in your repo. No code reading needed.</p>
+
+<nav>
+  <b>On this page</b>
+  <ol>
+    <li><a href="#idea">The idea in one minute</a></li>
+    <li><a href="#cast">Who does what</a></li>
+    <li><a href="#journey">The journey of one issue</a></li>
+    <li><a href="#talk">What you say to it</a></li>
+    <li><a href="#stuck">When a worker gets stuck</a></li>
+    <li><a href="#roles">The right model for each job</a></li>
+    <li><a href="#stories">Bigger work: a whole story</a></li>
+    <li><a href="#setup">Setting it up</a></li>
+    <li><a href="#faq">Common questions</a></li>
+    <li><a href="#words">Words you will see</a></li>
+  </ol>
+</nav>
+
+<h2 id="idea">1. The idea in one minute</h2>
+
+<p>You keep a list of issues in your tracker, such as GitHub Issues. Some of them are small,
+clear tasks an AI agent could do on its own. The orchestrator lets you hand those tasks
+off.</p>
+
+<p>You mark an issue as ready and assign it to yourself. A minute later an agent starts
+working on it, in its own private copy of the repo, so it never gets in anyone's way. When
+it finishes, it opens a pull request. You review the PR like you would review a
+colleague's, and you say when to merge.</p>
+
+<div class="callout"><p><b>Think of it like a small team.</b> You are the lead who decides
+what gets done and approves the result. The agents are helpers who each take one task. A
+clock on the wall checks on everyone once a minute. The tracker is the shared whiteboard
+where everyone can see who is doing what.</p></div>
+
+<div class="cards">
+  <div class="card"><div class="icon">⏳</div><h3>Waiting is free</h3>
+    <p>The once-a-minute check is a plain script, not an AI. Nothing is spent while the
+    helpers work.</p></div>
+  <div class="card"><div class="icon">💬</div><h3>Your chat stays yours</h3>
+    <p>"work on 42" answers right away. Keep talking about anything else while up to three
+    helpers work in parallel.</p></div>
+  <div class="card"><div class="icon">✅</div><h3>You stay in charge</h3>
+    <p>You decide what is ready, you review every PR, and nothing merges until you say
+    so.</p></div>
+</div>
+
+<h2 id="cast">2. Who does what</h2>
+
+<div class="cards">
+  <div class="card"><div class="icon">🧑‍💻</div><h3>You</h3>
+    <p>Pick which issues are ready, review the pull requests, answer questions, say
+    "merge".</p></div>
+  <div class="card"><div class="icon">🎛️</div><h3>The orchestrator</h3>
+    <p>Your Claude Code chat. It understands a few short requests, such as "work on 42" or
+    "status". It never writes code itself.</p></div>
+  <div class="card"><div class="icon">🤖</div><h3>A worker</h3>
+    <p>One AI agent on one issue, in its own copy of the repo. It writes the code and tests,
+    and opens the PR.</p></div>
+  <div class="card"><div class="icon">⏱️</div><h3>The tick</h3>
+    <p>A tiny check that runs every minute. It sees who finished, updates the labels and
+    starts the next issue when a slot frees up.</p></div>
+  <div class="card"><div class="icon">📋</div><h3>The tracker</h3>
+    <p>GitHub, GitLab or plain markdown files. Every issue's status lives here as a label,
+    and nowhere else.</p></div>
+  <div class="card"><div class="icon">🐋</div><h3>Orca</h3>
+    <p>The desktop app the workers run in. It holds each worker's terminal and copy of the
+    repo, so you can watch any of them.</p></div>
+</div>
+
+<h2 id="journey">3. The journey of one issue</h2>
+
+<p>Every issue the orchestrator handles wears exactly one of four labels. The label is the
+whole story: look at it, and you know where the issue stands.</p>
+
+<div class="flow">
+  <div class="step"><span class="who">You</span><b>Write the issue</b>Describe the task,
+    label it <span class="lbl l-rfa">ready-for-agent</span> and assign it to yourself.</div>
+  <div class="arrow">→</div>
+  <div class="step"><span class="who">The tick</span><b>Claims it</b>Within a minute it
+    swaps the label to <span class="lbl l-ip">in-progress</span> and starts a worker.</div>
+  <div class="arrow">→</div>
+  <div class="step"><span class="who">The worker</span><b>Does the work</b>Writes code and
+    tests, reviews its own change, opens a PR.</div>
+  <div class="arrow">→</div>
+  <div class="step"><span class="who">The tick</span><b>Hands it to you</b>The label
+    becomes <span class="lbl l-rfh">ready-for-human</span>.</div>
+  <div class="arrow">→</div>
+  <div class="step"><span class="who">You</span><b>Review and merge</b>Say "merge 42". The
+    worker's copy is cleaned up and the issue closes.</div>
+</div>
+
+<table>
+  <tr><th>Label</th><th>What it means</th><th>What moves it on</th></tr>
+  <tr><td><span class="lbl l-rfa">ready-for-agent</span></td><td>Ready to start.</td>
+      <td>"work on N", or the tick once the issue is assigned to you.</td></tr>
+  <tr><td><span class="lbl l-ip">in-progress</span></td><td>A worker is on it.</td>
+      <td>The worker reports that it is done or stuck.</td></tr>
+  <tr><td><span class="lbl l-rfh">ready-for-human</span></td><td>A PR is waiting for your
+      review.</td><td>You merge it, by saying "merge N" or on the tracker.</td></tr>
+  <tr><td><span class="lbl l-nh">needs-human</span></td><td>The worker stopped and left a
+      comment saying why.</td><td>You answer on the issue and set it back to
+      <span class="lbl l-rfa">ready-for-agent</span>.</td></tr>
+</table>
+
+<p>The only label you ever set yourself is <span class="lbl l-rfa">ready-for-agent</span>.
+The orchestrator moves all the others, so the labels always tell the truth.</p>
+
+<p>When a worker starts, Orca also opens the issue's page in a browser tab next to it, so
+the issue's comments sit right beside the work.</p>
+
+<h2 id="talk">4. What you say to it</h2>
+
+<p>You talk to your Claude Code chat in plain words. It knows four requests:</p>
+
+<table>
+  <tr><th>You say</th><th>What happens</th></tr>
+  <tr><td><b>"work on 42"</b></td><td>Starts a worker on issue 42 right now, even if it is not
+      assigned to you.</td></tr>
+  <tr><td><b>"status"</b></td><td>Shows what is running, what is next in line, and why
+      anything else is waiting.</td></tr>
+  <tr><td><b>"merge 42"</b></td><td>Merges the PR of issue 42, cleans up and closes the
+      issue.</td></tr>
+  <tr><td><b>"set up the orchestrator"</b></td><td>Runs the setup again, to change
+      anything.</td></tr>
+</table>
+
+<p>Or say nothing at all. Assign a ready issue to yourself, and the tick picks it up within
+a minute. Issues nobody has assigned to you just wait, so nothing starts behind your
+back.</p>
+
+<h2 id="stuck">5. When a worker gets stuck</h2>
+
+<p>Sometimes a task is unclear, or a test will not pass. A worker in that spot does not
+keep guessing. It stops, and the issue turns <span class="lbl l-nh">needs-human</span>
+with a comment in the worker's own words, such as a question it needs answered.</p>
+
+<ol class="steps">
+  <li>Read the comment on the issue.</li>
+  <li>Reply with your answer, right there on the issue.</li>
+  <li>Set the label back to <span class="lbl l-rfa">ready-for-agent</span>.</li>
+  <li>A fresh worker starts in the same copy of the repo, reads your reply first and picks
+    up where the last one stopped.</li>
+</ol>
+
+<div class="callout"><p><b>Nothing is lost if something crashes.</b> Since all the status
+lives in the tracker's labels, the next tick simply looks at the labels and carries
+on.</p></div>
+
+<h2 id="roles">6. The right model for each job</h2>
+
+<p>A one-line fix should not need your most expensive AI model. Each issue runs in one of
+three <b>roles</b>, and each role has its own agent, model and effort level:</p>
+
+<div class="cards">
+  <div class="card"><div class="icon">🏋️</div><h3>Heavy</h3>
+    <p>Big or tricky work. Picked by the <code>heavy</code> label, or when the issue lists
+    three or more files it will touch.</p></div>
+  <div class="card"><div class="icon">⚖️</div><h3>Medium</h3>
+    <p>The everyday default for any issue that is not heavy or light.</p></div>
+  <div class="card"><div class="icon">🪶</div><h3>Light</h3>
+    <p>Small, simple work. Picked by the <code>light</code> label.</p></div>
+</div>
+
+<p>The pick follows fixed rules, so it costs nothing and you can always predict it. You can
+also say "work on 42 as heavy" to choose for yourself.</p>
+
+<p>Workers can run on any of five agent tools: <b>claude</b>, <b>codex</b>, <b>cursor</b>,
+<b>pi</b> and <b>copilot</b>. You can mix them, for example Claude Opus for heavy work and
+Codex for light work.</p>
+
+<h2 id="stories">7. Bigger work: a whole story</h2>
+
+<p>A big feature is often split into a parent issue (a "story") with smaller child issues
+under it. Some children may depend on others.</p>
+
+<ul>
+  <li>Mark each child <span class="lbl l-rfa">ready-for-agent</span>, and assign the parent
+    to yourself.</li>
+  <li>Each child starts as soon as nothing it depends on is still open, so the story runs in
+    the right order by itself.</li>
+  <li>When the last child is closed, the tick closes the parent too.</li>
+</ul>
+
+<h2 id="setup">8. Setting it up</h2>
+
+<h3>What you need</h3>
+<ul>
+  <li><b>Claude Code</b>, for your orchestrator chat.</li>
+  <li><b>The Orca app</b>, where the workers run.</li>
+  <li><b>Node 22.18 or later.</b></li>
+  <li><b>The GitHub CLI</b> (<code>gh</code>) for GitHub, or <code>glab</code> for GitLab.
+    A markdown-file tracker needs neither.</li>
+</ul>
+<p>Don't worry about installing all of these by hand: setup checks each one and installs
+what it can.</p>
+
+<h3>Install the plugin, once</h3>
+<p>In your terminal:</p>
+<p><code>claude plugin marketplace add wagnersza/orchestrator-skills</code><br>
+<code>claude plugin install orchestrator-skills@wsza</code></p>
+
+<h3>Set up each repo, once</h3>
+<ol class="steps">
+  <li><b>Open the repo in Orca</b> and start Claude Code in an Orca terminal. Setup has to
+    run there, because it registers the repo with Orca.</li>
+  <li><b>Say "set up the orchestrator."</b> It asks you a few questions, one at a time, and
+    always suggests an answer, so you can just accept:
+    <ul>
+      <li><b>Which tracker?</b> It reads this from your repo's docs, so usually it does not
+        even ask.</li>
+      <li><b>Which cost profile?</b> This fills in all three roles at once:
+        <table>
+          <tr><th>Profile</th><th>Heavy</th><th>Medium</th><th>Light</th></tr>
+          <tr><td><b>Balanced</b> (suggested)</td><td>Opus, high</td><td>Sonnet, medium</td><td>Sonnet, low</td></tr>
+          <tr><td><b>Economy</b></td><td>Sonnet, high</td><td>Sonnet, low</td><td>Haiku, low</td></tr>
+          <tr><td><b>Quality</b></td><td>Opus, extra high</td><td>Opus, high</td><td>Sonnet, medium</td></tr>
+        </table>
+        You can then change any single role.</li>
+      <li><b>How many workers at once?</b> Three is suggested.</li>
+      <li><b>Which branch?</b> The one your PRs go into, usually <code>main</code>.</li>
+    </ul></li>
+  <li><b>It installs what is missing.</b> The tracker tool, each agent tool your roles use,
+    and the skills each worker needs to code, test, review and write a PR. If a tool needs
+    you to log in, it gives you the exact command.</li>
+  <li><b>It turns the loop on.</b> It saves your answers in
+    <code>docs/agents/orchestrator.md</code>, creates the four labels, starts the
+    once-a-minute check in Orca and runs one test check. When you see
+    <b>"the precheck works"</b>, you are ready.</li>
+</ol>
+
+<div class="callout"><p><b>Running setup again is always safe.</b> It keeps everything
+that already exists and only adds what is missing, so it is also how you change your
+answers later.</p></div>
+
+<h3>Your first issue</h3>
+<p>Label an issue <span class="lbl l-rfa">ready-for-agent</span>, then either say
+"work on N" or assign it to yourself and wait a minute. Say "status" any time to see how
+it is going.</p>
+
+<h2 id="faq">9. Common questions</h2>
+
+<details><summary>Does it cost anything while workers are busy?</summary>
+<p>Only the workers themselves use AI. The once-a-minute check is a plain script, and your
+chat goes quiet after each request. Nothing keeps polling in the background.</p></details>
+
+<details><summary>Can a worker merge its own PR?</summary>
+<p>No. Workers never merge and never change the labels. Only you merge, by saying
+"merge N" or merging on the tracker. A merge on the tracker is noticed on the next tick,
+which then cleans up.</p></details>
+
+<details><summary>Will it start work I did not ask for?</summary>
+<p>No. The tick only takes issues that are ready <em>and</em> assigned to you (or are
+children of a parent assigned to you). Saying "work on N" starts an issue directly.</p></details>
+
+<details><summary>Can I watch a worker?</summary>
+<p>Yes. Each worker runs in its own Orca terminal and copy of the repo, with the issue open
+in a tab next to it. Open it in Orca at any time.</p></details>
+
+<details><summary>What if two issues touch the same code?</summary>
+<p>Each worker has its own copy of the repo, so they never step on each other while they
+work. Any clash shows up in the PR, where you review it as usual. If one issue must go
+first, mark it as blocking the other, and the second waits.</p></details>
+
+<details><summary>Can I go back to the old version?</summary>
+<p>Version 1 is still there, at the
+<a href="https://github.com/wagnersza/orchestrator-skills/tree/v1.0.0">v1.0.0 tag</a>.</p></details>
+
+<h2 id="words">10. Words you will see</h2>
+
+<dl>
+  <dt>Orchestrator</dt><dd>Your main Claude Code chat. It hands out work and reports back,
+    and never codes itself.</dd>
+  <dt>Worker</dt><dd>One AI agent working on one issue, in its own copy of the repo.</dd>
+  <dt>Worktree</dt><dd>That private copy of the repo, named after the issue, such as
+    <code>issue-42</code>.</dd>
+  <dt>Harness</dt><dd>The agent tool a worker runs in: claude, codex, cursor, pi or
+    copilot.</dd>
+  <dt>Role</dt><dd>Heavy, medium or light. It decides which tool, model and effort a worker
+    gets.</dd>
+  <dt>Tick</dt><dd>The once-a-minute check that moves labels and starts new workers.</dd>
+  <dt>Slot</dt><dd>A place for one running worker. You choose how many there are.</dd>
+  <dt>Parent and child</dt><dd>A story and the smaller issues under it.</dd>
+  <dt>Resume</dt><dd>A fresh worker picking up a stuck issue after you answered it.</dd>
+</dl>
+
+<p>The precise definitions live in
+<a href="../orchestrator/CONTEXT.md">orchestrator/CONTEXT.md</a>, and the reasons behind
+each design choice in <a href="../orchestrator/docs/adr/">orchestrator/docs/adr/</a>.</p>
+
+<footer>orchestrator-skills ·
+<a href="https://github.com/wagnersza/orchestrator-skills">github.com/wagnersza/orchestrator-skills</a></footer>
+
+</main>
+</body>
+</html>

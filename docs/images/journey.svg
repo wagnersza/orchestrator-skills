@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 230" width="960" height="230">
+<style>
+.bg{fill:#fbfaf7}.card{fill:#fff;stroke:#e3e0d8;stroke-width:1.5}
+text{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Helvetica,Arial,sans-serif;fill:#1d1d1b}
+.t{font-size:17px;font-weight:700}.b{font-size:14px;fill:#55544f}.who{font-size:11px;font-weight:700;letter-spacing:.08em;fill:#8a8984}
+.ico{font-size:26px}.lt{font-family:ui-monospace,Menlo,monospace;font-size:12px;font-weight:700;fill:#fff}
+.arr{stroke:#9a978f;stroke-width:2;fill:none}.h{font-size:20px;font-weight:700}
+</style>
+<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#9a978f"/></marker></defs>
+<rect class="bg" width="960" height="230" rx="14"/>
+<text class="h" x="24" y="38">The journey of one issue</text>
+<rect class="card" x="24" y="58" width="162" height="150" rx="12"/>
+<text class="who" x="38" y="82">YOU</text>
+<text class="t" x="38" y="106">Write the issue</text>
+<text class="b" x="38" y="130">Describe the task,</text>
+<text class="b" x="38" y="148">label it, assign</text>
+<text class="b" x="38" y="166">it to yourself.</text>
+<rect x="38" y="178" width="134" height="20" rx="5" fill="#2f7d4f"/><text class="lt" x="45" y="192">ready-for-agent</text>
+<path class="arr" d="M188,133 L208,133" marker-end="url(#a)"/>
+<rect class="card" x="210" y="58" width="162" height="150" rx="12"/>
+<text class="who" x="224" y="82">THE TICK</text>
+<text class="t" x="224" y="106">Claims it</text>
+<text class="b" x="224" y="130">Within a minute it</text>
+<text class="b" x="224" y="148">swaps the label and</text>
+<text class="b" x="224" y="166">starts a worker.</text>
+<rect x="224" y="178" width="102" height="20" rx="5" fill="#c78a1a"/><text class="lt" x="231" y="192">in-progress</text>
+<path class="arr" d="M374,133 L394,133" marker-end="url(#a)"/>
+<rect class="card" x="396" y="58" width="162" height="150" rx="12"/>
+<text class="who" x="410" y="82">THE WORKER</text>
+<text class="t" x="410" y="106">Does the work</text>
+<text class="b" x="410" y="130">Writes code and</text>
+<text class="b" x="410" y="148">tests, reviews it,</text>
+<text class="b" x="410" y="166">opens a PR.</text>
+
+<path class="arr" d="M560,133 L580,133" marker-end="url(#a)"/>
+<rect class="card" x="582" y="58" width="162" height="150" rx="12"/>
+<text class="who" x="596" y="82">THE TICK</text>
+<text class="t" x="596" y="106">Hands it to you</text>
+<text class="b" x="596" y="130">The PR is ready</text>
+<text class="b" x="596" y="148">for your review.</text>
+<text class="b" x="596" y="166"></text>
+<rect x="596" y="178" width="134" height="20" rx="5" fill="#2f5d8a"/><text class="lt" x="603" y="192">ready-for-human</text>
+<path class="arr" d="M746,133 L766,133" marker-end="url(#a)"/>
+<rect class="card" x="768" y="58" width="162" height="150" rx="12"/>
+<text class="who" x="782" y="82">YOU</text>
+<text class="t" x="782" y="106">Review, merge</text>
+<text class="b" x="782" y="130">Say "merge 42".</text>
+<text class="b" x="782" y="148">The worker is</text>
+<text class="b" x="782" y="166">cleaned up, closed.</text>
+</svg>
