@@ -443,6 +443,7 @@ test("local: prFor is the branch while it is ahead, and the squash commit once t
   const { root, orca, path } = reviewed();
   const tracker = local(orca.sh, root, "main");
   assert.deepEqual(tracker.prFor("a/01"), { ref: "ada/issue-a-01", url: "ada/issue-a-01", open: false });
+  assert.equal(tracker.pageUrl("a/01"), null);
   commit(path, "one.txt", "one\n");
   assert.equal(tracker.prFor("a/01")?.open, true);
   assert.equal(tracker.isMerged("a/01"), false);

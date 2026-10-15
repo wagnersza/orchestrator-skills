@@ -560,6 +560,11 @@ for (const backend of BACKENDS) {
     assert.equal(tracker.prFor("12"), null);
   });
 
+  it("pageUrl is the issue's web page", () => {
+    const { tracker } = setup(backend, [{ n: 10 }]);
+    assert.match(tracker.pageUrl("10") ?? "", /^https:\/\/[^/]+\/.+\/issues\/10$/);
+  });
+
   it("isMerged holds once a PR that closes the issue is merged, read fresh each time", () => {
     const { tracker, server } = setup(backend, [{ n: 10 }], [{ n: 20, closes: 10, state: "open" }]);
     assert.equal(tracker.isMerged("10"), false);
@@ -733,6 +738,8 @@ test("gitlab: start claims the issue and renders the merge request step", () => 
     [ORCA("run-show", "--id", RUN)]: receipt({ run: { id: RUN, coordinator_handle: COORDINATOR } }),
     "orca worktree show *": { fail: { code: 1, stdout: JSON.stringify({ error: { code: "selector_not_found" } }), stderr: "" } },
     "orca orchestration worker-start *": receipt({ dispatchId: "ctx_1" }),
+    "orca tab list *": receipt({ tabs: [] }),
+    "orca tab create *": receipt({ browserPageId: "page_1" }),
   });
   assert.deepEqual(result.err, []);
   assert.equal(result.code, 0);
@@ -748,6 +755,9 @@ test("gitlab: start claims the issue and renders the merge request step", () => 
     '4. Push, and open a merge request (not a draft) against main. Write its description with /pr, and put "Closes #10" in it.',
     "5. Never change the issue's state or labels, and never merge.",
   ].join("\n")), start);
+  assert.ok(result.calls.includes(
+    `orca tab create --worktree name:issue-10 --url ${GL_HOST}/${GL_HOME}/-/issues/10 --json`,
+  ), result.calls.join("\n"));
 });
 
 // The orca replies a merge and a teardown of issue 10 need, with no worker left.

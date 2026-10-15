@@ -290,12 +290,27 @@ function startLeaf(config: Config, tracker: Tracker, sh: Sh, cwd: string, issue:
     deps.err(`error: ${started.failed} failed, so ${ref} is unclaimed again: ${started.why}`);
     return 1;
   }
+  openIssueTab(tracker, sh, cwd, issue.id, name, deps);
   const { harness, model, effort, clamped } = launch;
   deps.out(
     `started ${ref} in worktree ${name}: ${harness.name} ${model} @ ${effort} (${role} role${clamped ? `; ${clamped}` : ""}), `
       + `dispatch ${orcaReply(started).result?.dispatchId ?? "unknown"}`,
   );
   return 0;
+}
+
+// Open the issue's page in a browser tab of worktree `name`, so its comments and state
+// sit beside the worker in orca. A resume that finds the page open leaves it. A tab that
+// fails to open is reported and passed, because the worker is already running.
+function openIssueTab(tracker: Tracker, sh: Sh, cwd: string, id: Id, name: string, deps: Deps): void {
+  const url = tracker.pageUrl(id);
+  if (url === null) return;
+  const worktree = `name:${name}`;
+  const list = sh("orca", ["tab", "list", "--worktree", worktree, "--json"], { cwd });
+  const tabs = (orcaReply(list) as { result?: { tabs?: { url?: string }[] } }).result?.tabs ?? [];
+  if (list.code === 0 && tabs.some((tab) => tab.url === url)) return;
+  const tab = sh("orca", ["tab", "create", "--worktree", worktree, "--url", url, "--json"], { cwd });
+  if (tab.code !== 0) deps.err(`${tracker.ref(id)}: orca tab create failed: ${orcaError(tab)}`);
 }
 
 // Where a worker starts: worktree `name` of `repo`, new from `base` unless `resumed`.
