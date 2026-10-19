@@ -12,6 +12,7 @@ type Raw = {
   labels: { name: string }[];
   assignees: { login: string }[];
   repository_url: string;
+  html_url: string;
   pull_request?: unknown;
   issue_dependencies_summary?: { total_blocked_by: number };
   sub_issues_summary?: { total: number } | null;
@@ -244,6 +245,10 @@ export function github(sh: Sh, cwd: string): Tracker {
       const repo = new URL(pr.url).pathname.split("/").slice(1, 3).join("/");
       gh(["pr", "merge", String(pr.number), "-R", repo, "--squash", "--delete-branch"]);
       return null;
+    },
+
+    pageUrl(id) {
+      return fetch(id).html_url;
     },
 
     // JSON, because outside a terminal `--comments` prints the comments and not the body.

@@ -329,6 +329,11 @@ export function local(sh: Sh, cwd: string, base: string): Tracker {
       return null;
     },
 
+    // A local issue is a file, with no page to open.
+    pageUrl() {
+      return null;
+    },
+
     viewCommand(id) {
       return `cat ${shellQuote(locate(id).path)}`;
     },
