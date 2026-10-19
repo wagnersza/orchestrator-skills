@@ -4,8 +4,6 @@ Label an issue, assign it to yourself, and an agent ships a PR for it. This Clau
 plugin runs agent workers on your tracker's `ready-for-agent` issues. Each worker gets its own worktree and runs on
 the harness and model that fit the job. You review the PR, and you say when to merge.
 
-Note: v1 is still available at the v1.0.0 tag: https://github.com/wagnersza/orchestrator-skills/tree/v1.0.0
-
 ![You talk to one Claude session. An orca automation runs the script every minute, and the script starts and watches one worker per issue.](docs/images/overview.png)
 
 **In one minute:**
@@ -211,9 +209,3 @@ runs the typecheck and the test suite.
 
 The diagrams are HTML pages in [`docs/images/src/`](docs/images/src/), and
 `docs/images/render.sh` renders them to PNG with headless Chrome.
-
-## v1
-
-v1 had cmux and herdr, a per-item automation, quality-gate layers, adversarial review and
-65 ADRs. It is the [`v1.0.0`](https://github.com/wagnersza/orchestrator-skills/tree/v1.0.0)
-tag.
