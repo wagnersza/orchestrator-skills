@@ -92,8 +92,10 @@ is missing.
    - **The base branch** each worktree starts from and each PR targets.
 3. **Setup installs the rest.** It installs and checks the tracker CLI and each harness CLI
    the roles name. It installs the mattpocock skills each worker uses (`implement`, `tdd`,
-   `code-review`, `diagnosing-bugs` and `pr`) into every one of those harnesses. A harness
-   that needs a login gets the exact command to run.
+   `code-review`, `diagnosing-bugs` and `pr`) into every one of those harnesses. Upstream
+   ships some of them as user-only, so setup then makes all five model-invocable, because
+   a worker must invoke them itself. A harness that needs a login gets the exact command to
+   run.
 4. **Setup writes the config and starts the loop.** It writes `docs/agents/orchestrator.md`,
    then runs the script's `install`. That creates the state labels, the orca Run, the
    `orchestrator-tick` automation and one proof tick. The install ends with

@@ -116,7 +116,8 @@ nothing to call. Remove that line from the `SKILL.md` of each of the five, in ev
 installed copy. `~/.agents/skills/<name>/` and `~/.claude/skills/<name>/` are separate
 copies, not symlinks. Touch no other skill: `setup-matt-pocock-skills` stays user-only,
 because a human runs it. This runs on every re-run, so it repairs a skill that a `skills`
-update has made user-only again.
+update has made user-only again
+([ADR 0009](../orchestrator/docs/adr/0009-setup-makes-the-worker-skills-model-invocable.md)).
 
 ```sh
 node -e '
