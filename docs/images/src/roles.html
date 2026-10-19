@@ -1,0 +1,21 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="style.css">
+<style>
+  .q { display: flex; align-items: center; gap: 14px; margin-bottom: 10px; }
+  .q .box:first-child { width: 390px; min-height: 46px; }
+  .q .box {  background: #fff; padding: 11px 14px; }
+  .res { width: 220px; min-height: 64px; padding: 10px 14px; display: flex; flex-direction: column; justify-content: center; }
+  .q .arrow { width: 46px; text-align: left; }
+  .heavy { background: #f3eaff; border-color: #8250df; }
+  .medium { background: #ddf4ff; border-color: #54aeff; }
+  .light { background: #f6f8fa; border-color: #afb8c1; }
+</style></head><body>
+<h1>Which model runs an issue?</h1>
+<p class="sub">The script picks a role with no agent, so the pick costs nothing. The first match wins.</p>
+<div class="q"><div class="box">1. You said <span class="mono">"work on 42 as heavy"</span>?</div><div class="arrow">yes ▶</div><div class="box res">that role</div></div>
+<div class="q"><div class="box">2. The issue has the <span class="mono">heavy</span> label?</div><div class="arrow">yes ▶</div><div class="box res heavy"><b>heavy</b>opus @ high</div></div>
+<div class="q"><div class="box">3. The issue has the <span class="mono">light</span> label?</div><div class="arrow">yes ▶</div><div class="box res light"><b>light</b>sonnet @ low</div></div>
+<div class="q"><div class="box">4. Its <span class="mono">## Touches</span> block lists 3 or more paths?</div><div class="arrow">yes ▶</div><div class="box res heavy"><b>heavy</b>opus @ high</div></div>
+<div class="q"><div class="box">5. Anything else</div><div class="arrow">&nbsp;&nbsp;&nbsp;&nbsp;▶</div><div class="box res medium"><b>medium</b>sonnet @ medium</div></div>
+<p class="note" style="margin-top:14px">Models shown are the <b style="display:inline">balanced</b> profile. Each role is its own harness, model and effort in <span class="mono">docs/agents/orchestrator.md</span>.</p>
+<script>document.documentElement.setAttribute("data-size", document.body.offsetWidth + "x" + document.body.offsetHeight)</script>
+</body></html>

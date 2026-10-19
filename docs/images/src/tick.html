@@ -1,0 +1,19 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="style.css">
+<style>
+  .steps { display: flex; flex-direction: column; gap: 10px; width: 720px; }
+  .step { display: flex; gap: 14px; align-items: center; }
+  .n { flex: none; width: 34px; height: 34px; border-radius: 50%; background: #8250df; color: #fff;
+       font-weight: 700; display: flex; align-items: center; justify-content: center; font-size: 15px; }
+  .step .box { flex: 1; padding: 11px 14px; background: #fff; }
+</style></head><body>
+<h1>What one tick does</h1>
+<p class="sub">Every minute, in this order. A lock keeps two ticks from overlapping. No agent ever runs.</p>
+<div class="steps">
+  <div class="step"><div class="n">1</div><div class="box"><b>Read the workers' reports</b>Done with a PR → <span class="label l-human">ready-for-human</span>. Failed, asked or escalated → <span class="label l-needs">needs-human</span>.</div></div>
+  <div class="step"><div class="n">2</div><div class="box"><b>Catch dead workers</b>A worker that exited without a report → <span class="label l-needs">needs-human</span>.</div></div>
+  <div class="step"><div class="n">3</div><div class="box"><b>Tear down merged issues</b>A PR merged on the tracker → release the worker, remove the worktree, close the issue.</div></div>
+  <div class="step"><div class="n">4</div><div class="box"><b>Close finished parents</b>A story whose children are all closed gets closed too.</div></div>
+  <div class="step"><div class="n">5</div><div class="box"><b>Fill free slots</b>Claim each eligible issue assigned to you, up to <span class="mono">max_workers</span>, and start a worker on it.<small>Eligible: open, <span class="mono">ready-for-agent</span>, assigned to you (or a child of a parent you hold), and no open blocker.</small></div></div>
+</div>
+<script>document.documentElement.setAttribute("data-size", document.body.offsetWidth + "x" + document.body.offsetHeight)</script>
+</body></html>
