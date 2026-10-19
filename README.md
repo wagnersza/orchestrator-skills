@@ -6,12 +6,17 @@ the harness and model that fit the job. You review the PR, and you say when to m
 
 Note: v1 is still available at the v1.0.0 tag: https://github.com/wagnersza/orchestrator-skills/tree/v1.0.0
 
+![You talk to one Claude session. An orca automation runs the script every minute, and the script starts and watches one worker per issue.](docs/images/overview.png)
 
-```
-you assign a ready-for-agent issue ─▶ tick claims it ─▶ worker opens a PR ─▶ you review ─▶ "merge N"
-                                                     │
-                                         stuck? ─▶ needs-human, with the worker's question
-```
+**In one minute:**
+
+1. You label an issue `ready-for-agent` and assign it to yourself.
+2. Within a minute the tick claims it and starts a worker in its own worktree.
+3. The worker builds it and opens a PR.
+4. You review the PR and say "merge 42". The worker and its worktree go away, and the
+   issue closes.
+
+A worker that gets stuck stops, comments its question on the issue and waits for you.
 
 ## Why use it
 
@@ -135,6 +140,63 @@ reason, such as an open blocker or no assignee.
 
 ## How it works
 
+There are four parts, and each one does one job:
+
+- **You** decide what is ready, review each PR and say when to merge.
+- **The orchestrator session** is your Claude Code session. It turns each verb you say into
+  one call to the script, relays the result and goes idle. It never writes code.
+- **The script**, `scripts/orchestrator.ts`, does all the bookkeeping. It claims issues,
+  starts workers, moves state labels and tears down merged work. It is plain code, so it
+  costs no tokens.
+- **The workers** do the code, one agent per issue, each in its own orca worktree.
+
+The tracker holds every bit of state, so nothing else can drift out of step with it.
+
+### The life of an issue
+
+![An issue goes ready-for-agent, in-progress, ready-for-human, then closed. A stuck worker sends it to needs-human, and you send it back to ready-for-agent.](docs/images/lifecycle.png)
+
+Each issue carries exactly one state label. Look at the label and you know where the issue
+is. A crash loses nothing, because the next tick reads the labels and carries on
+([ADR 0003](orchestrator/docs/adr/0003-state-labels-are-the-only-state.md)).
+
+### The tick
+
+The `orchestrator-tick` automation runs the script's `tick` once a minute, as an orca
+precheck. The precheck always exits non-zero, so the automation's agent never starts and
+waiting costs nothing
+([ADR 0001](orchestrator/docs/adr/0001-the-precheck-is-the-whole-tick.md)).
+
+![One tick: read the workers' reports, catch dead workers, tear down merged issues, close finished parents, fill free slots.](docs/images/tick.png)
+
+The workers report through one orca Run, so the tick reads "done", "failed" and "I have a
+question" straight from orca
+([ADR 0002](orchestrator/docs/adr/0002-orca-orchestration-is-the-done-and-stuck-signal.md)).
+
+### What a worker does
+
+Each worker gets a short prompt with these steps:
+
+1. Read the issue and every comment on it.
+2. Run the `implement` skill on it.
+3. Commit in slices, one logical change per commit.
+4. Open a PR with the `pr` skill.
+5. Never touch a state label, and never merge.
+6. When blocked on a decision only a human can make, ask through orca and stop.
+
+A resumed worker is told that it is resuming. It reads the latest comments first, because
+they hold your answer.
+
+### Which model runs an issue
+
+![The role pick: a role you name, then the heavy label, then the light label, then three or more Touches paths for heavy, else medium.](docs/images/roles.png)
+
+The pick is plain code, so you can predict it before the issue starts
+([ADR 0005](orchestrator/docs/adr/0005-the-role-is-picked-deterministically.md)). To
+change it, add a label or say "work on 42 as light".
+
+### Where the code lives
+
 ```
 orchestrator/            the orchestrator skill, its glossary and ADRs
 orchestrator-setup/      the setup skill and the config template
@@ -143,9 +205,12 @@ scripts/harnesses.ts     how each harness starts
 scripts/trackers/        github · gitlab · local
 ```
 
-The terms are in [`orchestrator/CONTEXT.md`](orchestrator/CONTEXT.md). The five decisions
-the loop rests on are in [`orchestrator/docs/adr/`](orchestrator/docs/adr/). `make quick`
+The terms are in [`orchestrator/CONTEXT.md`](orchestrator/CONTEXT.md). The decisions the
+loop rests on are in [`orchestrator/docs/adr/`](orchestrator/docs/adr/). `make quick`
 runs the typecheck and the test suite.
+
+The diagrams are HTML pages in [`docs/images/src/`](docs/images/src/), and
+`docs/images/render.sh` renders them to PNG with headless Chrome.
 
 ## v1
 

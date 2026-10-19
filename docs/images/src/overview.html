@@ -1,0 +1,33 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="style.css">
+<style>
+  .grid { display: grid; grid-template-columns: 210px 120px 250px 120px 270px; align-items: center; row-gap: 18px; }
+  .workers { display: flex; flex-direction: column; gap: 8px; }
+  .worker { padding: 9px 12px; }
+  .down { grid-column: 3; text-align: center; }
+</style></head><body>
+<h1>The big picture</h1>
+<p class="sub">You talk to one Claude session. A script does the bookkeeping. Workers do the code.</p>
+<div class="grid">
+  <div class="box you"><b>👤 You</b>Label issues, assign them,<br>review PRs, say "merge N".</div>
+  <div class="arrow">"work on 42"<br>"status"<br>"merge 42"<div class="line">──▶</div></div>
+  <div class="box session"><b>💬 Orchestrator session</b>Claude Code. Turns each verb into one script call, then goes idle.<small>Never writes code itself.</small></div>
+  <div class="arrow">reads &amp; writes<br>state labels<div class="line">◀──▶</div></div>
+  <div class="box tracker"><b>📋 Tracker</b>GitHub, GitLab or local markdown.<small>The only place state lives.</small></div>
+
+  <div></div><div></div>
+  <div class="down arrow"><div class="line">│</div>runs<div class="line">▼</div></div>
+  <div></div><div></div>
+
+  <div class="box orca"><b>⏱ orchestrator-tick</b>An orca automation that runs the tick <b style="display:inline">every minute</b>.<small>A precheck only: no agent, no tokens.</small></div>
+  <div class="arrow">runs<div class="line">──▶</div></div>
+  <div class="box script"><b>⚙️ scripts/orchestrator.ts</b><span class="mono">install · tick · start · status · merge</span><small>Plain TypeScript. Node runs it, no build step.</small></div>
+  <div class="arrow">starts &amp;<br>watches<div class="line">──▶</div></div>
+  <div class="workers">
+    <div class="box worker"><b>🤖 Worker #42</b><small>worktree issue-42 · opus @ high</small></div>
+    <div class="box worker"><b>🤖 Worker #43</b><small>worktree issue-43 · sonnet @ medium</small></div>
+    <div class="box worker"><b>🤖 Worker #47</b><small>worktree issue-47 · codex @ low</small></div>
+  </div>
+</div>
+<p class="note" style="margin-top:22px">Each worker opens a PR on the tracker, then reports done or stuck through the orca Run. Up to <span class="mono">max_workers</span> run at once.</p>
+<script>document.documentElement.setAttribute("data-size", document.body.offsetWidth + "x" + document.body.offsetHeight)</script>
+</body></html>

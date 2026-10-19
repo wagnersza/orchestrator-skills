@@ -1,0 +1,31 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="style.css">
+<style>
+  .stage { display: flex; flex-direction: column; align-items: center; gap: 8px; width: 165px; text-align: center; }
+  .stage .note { min-height: 36px; }
+  .arrow { width: 135px; }
+  .loop { margin: 22px 0 0 0; display: flex; gap: 30px; align-items: flex-start; }
+</style></head><body>
+<h1>The life of an issue</h1>
+<p class="sub">Four state labels. Only the script moves them, except that you write <span class="mono">ready-for-agent</span>.</p>
+<div class="row" style="align-items:flex-start">
+  <div class="stage"><span class="label l-ready">ready-for-agent</span><div class="note">You label it and assign it to yourself.</div></div>
+  <div class="arrow">tick claims it,<br>or "work on N"<div class="line">──▶</div></div>
+  <div class="stage"><span class="label l-progress">in-progress</span><div class="note">A worker builds it in its own worktree.</div></div>
+  <div class="arrow">worker reports done<br>and a PR is open<div class="line">──▶</div></div>
+  <div class="stage"><span class="label l-human">ready-for-human</span><div class="note">You review the PR.</div></div>
+  <div class="arrow">"merge N", or you<br>merge on the tracker<div class="line">──▶</div></div>
+  <div class="stage"><span class="label l-closed">closed</span><div class="note">Worker released, worktree removed, issue closed.</div></div>
+</div>
+<div class="loop">
+  <div style="width:120px"></div>
+  <div class="box" style="border-color:#D93F0B;background:#fff1ec;width:640px;margin-left:60px">
+    <b>When a worker gets stuck</b>
+    It fails, asks a question, or dies: the tick moves the issue to
+    <span class="label l-needs">needs-human</span> and posts the worker's own words as a comment.
+    Nothing re-prompts it.<br><br>
+    You answer on the issue and relabel it <span class="label l-ready">ready-for-agent</span>.
+    A fresh worker <b style="display:inline">resumes in the same worktree</b> and reads your answer first.
+  </div>
+</div>
+<script>document.documentElement.setAttribute("data-size", document.body.offsetWidth + "x" + document.body.offsetHeight)</script>
+</body></html>
